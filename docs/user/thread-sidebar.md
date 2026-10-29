@@ -61,6 +61,8 @@ and worktree while you stay in the new thread composer. This requires a Git proj
 ## Pin and reorder threads
 
 Pin a thread from its menu to keep it above your active work.
+Choose **Pin in project** instead to keep it at the top of its project's folder in the boring
+sidebar. Elsewhere it shows with your other pins. The same menu switches a pin between the two.
 
 On web and desktop, unpinning, settling, snoozing, and archiving a thread each show
 a notification with **Undo** for five seconds. Undo restores the thread's previous

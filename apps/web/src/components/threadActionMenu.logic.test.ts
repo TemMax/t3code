@@ -7,6 +7,7 @@ const baseState: ThreadActionMenuState = {
   branch: null,
   projectFilter: null,
   isPinned: false,
+  isPinnedInProject: false,
   isSettled: false,
   autoSettleEnabled: true,
   isSnoozed: false,
@@ -39,6 +40,7 @@ describe("buildThreadActionMenuItems", () => {
       const expected = reversed
         ? [
             "unpin",
+            "pin-project",
             "unsettle",
             "unsnooze",
             "rename",
@@ -49,6 +51,7 @@ describe("buildThreadActionMenuItems", () => {
           ]
         : [
             "pin",
+            "pin-project",
             "settle",
             "snooze",
             "rename",
@@ -64,6 +67,16 @@ describe("buildThreadActionMenuItems", () => {
       ).toBe(true);
     },
   );
+
+  it("offers the other pin scope beside unpin", () => {
+    const pinIds = (state: Partial<ThreadActionMenuState>) =>
+      buildThreadActionMenuItems({ ...baseState, ...state })
+        .map((item) => item.id)
+        .filter((id) => id.includes("pin"));
+    expect(pinIds({})).toEqual(["pin", "pin-project"]);
+    expect(pinIds({ isPinned: true })).toEqual(["unpin", "pin-project"]);
+    expect(pinIds({ isPinned: true, isPinnedInProject: true })).toEqual(["unpin", "pin"]);
+  });
 
   it("disables archive and turning into a project while the thread is running", () => {
     const items = buildThreadActionMenuItems({

@@ -58,6 +58,7 @@ import {
   ProjectId,
   type ScopedThreadRef,
   type ThreadId,
+  type ThreadPinScope,
 } from "@t3tools/contracts";
 import type { OlderSettledScope } from "@t3tools/client-runtime/state/threads";
 
@@ -515,8 +516,16 @@ function useSidebarThreads(input: {
     clockKey: `${nowMinute}:${snoozeWakeClock}:${inboxReturnsVersion}`,
   });
 
-  const { pinnedThreads, activeThreads, workingThreads, snoozedThreads, settledThreads } =
-    partition;
+  const { activeThreads, workingThreads, snoozedThreads, settledThreads } = partition;
+  // Folders lead with their own pins; only pins above projects stay in the Pinned section.
+  const folderPinnedThreads =
+    folderGroups === null
+      ? EMPTY_THREADS
+      : partition.pinnedThreads.filter((thread) => thread.pinScope === "project");
+  const pinnedThreads =
+    folderPinnedThreads.length === 0
+      ? partition.pinnedThreads
+      : partition.pinnedThreads.filter((thread) => thread.pinScope !== "project");
   // Older settled threads load in pages; the shelf lists them only as far as they are loaded.
   const olderSettledShelf = useOlderSettledShelf({
     scopes: olderSettledScopes([...serverConfigs.keys()], scopedProjectKeys),
@@ -552,7 +561,11 @@ function useSidebarThreads(input: {
   const projectFolders =
     folderGroups === null
       ? null
-      : groupSidebarThreadsByProject(folderGroups, activeThreads, keepEmpty).map((folder) => {
+      : groupSidebarThreadsByProject(
+          folderGroups,
+          [...folderPinnedThreads, ...activeThreads],
+          keepEmpty,
+        ).map((folder) => {
           const collapsed = !resolveProjectExpanded(
             projectExpandedById,
             sidebarFolderExpansionKeys(folder.group),
@@ -580,7 +593,7 @@ function useSidebarThreads(input: {
   ];
   const sectionByThreadKey = new Map<string, SidebarSection>();
   for (const [list, section] of [
-    [pinnedThreads, "pinned"],
+    [partition.pinnedThreads, "pinned"],
     [activeThreads, "active"],
     [workingThreads, "working"],
     [snoozedThreads, "snoozed"],
@@ -590,10 +603,11 @@ function useSidebarThreads(input: {
   }
   return {
     ...partition,
+    pinnedThreads,
     threads,
     workingShelfEnabled,
     searchableThreads: [
-      ...pinnedThreads,
+      ...partition.pinnedThreads,
       ...activeThreads,
       ...workingThreads,
       ...snoozedThreads,
@@ -1905,9 +1919,9 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
   ) {
     setOptimisticDrop(null);
   }
-  const attemptPin = (threadRef: ScopedThreadRef) => {
+  const attemptPin = (threadRef: ScopedThreadRef, scope?: ThreadPinScope) => {
     void (async () => {
-      const result = await pinThread(threadRef);
+      const result = await pinThread(threadRef, scope === undefined ? {} : { scope });
       if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
         const error = squashAtomCommandFailure(result);
         toastManager.add(
@@ -2678,6 +2692,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                     }
                   : null,
               isPinned,
+              isPinnedInProject: isPinned && thread.pinScope === "project",
               isSettled,
               autoSettleEnabled: thread.autoSettleDisabledAt == null,
               isSnoozed,
@@ -2764,6 +2779,9 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
             return;
           case "pin":
             attemptPin(threadRef);
+            return;
+          case "pin-project":
+            attemptPin(threadRef, "project");
             return;
           case "unpin":
             attemptUnpin(threadRef);

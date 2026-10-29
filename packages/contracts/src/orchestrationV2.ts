@@ -470,6 +470,10 @@ export const OrchestrationV2ThreadActivitySummary = Schema.Struct({
 });
 export type OrchestrationV2ThreadActivitySummary = typeof OrchestrationV2ThreadActivitySummary.Type;
 
+// A project-scoped pin keeps the thread at the top of its project instead of above every project.
+export const ThreadPinScope = Schema.Literal("project");
+export type ThreadPinScope = typeof ThreadPinScope.Type;
+
 export const OrchestrationV2AppThread = Schema.Struct({
   ...OrchestrationV2CreationFields,
   id: ThreadId,
@@ -518,6 +522,7 @@ export const OrchestrationV2AppThread = Schema.Struct({
   pinnedAt: Schema.optional(Schema.NullOr(Schema.DateTimeUtc)),
   autoSettleDisabledAt: Schema.optional(Schema.NullOr(Schema.DateTimeUtc)),
   pinOrderKey: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  pinScope: Schema.optional(Schema.NullOr(ThreadPinScope)),
   activeOrderKey: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   /** Absent on threads written before tags existed; read as empty. */
   tags: Schema.optional(StoredThreadTags),
@@ -2166,6 +2171,7 @@ export const OrchestrationV2ThreadShell = Schema.Struct({
   pinnedAt: Schema.optional(Schema.NullOr(Schema.DateTimeUtc)),
   autoSettleDisabledAt: Schema.optional(Schema.NullOr(Schema.DateTimeUtc)),
   pinOrderKey: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  pinScope: Schema.optional(Schema.NullOr(ThreadPinScope)),
   activeOrderKey: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   /** Absent on threads written before tags existed; read as empty. */
   tags: Schema.optional(StoredThreadTags),
@@ -3037,6 +3043,7 @@ export const OrchestrationV2Command = Schema.Union([
     commandId: CommandId,
     threadId: ThreadId,
     orderKey: Schema.optional(TrimmedNonEmptyString),
+    scope: Schema.optional(ThreadPinScope),
   }),
   Schema.Struct({
     type: Schema.Literal("thread.unpin"),

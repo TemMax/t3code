@@ -1537,6 +1537,68 @@ it.effect("explicit settle clears snooze atomically and stays idempotent after r
   }).pipe(Effect.provide(layerTest)),
 );
 
+it.effect("a pin moves between project and global scope and clears with unpin or settle", () =>
+  Effect.gen(function* () {
+    const orchestrator = yield* Orchestrator.OrchestratorV2;
+    const projections = yield* ProjectionStore.ProjectionStoreV2;
+    const threadId = ThreadId.make("thread:project-pin");
+    yield* orchestrator.dispatch({
+      type: "thread.create",
+      commandId: CommandId.make("create-project-pin"),
+      threadId,
+      projectId: ProjectId.make("project:project-pin"),
+      title: "Project pin",
+      modelSelection,
+      runtimeMode: "full-access",
+      interactionMode: "default",
+      branch: null,
+      worktreePath: null,
+      createdBy: "user",
+      creationSource: "web",
+    });
+    const pinnedAt = yield* DateTime.now;
+    yield* orchestrator.dispatch({
+      type: "thread.pin",
+      commandId: CommandId.make("pin-in-project"),
+      threadId,
+      orderKey: "a",
+      scope: "project",
+    });
+    assert.deepInclude(yield* projections.getThreadShell(threadId), {
+      pinnedAt,
+      pinOrderKey: "a",
+      pinScope: "project",
+    });
+
+    yield* TestClock.adjust("1 second");
+    yield* orchestrator.dispatch({
+      type: "thread.pin",
+      commandId: CommandId.make("pin-globally"),
+      threadId,
+    });
+    assert.deepInclude(yield* projections.getThreadShell(threadId), {
+      pinnedAt,
+      pinOrderKey: "a",
+      pinScope: null,
+      updatedAt: yield* DateTime.now,
+    });
+
+    for (const clear of ["thread.unpin", "thread.settle"] as const) {
+      yield* orchestrator.dispatch({
+        type: "thread.pin",
+        commandId: CommandId.make(`repin-before-${clear}`),
+        threadId,
+        scope: "project",
+      });
+      yield* orchestrator.dispatch({ type: clear, commandId: CommandId.make(clear), threadId });
+      assert.deepInclude(yield* projections.getThreadShell(threadId), {
+        pinnedAt: null,
+        pinScope: null,
+      });
+    }
+  }).pipe(Effect.provide(layerTest)),
+);
+
 it.effect("dispatch records the command outcome and its duration", () =>
   Effect.gen(function* () {
     const orchestrator = yield* Orchestrator.OrchestratorV2;
