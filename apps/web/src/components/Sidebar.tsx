@@ -128,7 +128,10 @@ import {
 import { useHandleNewThread } from "../hooks/useHandleNewThread";
 import { useOrderWhileOpen } from "../hooks/useOrderWhileOpen";
 import { useProjectPin } from "../hooks/useProjectGroupUpdate";
-import { useSidebarProjectGroups } from "../hooks/useSidebarProjectGroups";
+import {
+  reorderSidebarProjectGroups,
+  useSidebarProjectGroups,
+} from "../hooks/useSidebarProjectGroups";
 import { useTerminalFocus } from "../hooks/useTerminalFocus";
 import { isCommandPaletteOpen, openCommandPalette } from "../commandPaletteBus";
 import { registerSettleAndAdvance } from "../settleAndAdvance";
@@ -324,6 +327,16 @@ const sidebarProviderEntriesAtom = Atom.make((get) => {
 }).pipe(Atom.withLabel("sidebar-provider-entries"));
 
 const EMPTY_PROVIDER_ENTRIES: ReadonlyMap<string, SidebarProviderEntry> = new Map();
+
+// Pinned folders always lead and archived ones trail, so a drop only reorders within its section.
+function canDropFolderOn(dragged: SidebarProjectSnapshot, target: SidebarProjectSnapshot) {
+  return (
+    dragged.projectKey !== target.projectKey &&
+    dragged.pinned === target.pinned &&
+    dragged.archived === target.archived
+  );
+}
+
 const EMPTY_THREADS: readonly EnvironmentThreadShell[] = [];
 
 const SETTLED_TAIL_INITIAL_COUNT = 10;
@@ -1265,6 +1278,35 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     if (isMobile) setOpenMobile(false);
     void handleNewThread(scopeProjectRef(group.environmentId, group.id));
   });
+  const manualProjectOrder = useClientSettings(
+    (settings) => settings.sidebarProjectSortOrder === "manual",
+  );
+  const [folderDrag, setFolderDrag] = useState<{
+    readonly dragged: SidebarProjectSnapshot;
+    readonly overKey: string | null;
+  } | null>(null);
+  const startFolderReorder = useStableCallback((group: SidebarProjectSnapshot) => {
+    setFolderDrag({ dragged: group, overKey: null });
+  });
+  const overFolderReorder = useStableCallback((group: SidebarProjectSnapshot) => {
+    setFolderDrag((current) =>
+      current === null || current.overKey === group.projectKey
+        ? current
+        : { ...current, overKey: group.projectKey },
+    );
+  });
+  const leaveFolderReorder = useStableCallback((group: SidebarProjectSnapshot) => {
+    setFolderDrag((current) =>
+      current?.overKey === group.projectKey ? { ...current, overKey: null } : current,
+    );
+  });
+  const dropFolderReorder = useStableCallback((group: SidebarProjectSnapshot) => {
+    if (folderDrag !== null && canDropFolderOn(folderDrag.dragged, group)) {
+      reorderSidebarProjectGroups(folderDrag.dragged, group);
+    }
+    setFolderDrag(null);
+  });
+  const endFolderReorder = useStableCallback(() => setFolderDrag(null));
   const handleProjectFolderContextMenu = useStableCallback(
     (group: SidebarProjectSnapshot, position: { x: number; y: number }) => {
       const api = readLocalApi();
@@ -3455,6 +3497,17 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                                 onToggle={toggleProjectFolder}
                                 onNewThread={startThreadInProjectFolder}
                                 onContextMenu={handleProjectFolderContextMenu}
+                                reorderable={manualProjectOrder}
+                                isDropTarget={
+                                  folderDrag !== null &&
+                                  folderDrag.overKey === folder.group.projectKey &&
+                                  canDropFolderOn(folderDrag.dragged, folder.group)
+                                }
+                                onReorderStart={startFolderReorder}
+                                onReorderOver={overFolderReorder}
+                                onReorderLeave={leaveFolderReorder}
+                                onReorderDrop={dropFolderReorder}
+                                onReorderEnd={endFolderReorder}
                               />,
                             );
                             for (const thread of folder.threads) {
