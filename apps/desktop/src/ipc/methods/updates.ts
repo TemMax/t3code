@@ -7,6 +7,7 @@ import {
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 
+import * as DesktopAutoInstall from "../../updates/DesktopAutoInstall.ts";
 import * as DesktopUpdates from "../../updates/DesktopUpdates.ts";
 import * as IpcChannels from "../channels.ts";
 import * as DesktopIpc from "../DesktopIpc.ts";
@@ -64,5 +65,16 @@ export const checkForUpdate = DesktopIpc.makeIpcMethod({
   handler: Effect.fn("desktop.ipc.updates.check")(function* () {
     const updates = yield* DesktopUpdates.DesktopUpdates;
     return yield* updates.check("web-ui");
+  }),
+});
+
+export const reportAgentActivity = DesktopIpc.makeIpcMethod({
+  channel: IpcChannels.UPDATE_REPORT_AGENT_ACTIVITY_CHANNEL,
+  payload: Schema.Boolean,
+  result: Schema.Void,
+  handler: Effect.fn("desktop.ipc.updates.reportAgentActivity")(function* (busy, event) {
+    if (event === undefined) return;
+    const autoInstall = yield* DesktopAutoInstall.DesktopAutoInstall;
+    yield* autoInstall.reportAgentActivity(event.sender.id, busy);
   }),
 });
