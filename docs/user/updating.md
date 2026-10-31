@@ -36,6 +36,14 @@ The confirmation counts the running threads that the restarts will interrupt,
 and how many can resume afterwards. See **Continue threads after restarts**
 below.
 
+## Automatic installs
+
+The desktop app downloads new releases in the background and installs them on
+its own once no agent on a machine it runs is working or waiting on you, and
+your computer has been idle for 5 minutes. It restarts into the new version.
+With every window closed it waits until you open one. Turn this off in
+**Settings → About → Automatically install updates**.
+
 ## Switch between Stable and Nightly
 
 In the desktop app, change **Settings → About → Update track**. T3 Code shows each
