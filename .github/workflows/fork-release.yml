@@ -136,8 +136,16 @@ jobs:
           hdiutil attach "$dmg" -nobrowse -readonly -mountpoint "$mount_dir" >/dev/null
           app="$(ls -d "$mount_dir"/*.app | head -1)"
           codesign --verify --deep --strict "$app"
-          xcrun stapler validate "$app"
-          spctl --assess --type execute --verbose "$app"
+          # Both contact Apple; retry transient network failures.
+          for attempt in 1 2 3; do
+            if xcrun stapler validate "$app" && spctl --assess --type execute --verbose "$app"; then
+              break
+            fi
+            if [[ $attempt == 3 ]]; then
+              exit 1
+            fi
+            sleep 15
+          done
           codesign -dv "$app" 2>&1 | grep -E "^(Identifier|TeamIdentifier)="
           hdiutil detach "$mount_dir" >/dev/null
 
