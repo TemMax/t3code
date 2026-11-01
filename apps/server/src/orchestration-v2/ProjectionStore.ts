@@ -81,6 +81,7 @@ import {
 import {
   deriveBlockedOnThreadWait,
   derivePendingBackgroundWork,
+  runningSubagentCount,
 } from "@t3tools/shared/orchestrationV2PendingBackgroundWork";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
@@ -1530,6 +1531,7 @@ export function threadShellFromProjection(
       ),
     activeRunId: activeRun?.id ?? null,
     blockedOnThreadWait: deriveBlockedOnThreadWait({ activeRun, turnItems: projection.turnItems }),
+    runningSubagentCount: runningSubagentCount(projection.turnItems, activeRun?.id ?? null),
     activityRunStatus: activityRun?.status ?? null,
     activityRunStartedAt:
       activityRun === null ? null : orchestrationV2RunWorkStartedAt(activityRun),
@@ -1647,6 +1649,7 @@ type ShellThreadState = {
   readonly latestRunStopRequested: boolean;
   readonly activeRunId: RunId | null;
   readonly blockedOnThreadWait: boolean;
+  readonly runningSubagentCount: number;
   readonly activityRunStatus: ShellActivityRunStatus | null;
   readonly activityRunStartedAt: DateTime.Utc | null;
   readonly lastError: string | null;
@@ -1807,6 +1810,7 @@ function shellFromState(input: {
     latestRunStopRequested: input.state.latestRunStopRequested,
     activeRunId: input.state.activeRunId,
     blockedOnThreadWait: input.state.blockedOnThreadWait,
+    runningSubagentCount: input.state.runningSubagentCount,
     activityRunStatus: input.state.activityRunStatus,
     activityRunStartedAt: input.state.activityRunStartedAt,
     status: input.state.latestRunStatus,
@@ -6562,6 +6566,10 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
                 : { id: RunId.make(row.active_run_id), status: "running" },
             turnItems: pendingTurnItemsByThreadId.get(thread.id) ?? [],
           }),
+          runningSubagentCount: runningSubagentCount(
+            pendingTurnItemsByThreadId.get(thread.id) ?? [],
+            row.active_run_id,
+          ),
           activityRunStartedAt:
             row.activity_run_started_at === null
               ? null

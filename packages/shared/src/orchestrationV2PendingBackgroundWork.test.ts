@@ -3,6 +3,7 @@ import { ProviderInstanceId, ProviderThreadId } from "@t3tools/contracts";
 import {
   backgroundWorkHoldsCompletion,
   derivePendingBackgroundWork,
+  runningSubagentCount,
 } from "./orchestrationV2PendingBackgroundWork.ts";
 
 describe("backgroundWorkHoldsCompletion", () => {
@@ -444,5 +445,23 @@ describe("derivePendingBackgroundWork kinds", () => {
         }),
       ).toEqual([]);
     });
+  });
+});
+
+describe("runningSubagentCount", () => {
+  const items = [
+    { type: "subagent", status: "running", runId: "run-2" },
+    { type: "subagent", status: "waiting", runId: "run-2" },
+    { type: "subagent", status: "completed", runId: "run-2" },
+    { type: "subagent", status: "running", runId: "run-1" },
+    { type: "command_execution", status: "running", runId: "run-2" },
+  ] as const;
+
+  it.each([
+    { activeRunId: "run-2", expected: 2 },
+    { activeRunId: "run-1", expected: 1 },
+    { activeRunId: null, expected: 0 },
+  ])("counts live subagents of active run $activeRunId", ({ activeRunId, expected }) => {
+    expect(runningSubagentCount(items, activeRunId)).toBe(expected);
   });
 });

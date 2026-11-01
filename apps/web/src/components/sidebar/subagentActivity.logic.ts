@@ -62,15 +62,17 @@ export function withWorkingSubagents(
 
 /**
  * What a thread's own shell says about subagents working for it, for callers without the
- * environment's thread list: its background subagents, or a wait on delegated threads.
+ * environment's thread list: subagents of its live run or left in the background, or a wait
+ * on delegated threads.
  */
 export function ownWorkingSubagentCount(
-  thread: Pick<OrchestrationV2ThreadShell, "pendingBackgroundTasks"> & {
+  thread: Pick<OrchestrationV2ThreadShell, "pendingBackgroundTasks" | "runningSubagentCount"> & {
     readonly blockedOnThreadWait?: boolean | undefined;
   },
 ): number {
   const background = (thread.pendingBackgroundTasks ?? []).filter(
     (task) => task.kind === "subagent",
   ).length;
-  return background > 0 ? background : thread.blockedOnThreadWait === true ? 1 : 0;
+  const count = Math.max(background, thread.runningSubagentCount ?? 0);
+  return count > 0 ? count : thread.blockedOnThreadWait === true ? 1 : 0;
 }

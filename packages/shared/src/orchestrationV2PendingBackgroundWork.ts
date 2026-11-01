@@ -225,6 +225,21 @@ export function pendingBackgroundTurnItems<Item extends PendingBackgroundWorkTur
   );
 }
 
+/** Subagents the live run is still working with; once it settles they are background tasks. */
+export function runningSubagentCount(
+  turnItems: ReadonlyArray<Pick<PendingBackgroundWorkTurnItem, "type" | "status" | "runId">>,
+  activeRunId: string | null,
+): number {
+  if (activeRunId === null) return 0;
+  return turnItems.filter(
+    (item) =>
+      item.type === "subagent" &&
+      isOrchestrationV2WorkActive(item.status) &&
+      item.runId != null &&
+      String(item.runId) === activeRunId,
+  ).length;
+}
+
 export function derivePendingBackgroundWork(input: {
   readonly latestRun: PendingBackgroundWorkRun | null | undefined;
   readonly providerThreads: ReadonlyArray<PendingBackgroundWorkProviderThread>;
