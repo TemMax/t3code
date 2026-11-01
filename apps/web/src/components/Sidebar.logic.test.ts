@@ -1698,6 +1698,14 @@ describe("resolveSidebarFolderDot", () => {
     expect(resolveSidebarFolderDot([idle, working])).toBe("working");
     expect(resolveSidebarFolderDot([working, unread])).toBe("unread");
     expect(resolveSidebarFolderDot([unread, limited])).toBe("attention");
+    // A thread waiting only on its subagents is still working.
+    const parked = { ...idle, runtime: { ...runtime, status: "idle" as const } };
+    expect(
+      resolveSidebarFolderDot([
+        { ...parked, pendingBackgroundTasks: [{ taskId: "agent-1", kind: "subagent" as const }] },
+      ]),
+    ).toBe("working");
+    expect(resolveSidebarFolderDot([{ ...working, blockedOnThreadWait: true }])).toBe("working");
   });
 });
 

@@ -32,6 +32,7 @@ import {
   AlarmClockIcon,
   AlarmClockOffIcon,
   ArrowRightLeftIcon,
+  BotIcon,
   CheckIcon,
   CircleAlertIcon,
   CircleCheckIcon,
@@ -101,6 +102,8 @@ import {
 } from "../ThreadStatusIndicators";
 import { pickSnoozePreset, resolveSnoozePresets, type SnoozePreset } from "../Sidebar.snooze";
 import { useThreadShell } from "../../state/entities";
+import { useWorkingSubagentCount } from "./subagentActivity";
+import { ownWorkingSubagentCount, withWorkingSubagents } from "./subagentActivity.logic";
 import { ProjectFavicon, type ProjectFaviconProject } from "../ProjectFavicon";
 import { ThreadSearchMatchExcerpt } from "../ThreadSearchMatch";
 import { makeWorkspaceFileDropHandlers } from "../chat/workspaceFileDrop";
@@ -526,6 +529,18 @@ const TOP_STATUS_ICONS = {
   woke: AlarmClockIcon,
 } as const;
 
+function WorkingSubagentsBadge(props: { count: number; className: string }) {
+  return (
+    <span
+      className="inline-flex items-center gap-0.5"
+      aria-label={`${props.count} subagents working`}
+    >
+      <BotIcon aria-hidden className={cn("shrink-0", props.className)} />
+      {`\u00d7${props.count}`}
+    </span>
+  );
+}
+
 function TopStatusIcon(props: { icon: keyof typeof TOP_STATUS_ICONS; className: string }) {
   const Icon = TOP_STATUS_ICONS[props.icon];
   return <Icon aria-hidden className={cn("shrink-0", props.className)} />;
@@ -706,7 +721,12 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     : null;
 
   const isUnread = hasUnseenCompletion({ ...thread, lastVisitedAt });
-  const status = resolveSidebarThreadStatus(thread);
+  // Tasks delegated to other environments only show through the thread's own wait.
+  const workingSubagents = Math.max(
+    useWorkingSubagentCount(threadRef),
+    ownWorkingSubagentCount(thread),
+  );
+  const status = withWorkingSubagents(resolveSidebarThreadStatus(thread), workingSubagents);
   const lastVisitedDate = lastVisitedAt === undefined ? null : parseTimestampDate(lastVisitedAt);
   const wokeAtDate = props.wokeAt === null ? null : parseTimestampDate(props.wokeAt);
   const isWoke =
@@ -1303,6 +1323,9 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                       >
                         <TopStatusIcon icon={topStatus.icon} className="size-3" />
                         {topStatus.label}
+                        {status === "working" && workingSubagents > 0 ? (
+                          <WorkingSubagentsBadge count={workingSubagents} className="size-3" />
+                        ) : null}
                       </span>
                     ) : (
                       <span className="text-xs">
@@ -1492,9 +1515,19 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                             BackgroundThreadAnnouncer and the open thread's
                             timeline speak status changes instead. */}
                           {topStatus.label}
+                          {status === "working" && workingSubagents > 0 ? (
+                            <WorkingSubagentsBadge count={workingSubagents} className="size-4" />
+                          ) : null}
                           {status === "working" ? (
                             <span aria-hidden>
-                              <WorkingDuration startedAt={resolveWorkingStartedAt(thread)} />
+                              <WorkingDuration
+                                startedAt={
+                                  resolveWorkingStartedAt(thread) ??
+                                  (workingSubagents > 0
+                                    ? (thread.latestRun?.startedAt ?? null)
+                                    : null)
+                                }
+                              />
                             </span>
                           ) : status === "waiting" ? (
                             <span aria-hidden>
