@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: Release version without the leading v, e.g. 0.1.6
+        description: Upstream version (0.1.7), or fork build ahead of the next upstream release (0.1.7-fork.1)
         required: true
         type: string
 
@@ -50,8 +50,9 @@ jobs:
       - name: Validate version
         shell: bash
         run: |
-          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "Version must look like 1.2.3, got '$VERSION'." >&2
+          # X.Y.Z-fork.N sorts after X.Y.(Z-1) and before upstream X.Y.Z, so updates flow both ways.
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-fork\.[0-9]+)?$ ]]; then
+            echo "Version must look like 1.2.3 or 1.2.3-fork.1, got '$VERSION'." >&2
             exit 1
           fi
 
@@ -190,6 +191,12 @@ jobs:
         run: |
           set -euo pipefail
           tag="v$VERSION"
+          upstream_tag="v${VERSION%%-fork.*}"
+          if [[ "$VERSION" == *-fork.* ]]; then
+            notes="Fork-only build between upstream releases: the fork's features on top of upstream. Upstream $upstream_tag will supersede it."
+          else
+            notes="Fork build of upstream $tag. Upstream notes: https://github.com/pingdotgg/t3code/releases/tag/$tag"
+          fi
           ls -la release-assets
           if gh release view "$tag" >/dev/null 2>&1; then
             gh release upload "$tag" release-assets/* --clobber
@@ -197,6 +204,6 @@ jobs:
             gh release create "$tag" release-assets/* \
               --target "$GITHUB_SHA" \
               --title "T3 Code $tag (fork)" \
-              --notes "Fork build of upstream $tag. Upstream notes: https://github.com/pingdotgg/t3code/releases/tag/$tag" \
+              --notes "$notes" \
               --latest
           fi

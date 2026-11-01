@@ -2701,7 +2701,8 @@ export const resolveGitHubPublishConfig = Effect.fn("resolveGitHubPublishConfig"
     owner,
     repo,
     releaseType: updateChannel === "nightly" ? "prerelease" : "release",
-    ...(updateChannel === "nightly" ? { channel: "nightly" as const } : {}),
+    // Explicit, or electron-builder names the feed after a version suffix (0.1.7-fork.1 -> fork-mac.yml).
+    channel: updateChannel,
   };
 });
 

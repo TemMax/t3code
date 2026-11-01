@@ -526,6 +526,15 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
         undefined,
         undefined,
       );
+      const forkRelease = yield* createBuildConfig(
+        "mac",
+        "dmg",
+        "0.1.7-fork.1",
+        false,
+        false,
+        undefined,
+        undefined,
+      );
 
       assert.isNull(preview.publish);
       assert.isNull(previewChannel.publish);
@@ -535,8 +544,10 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
           owner: "pingdotgg",
           repo: "t3code",
           releaseType: "release",
+          channel: "latest",
         },
       ]);
+      assert.deepStrictEqual(forkRelease.publish, release.publish);
     }).pipe(
       Effect.provide(
         ConfigProvider.layer(
