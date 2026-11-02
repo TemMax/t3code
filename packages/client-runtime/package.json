@@ -251,6 +251,10 @@
       "types": "./src/state/pullRequests.ts",
       "default": "./src/state/pullRequests.ts"
     },
+    "./state/project-folders": {
+      "types": "./src/state/projectFolders.ts",
+      "default": "./src/state/projectFolders.ts"
+    },
     "./state/project-grouping": {
       "types": "./src/state/projectGrouping.ts",
       "default": "./src/state/projectGrouping.ts"
@@ -310,6 +314,10 @@
     "./state/threads": {
       "types": "./src/state/threads.ts",
       "default": "./src/state/threads.ts"
+    },
+    "./state/subagent-activity": {
+      "types": "./src/state/subagentActivity.ts",
+      "default": "./src/state/subagentActivity.ts"
     },
     "./state/subagent-display": {
       "types": "./src/state/subagentDisplay.ts",
