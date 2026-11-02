@@ -61,6 +61,7 @@ import {
 } from "~/state/session";
 import { environmentIdsKey } from "~/state/environmentAtomList";
 import { appAtomRegistry } from "~/rpc/atomRegistry";
+import { environmentPresentations } from "~/state/presentation";
 
 const CLIENT_SETTINGS_PERSISTENCE_ERROR_SCOPE = "[CLIENT_SETTINGS]";
 
@@ -415,10 +416,31 @@ export function useEnvironmentIdentificationMode(): EnvironmentIdentificationMod
   });
 }
 
-/** Legacy sidebar opt-ins still count, so those users land in the boring sidebar. */
+const projectFoldersEnabledAtom = Atom.make((get) => {
+  for (const config of get(environmentPresentations.serverConfigsAtom).values()) {
+    if (config.settings.sidebarProjectFoldersEnabled) return true;
+  }
+  return false;
+}).pipe(Atom.withLabel("sidebar-project-folders-enabled"));
+
+/**
+ * The server setting syncs project folders across clients. The local boring and legacy sidebar
+ * opt-ins still count until the switch is used.
+ */
 export function useBoringSidebarEnabled(): boolean {
-  return useClientSettings(
+  const local = useClientSettings(
     (settings) => settings.boringSidebarEnabled || settings.legacySidebarEnabled,
+  );
+  const synced = useAtomValue(projectFoldersEnabledAtom);
+  return local || synced;
+}
+
+export function readBoringSidebarEnabled(): boolean {
+  const settings = getClientSettings();
+  return (
+    settings.boringSidebarEnabled ||
+    settings.legacySidebarEnabled ||
+    appAtomRegistry.get(projectFoldersEnabledAtom)
   );
 }
 

@@ -10,7 +10,7 @@ import { isAppModalPage } from "../components/sidebar/mainAppLocation";
 import { shouldCreateNewThreadInCurrentProject } from "../components/Sidebar.logic";
 import { createNewThreadHandler, resolveDefaultProjectRef } from "../hooks/useHandleNewThread";
 import { createScratchProjectActions } from "../hooks/useScratchProject";
-import { getClientSettings } from "../hooks/useSettings";
+import { getClientSettings, readBoringSidebarEnabled } from "../hooks/useSettings";
 import { startNewThreadFromContext } from "../lib/chatThreadActions";
 import { selectProjectGroupingSettings } from "@t3tools/client-runtime/state/project-grouping";
 import { selectActiveRightPanel, useRightPanelStore } from "../rightPanelStore";
@@ -125,11 +125,9 @@ export function installChatRouteCommands(router: AnyRouter): () => void {
       "chat.new": (event) => {
         // The boring sidebar's folders already show the context, so it starts in
         // the current project like the legacy sidebar did.
-        const { boringSidebarEnabled, legacySidebarEnabled } = getClientSettings();
         const groups = readProjectGroups();
         if (
-          !boringSidebarEnabled &&
-          !legacySidebarEnabled &&
+          !readBoringSidebarEnabled() &&
           !shouldCreateNewThreadInCurrentProject(
             false,
             groups.filter((group) => !group.archived).length,

@@ -9,6 +9,7 @@ import { ScopedSwitch } from "./ScopedSwitch";
 import { SettingsPageContainer, SettingsRow, SettingsSection } from "./settingsLayout";
 import { searchableSetting } from "./settingsSearch";
 import { LegacyFeaturesSection } from "./SettingsPanels";
+import { useBoringSidebarEnabled, useUpdatePrimarySettings } from "~/hooks/useSettings";
 import { useScopedSettings, useUpdateScopedSettings } from "./useScopedSettings";
 
 /** Features still settling in, and legacy behavior kept for people who rely on it. */
@@ -29,18 +30,22 @@ export function LabsSettingsPanel() {
 }
 
 function BoringSidebarRow() {
-  const settings = useScopedSettings();
-  const updateSettings = useUpdateScopedSettings();
+  const enabled = useBoringSidebarEnabled();
+  const updateSettings = useUpdatePrimarySettings();
   return (
     <SettingsRow
       {...searchableSetting("boring-sidebar")}
-      description="Group sidebar threads into project folders. Pinned threads stay on top, and Snoozed and Settled stay below the folders."
+      description="Group sidebar threads into project folders. Pinned threads stay on top, and Snoozed and Settled stay below the folders. Syncs through your servers, so the mobile app follows."
       control={
         <Switch
-          checked={settings.boringSidebarEnabled || settings.legacySidebarEnabled}
-          // Turning it off also clears the opt-in of the removed legacy sidebar.
+          checked={enabled}
+          // The servers hold the value; clearing the local opt-ins keeps them from forcing it on.
           onCheckedChange={(checked) =>
-            updateSettings({ boringSidebarEnabled: Boolean(checked), legacySidebarEnabled: false })
+            updateSettings({
+              sidebarProjectFoldersEnabled: Boolean(checked),
+              boringSidebarEnabled: false,
+              legacySidebarEnabled: false,
+            })
           }
           aria-label="Boring sidebar (group by project)"
         />
