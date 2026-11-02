@@ -59,7 +59,7 @@ export function useThreadListV2(input: {
 }) {
   const { threads } = input;
   const folderMode = input.projectFolders != null && input.projectRefs == null;
-  // Folders already separate the work, so folder mode has no Working shelf, as on desktop.
+  // Same rule as buildThreadListV2Items; the inbox and move menus need it before the layout.
   const workingShelfEnabled = input.workingShelfEnabled && !folderMode;
   const workingSubagentCounts = useMemo(
     () => countThreadListV2WorkingSubagents(threads),

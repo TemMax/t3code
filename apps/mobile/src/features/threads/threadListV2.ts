@@ -768,7 +768,9 @@ export function buildThreadListV2Items(input: {
     ? new Set(input.projectRefs.map((ref) => `${ref.environmentId}:${ref.projectId}`))
     : null;
 
-  const workingShelfEnabled = input.workingShelfEnabled === true;
+  const projectFolders = projectKeys === null ? (input.projectFolders ?? null) : null;
+  // Folders already separate the work, so folder mode has no Working shelf, as on desktop.
+  const workingShelfEnabled = input.workingShelfEnabled === true && projectFolders === null;
   const pinned: EnvironmentThreadShell[] = [];
   const active: EnvironmentThreadShell[] = [];
   const working: EnvironmentThreadShell[] = [];
@@ -874,7 +876,6 @@ export function buildThreadListV2Items(input: {
     };
   }
 
-  const projectFolders = projectKeys === null ? (input.projectFolders ?? null) : null;
   const orderedActive = projectFolders
     ? sortWorkingThreadsBySend(active)
     : workingShelfEnabled

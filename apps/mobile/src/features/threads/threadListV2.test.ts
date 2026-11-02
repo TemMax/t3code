@@ -1781,6 +1781,23 @@ describe("Working section beta", () => {
     const off = build({ workingShelfEnabled: false });
     expect(ids(off)).toContain("working");
     expect(off.workingCount).toBe(0);
+
+    const folders = build({
+      projectFolders: {
+        groups: [
+          {
+            key: "project",
+            title: "Project",
+            memberProjectRefs: [{ environmentId, projectId: threads[0]!.projectId }],
+            pinned: false,
+            archived: false,
+          },
+        ],
+        collapsedKeys: new Set(),
+      },
+    });
+    expect(ids(folders)).toContain("working");
+    expect(folders.workingShelfHeaderIndex).toBeNull();
   });
 
   it("keeps an inactive row in Working during the shared grace and returns it on expiry", () => {
