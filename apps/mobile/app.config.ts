@@ -10,6 +10,15 @@ Object.assign(process.env, repoEnv);
 
 const APP_VARIANT = resolveAppVariant(repoEnv.APP_VARIANT);
 const isIosPersonalTeamBuild = repoEnv.T3CODE_IOS_PERSONAL_TEAM === "1";
+// TemMax/t3code fork's TestFlight build (scripts/fork-ios-testflight.sh): own team and ids, no
+// push, Apple sign-in, Clerk links or T3 Connect.
+const isForkIosBuild = repoEnv.T3CODE_FORK_IOS === "1";
+const FORK_IOS = {
+  appName: "T3 Code (Beta)",
+  bundleIdentifier: "com.temmax.t3code.mobile",
+  teamId: "93FFKDMA3D",
+} as const;
+const relayUrl = isForkIosBuild ? undefined : repoEnv.T3CODE_RELAY_URL?.trim();
 const runtimeVersionPolicy =
   process.env.MOBILE_VERSION_POLICY ??
   (APP_VARIANT === "development" ? "appVersion" : "fingerprint");
@@ -19,8 +28,8 @@ const IOS_BUNDLE_IDENTIFIER_PATTERN = /^[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+$/;
 
 // Compiled into the native project. Without a relay, Observe's native side could dispatch to
 // Expo's own ingest before observe.ts turns it off; `.invalid` never resolves (RFC 6761).
-const observeEndpointUrl = repoEnv.T3CODE_RELAY_URL?.trim()
-  ? new URL("/v1/mobile/observe", repoEnv.T3CODE_RELAY_URL.trim()).toString()
+const observeEndpointUrl = relayUrl
+  ? new URL("/v1/mobile/observe", relayUrl).toString()
   : "https://observe.invalid";
 
 const fromRepoRoot = (relativePath: string) => `../../${relativePath}`;
@@ -116,9 +125,11 @@ function resolveAppVariant(value: string | undefined): AppVariant {
 }
 
 const variant = VARIANT_CONFIG[APP_VARIANT];
-const iosBundleIdentifier = isIosPersonalTeamBuild
-  ? personalTeamBundleIdentifier!
-  : variant.iosBundleIdentifier;
+const iosBundleIdentifier = isForkIosBuild
+  ? FORK_IOS.bundleIdentifier
+  : isIosPersonalTeamBuild
+    ? personalTeamBundleIdentifier!
+    : variant.iosBundleIdentifier;
 
 const dmSansFonts = {
   regular: "@expo-google-fonts/dm-sans/400Regular/DMSans_400Regular.ttf",
@@ -224,7 +235,7 @@ const sharingPlugin: NonNullable<ExpoConfig["plugins"]>[number] = [
 // Match iOS PostScript names on Android so RN and the native composer share fonts before runtime loading.
 
 const config: ExpoConfig = {
-  name: variant.appName,
+  name: isForkIosBuild ? FORK_IOS.appName : variant.appName,
   slug: "t3-code",
   platforms: ["ios", "android"],
   scheme: variant.scheme,
@@ -247,12 +258,14 @@ const config: ExpoConfig = {
     supportsTablet: true,
     requireFullScreen: process.env.T3_SHOWCASE_CAPTURE_BUILD === "1",
     bundleIdentifier: iosBundleIdentifier,
+    ...(repoEnv.T3CODE_MOBILE_BUILD_NUMBER
+      ? { buildNumber: repoEnv.T3CODE_MOBILE_BUILD_NUMBER }
+      : {}),
     // Avoid Personal Team fallback: it cannot sign App Groups, Apple sign-in or push entitlements.
-    appleTeamId: "ARK85ZXQ4Z",
-    associatedDomains: [
-      `applinks:${variant.relyingParty}`,
-      `webcredentials:${variant.relyingParty}`,
-    ],
+    appleTeamId: isForkIosBuild ? FORK_IOS.teamId : "ARK85ZXQ4Z",
+    associatedDomains: isForkIosBuild
+      ? []
+      : [`applinks:${variant.relyingParty}`, `webcredentials:${variant.relyingParty}`],
     entitlements: {
       "keychain-access-groups": [`$(AppIdentifierPrefix)${variant.iosBundleIdentifier}`],
     },
@@ -307,6 +320,8 @@ const config: ExpoConfig = {
     favicon: variant.assets.appIcon,
   },
   plugins: [
+    // Listed first so its mod runs last, after the plugins that add these entitlements.
+    ...(isForkIosBuild ? ["./plugins/withoutIosForkCapabilities.cjs"] : []),
     "expo-asset",
     "react-native-pdf-jsi",
     [
@@ -347,7 +362,10 @@ const config: ExpoConfig = {
       },
     ],
     // Gate Clerk here: withoutIosPersonalTeamCapabilities runs too early to strip its entitlement.
-    ["@clerk/expo", { theme: "./clerk-theme.json", appleSignIn: !isIosPersonalTeamBuild }],
+    [
+      "@clerk/expo",
+      { theme: "./clerk-theme.json", appleSignIn: !isIosPersonalTeamBuild && !isForkIosBuild },
+    ],
     "expo-web-browser",
     [
       "expo-quick-actions",
@@ -440,11 +458,11 @@ const config: ExpoConfig = {
     appVariant: APP_VARIANT,
     iosPersonalTeamBuild: isIosPersonalTeamBuild,
     relay: {
-      url: repoEnv.T3CODE_RELAY_URL ?? null,
+      url: isForkIosBuild ? null : (repoEnv.T3CODE_RELAY_URL ?? null),
     },
     clerk: {
-      publishableKey: repoEnv.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY ?? null,
-      jwtTemplate: repoEnv.EXPO_PUBLIC_CLERK_JWT_TEMPLATE ?? null,
+      publishableKey: isForkIosBuild ? null : (repoEnv.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY ?? null),
+      jwtTemplate: isForkIosBuild ? null : (repoEnv.EXPO_PUBLIC_CLERK_JWT_TEMPLATE ?? null),
     },
     // Clerk reads these exact names at prebuild. Omit unset values: manifest null becomes truthy {}.
     EXPO_PUBLIC_CLERK_GOOGLE_WEB_CLIENT_ID: repoEnv.EXPO_PUBLIC_CLERK_GOOGLE_WEB_CLIENT_ID,
