@@ -19,6 +19,7 @@ import { SettingsSection } from "./components/SettingsSection";
 import { SettingsSwitchRow } from "./components/SettingsSwitchRow";
 import { SettingsScreen } from "./components/SettingsScreen";
 import { planAutoSettleSettingsSync, type AutoSettleSettings } from "./autoSettleSettingsSync";
+import { useProjectFoldersEnabled } from "../threads/use-project-folders";
 import { useSettingsEnvironmentFilter } from "./settings-environment-filter";
 import { resolveMobileSettingsTargets, uniformMobileSetting } from "./settings-scoped-server";
 
@@ -34,6 +35,7 @@ export function SettingsLabsRouteScreen() {
         contentContainerClassName="gap-6 px-5 pt-4"
         contentContainerStyle={{ paddingBottom: Math.max(insets.bottom, 18) + 18 }}
       >
+        <ProjectFoldersSettingsSection />
         <BetaSettingsSection />
         <LegacySettingsSection />
       </ScrollView>
@@ -210,6 +212,42 @@ export function NewThreadSettingsSection() {
         onValueChange={(value) => savePreferences({ useLastProjectForNewThreads: value })}
       />
     </SettingsSection>
+  );
+}
+
+function ProjectFoldersSettingsSection() {
+  const { environments } = useEnvironments();
+  const targets = environments.filter(supportsSharedSettingsSync);
+  const writable = useEnvironmentsWithScope(targets, AuthSettingsWriteScope);
+  const enabled = useProjectFoldersEnabled();
+  const updateSettings = useAtomCommand(serverEnvironment.updateSettings, {
+    label: "project folders update",
+    reportFailure: true,
+  });
+  if (targets.length === 0) return null;
+  return (
+    <View className="gap-3">
+      <SettingsSection title="Project folders">
+        <SettingsSwitchRow
+          icon="folder"
+          label="Group threads by project"
+          value={enabled}
+          disabled={writable.size === 0}
+          onValueChange={(value) => {
+            for (const environment of targets) {
+              if (!writable.has(environment.environmentId)) continue;
+              void updateSettings({
+                environmentId: environment.environmentId,
+                input: { patch: { sidebarProjectFoldersEnabled: value } },
+              });
+            }
+          }}
+        />
+      </SettingsSection>
+      <Text className="px-2 text-sm text-foreground-muted">
+        Put active threads in project folders. Syncs through your servers, so desktop follows.
+      </Text>
+    </View>
   );
 }
 

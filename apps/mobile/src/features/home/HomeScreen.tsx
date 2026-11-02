@@ -13,7 +13,7 @@ import { pickableProjectGroups } from "@t3tools/client-runtime/state/project-gro
 import { threadSearchMatchKey } from "@t3tools/client-runtime/state/thread-search";
 import { type EnvironmentId, type SidebarProjectGroupingMode } from "@t3tools/contracts";
 import { useAtomValue } from "@effect/atom-react";
-import { use, useEffect, useRef, useState, type ComponentProps } from "react";
+import { use, useEffect, useMemo, useRef, useState, type ComponentProps } from "react";
 import {
   Platform,
   ScrollView,
@@ -59,6 +59,7 @@ import type { PendingNewTask } from "../../state/use-pending-new-tasks";
 import { useQueuedThreadKeys } from "../../state/use-thread-outbox";
 import {
   ThreadListV2PendingRow,
+  ThreadListV2ProjectFolderHeader,
   ThreadListV2Row,
   ThreadListV2SettledShelfHeader,
   ThreadListV2ShowMoreRow,
@@ -75,6 +76,7 @@ import {
   type ThreadListV2ListItem,
 } from "../threads/threadListV2";
 import { useThreadListV2ShelfPreferences } from "../threads/use-thread-list-v2-shelf-preferences";
+import { useProjectFolderCollapse, useProjectFoldersEnabled } from "../threads/use-project-folders";
 import type { HomeListFilterMenuEnvironment } from "./home-list-filter-menu";
 import {
   buildHomeProjectScopes,
@@ -430,6 +432,22 @@ export function HomeScreen(props: HomeScreenProps) {
     toggleSnoozedShelf,
     toggleWorkingShelf,
   } = useThreadListV2ShelfPreferences();
+  const projectFoldersEnabled = useProjectFoldersEnabled();
+  const { collapsedKeys, toggleFolder } = useProjectFolderCollapse();
+  const projectFolderGroups = useMemo(
+    () =>
+      [
+        ...pickableProjectGroups(projectScopes),
+        ...projectScopes.filter((scope) => scope.archived),
+      ].map((scope) => ({
+        key: scope.key,
+        title: scope.title,
+        memberProjectRefs: scope.projectRefs,
+        pinned: scope.pinned,
+        archived: scope.archived,
+      })),
+    [projectScopes],
+  );
   const now = useThreadListNow(props.threads);
   const listEnvironments = useAtomValue(threadListEnvironmentsAtom);
   const {
@@ -451,11 +469,13 @@ export function HomeScreen(props: HomeScreenProps) {
     items: threadListV2Items,
     contentOnlyThreadKeys,
     olderSettledShelf,
+    activeRowsReorderable,
   } = useThreadListV2({
     threads: props.threads,
     pendingTasks: props.pendingTasks,
     environmentId: props.selectedEnvironmentId,
     projectRefs: v2ScopedProjectGroup === null ? null : v2ScopedProjectGroup.projectRefs,
+    projectFolders: projectFoldersEnabled ? { groups: projectFolderGroups, collapsedKeys } : null,
     searchQuery: props.searchQuery,
     searchMatches: threadSearchMatchByKey,
     settlementEnvironmentIds,
@@ -495,6 +515,19 @@ export function HomeScreen(props: HomeScreenProps) {
   }, [activateVisibleRows, swipeEnabled, threadListV2Items]);
 
   const renderV2Item = ({ item }: { readonly item: ThreadListV2ListItem }) => {
+    if (item.type === "v2-project-folder") {
+      return (
+        <ThreadListV2ProjectFolderHeader
+          folderKey={item.folderKey}
+          title={item.title}
+          count={item.count}
+          collapsed={item.collapsed}
+          dot={item.dot}
+          onToggle={toggleFolder}
+          pane={primaryColumn ? "sidebar" : "screen"}
+        />
+      );
+    }
     if (item.type === "v2-pending") {
       const pendingScopeKey = scopedProjectKey(
         item.pendingTask.environmentId,
@@ -571,6 +604,7 @@ export function HomeScreen(props: HomeScreenProps) {
         thread={thread}
         variant={item.item.variant}
         hasQueuedMessages={item.hasQueuedMessages}
+        workingSubagents={item.workingSubagents}
         snoozed={item.item.snoozed}
         pinned={item.item.pinned}
         wokeAt={item.item.wokeAt}
@@ -614,7 +648,7 @@ export function HomeScreen(props: HomeScreenProps) {
         reorderSupported={
           item.item.pinned
             ? pinReorderEnvironmentIds.has(thread.environmentId)
-            : !workingShelfEnabled && activeReorderEnvironmentIds.has(thread.environmentId)
+            : activeRowsReorderable && activeReorderEnvironmentIds.has(thread.environmentId)
         }
         canMoveUp={item.canMoveUp}
         canMoveDown={item.canMoveDown}
@@ -644,7 +678,7 @@ export function HomeScreen(props: HomeScreenProps) {
     searchQuery: props.searchQuery,
     selectedThreadKey,
     threadSearchMatchByKey,
-    workingShelfEnabled,
+    activeRowsReorderable,
   };
 
   const hasAnyThreads =

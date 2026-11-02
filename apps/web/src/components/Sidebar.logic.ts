@@ -3,7 +3,14 @@ import { scopeThreadRef, scopedThreadKey } from "@t3tools/client-runtime/environ
 import { resolveThreadWorkingStartedAt } from "@t3tools/client-runtime/state/models";
 import { isShownUnderParent } from "@t3tools/client-runtime/state/threads";
 import { backgroundWorkHoldsCompletion } from "@t3tools/shared/orchestrationV2PendingBackgroundWork";
-import { ownWorkingSubagentCount, withWorkingSubagents } from "./sidebar/subagentActivity.logic";
+import {
+  groupThreadsByProject,
+  projectFolderDot,
+} from "@t3tools/client-runtime/state/project-folders";
+import {
+  ownWorkingSubagentCount,
+  withWorkingSubagents,
+} from "@t3tools/client-runtime/state/subagent-activity";
 import { threadPullRequestSearchTerms } from "@t3tools/shared/threadPullRequests";
 import * as React from "react";
 import {
@@ -936,25 +943,16 @@ export function resolveSidebarThreadStatus(thread: SidebarThreadStatusInput): Si
 export function resolveSidebarFolderDot(
   threads: ReadonlyArray<ThreadStatusInput & SidebarThreadStatusInput>,
 ): "attention" | "failed" | "unread" | "working" | null {
-  const statusOf = (thread: (typeof threads)[number]) =>
-    withWorkingSubagents(resolveSidebarThreadStatus(thread), ownWorkingSubagentCount(thread));
-  const statuses = new Set(threads.map(statusOf));
-  if (
-    statuses.has("input") ||
-    statuses.has("approval") ||
-    statuses.has("request") ||
-    statuses.has("limited")
-  ) {
-    return "attention";
-  }
-  if (statuses.has("failed")) return "failed";
-  // Rows show Done only for ready threads, so the dot follows the same rule.
-  const hasUnread = threads.some(
-    (thread) => statusOf(thread) === "ready" && hasUnseenCompletion(thread),
+  return projectFolderDot(
+    threads.map((thread) => {
+      const status = withWorkingSubagents(
+        resolveSidebarThreadStatus(thread),
+        ownWorkingSubagentCount(thread),
+      );
+      // Rows show Done only for ready threads, so the dot follows the same rule.
+      return { status, unread: status === "ready" && hasUnseenCompletion(thread) };
+    }),
   );
-  if (hasUnread) return "unread";
-  if (statuses.has("working")) return "working";
-  return null;
 }
 
 /**
@@ -994,17 +992,7 @@ export function groupSidebarThreadsByProject<
   threads: readonly TThread[],
   keepEmpty: (group: TGroup) => boolean,
 ): Array<{ group: TGroup; threads: TThread[] }> {
-  const folders = groups.map((group) => ({ group, threads: [] as TThread[] }));
-  const folderByProject = new Map<string, (typeof folders)[number]>();
-  for (const folder of folders) {
-    for (const ref of folder.group.memberProjectRefs) {
-      folderByProject.set(`${ref.environmentId}:${ref.projectId}`, folder);
-    }
-  }
-  for (const thread of threads) {
-    folderByProject.get(`${thread.environmentId}:${thread.projectId}`)?.threads.push(thread);
-  }
-  return folders.filter((folder) => folder.threads.length > 0 || keepEmpty(folder.group));
+  return groupThreadsByProject(groups, threads, keepEmpty);
 }
 
 export type SidebarV2TopStatusKind =
