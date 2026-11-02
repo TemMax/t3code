@@ -38,6 +38,7 @@ import { scopedProjectKey, scopedThreadKey } from "../../lib/scopedEntities";
 import { useProjects, useNavigationThreadShells } from "../../state/entities";
 import { useThreadSearch } from "../../state/queries";
 import { useThreadListV2ShelfPreferences } from "./use-thread-list-v2-shelf-preferences";
+import { useProjectFolderCollapse, useProjectFoldersEnabled } from "./use-project-folders";
 import { useThreadListNow } from "./use-thread-list-now";
 import { usePendingThreadOrder } from "../../state/thread-order";
 import { threadListEnvironmentsAtom } from "../../state/presentation";
@@ -69,6 +70,7 @@ import { createSidebarHeaderItems } from "./sidebar-native-header-items";
 import { SidebarNavigationShell } from "./sidebar-navigation-shell";
 import {
   ThreadListV2PendingRow,
+  ThreadListV2ProjectFolderHeader,
   ThreadListV2Row,
   ThreadListV2SettledShelfHeader,
   ThreadListV2ShowMoreRow,
@@ -284,6 +286,22 @@ function ThreadNavigationSidebarPane(
     toggleSnoozedShelf,
     toggleWorkingShelf,
   } = useThreadListV2ShelfPreferences();
+  const projectFoldersEnabled = useProjectFoldersEnabled();
+  const { collapsedKeys, toggleFolder } = useProjectFolderCollapse();
+  const projectFolderGroups = useMemo(
+    () =>
+      [
+        ...pickableProjectGroups(projectScopes),
+        ...projectScopes.filter((scope) => scope.archived),
+      ].map((scope) => ({
+        key: scope.key,
+        title: scope.title,
+        memberProjectRefs: scope.projectRefs,
+        pinned: scope.pinned,
+        archived: scope.archived,
+      })),
+    [projectScopes],
+  );
   const now = useThreadListNow(threads);
   const listEnvironments = useAtomValue(threadListEnvironmentsAtom);
   const {
@@ -310,7 +328,7 @@ function ThreadNavigationSidebarPane(
     pendingTasks,
     environmentId: options.selectedEnvironmentId,
     projectRefs: selectedProjectScope === null ? null : selectedProjectScope.projectRefs,
-    projectFolders: null,
+    projectFolders: projectFoldersEnabled ? { groups: projectFolderGroups, collapsedKeys } : null,
     searchQuery: props.searchQuery,
     searchMatches: threadSearchMatchByKey,
     settlementEnvironmentIds,
@@ -547,7 +565,17 @@ function ThreadNavigationSidebarPane(
         );
       }
       case "v2-project-folder":
-        return null;
+        return (
+          <ThreadListV2ProjectFolderHeader
+            folderKey={item.folderKey}
+            title={item.title}
+            count={item.count}
+            collapsed={item.collapsed}
+            dot={item.dot}
+            onToggle={toggleFolder}
+            pane="sidebar"
+          />
+        );
       case "v2-thread": {
         const thread = item.item.thread;
         const scopeKey = scopedProjectKey(thread.environmentId, thread.projectId);
@@ -557,6 +585,7 @@ function ThreadNavigationSidebarPane(
             thread={thread}
             variant={item.item.variant}
             hasQueuedMessages={item.hasQueuedMessages}
+            workingSubagents={item.workingSubagents}
             snoozed={item.item.snoozed}
             pinned={item.item.pinned}
             wokeAt={item.item.wokeAt}
