@@ -323,6 +323,7 @@ function ThreadNavigationSidebarPane(
     items: threadListV2Items,
     contentOnlyThreadKeys,
     olderSettledShelf,
+    activeRowsReorderable,
   } = useThreadListV2({
     threads,
     pendingTasks,
@@ -497,7 +498,7 @@ function ThreadNavigationSidebarPane(
     savedConnectionsById,
     listEnvironments,
     threadSearchMatchByKey,
-    workingShelfEnabled,
+    activeRowsReorderable,
   };
   useThreadJumpShortcuts(listItems, handleSelectThread);
   const sidebarItemsAreEqual = (previous: SidebarListItem, item: SidebarListItem): boolean => {
@@ -637,7 +638,7 @@ function ThreadNavigationSidebarPane(
             reorderSupported={
               item.item.pinned
                 ? pinReorderEnvironmentIds.has(thread.environmentId)
-                : !workingShelfEnabled && activeReorderEnvironmentIds.has(thread.environmentId)
+                : activeRowsReorderable && activeReorderEnvironmentIds.has(thread.environmentId)
             }
             canMoveUp={item.canMoveUp}
             canMoveDown={item.canMoveDown}

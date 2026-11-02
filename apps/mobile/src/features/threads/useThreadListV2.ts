@@ -57,8 +57,10 @@ export function useThreadListV2(input: {
   readonly settledShelfExpanded: boolean;
   readonly selectedThreadKey: string | null;
 }) {
-  const { threads, workingShelfEnabled } = input;
+  const { threads } = input;
   const folderMode = input.projectFolders != null && input.projectRefs == null;
+  // Folders already separate the work, so folder mode has no Working shelf, as on desktop.
+  const workingShelfEnabled = input.workingShelfEnabled && !folderMode;
   const workingSubagentCounts = useMemo(
     () => countThreadListV2WorkingSubagents(threads),
     [threads],
@@ -93,9 +95,10 @@ export function useThreadListV2(input: {
         queuedThreadKeys: input.queuedThreadKeys,
       }),
     });
+  const activeRowsReorderable = !workingShelfEnabled && !folderMode;
   const moveAvailability = new Map([
     ...sectionAvailability("pinned"),
-    ...(workingShelfEnabled || folderMode ? [] : sectionAvailability("active")),
+    ...(activeRowsReorderable ? sectionAvailability("active") : []),
   ]);
   // Older settled threads load in pages; the shelf lists them only as far as they are loaded.
   const scopes = olderSettledScopes(input);
@@ -175,7 +178,7 @@ export function useThreadListV2(input: {
     folderHeaders: layout.folderHeaders,
     workingSubagentCounts,
   });
-  return { layout, items, contentOnlyThreadKeys, olderSettledShelf };
+  return { layout, items, contentOnlyThreadKeys, olderSettledShelf, activeRowsReorderable };
 }
 
 /** The list's scope per environment: its projects there, or every project. */
