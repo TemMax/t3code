@@ -310,6 +310,7 @@ function ThreadNavigationSidebarPane(
     pendingTasks,
     environmentId: options.selectedEnvironmentId,
     projectRefs: selectedProjectScope === null ? null : selectedProjectScope.projectRefs,
+    projectFolders: null,
     searchQuery: props.searchQuery,
     searchMatches: threadSearchMatchByKey,
     settlementEnvironmentIds,
@@ -545,6 +546,8 @@ function ThreadNavigationSidebarPane(
           />
         );
       }
+      case "v2-project-folder":
+        return null;
       case "v2-thread": {
         const thread = item.item.thread;
         const scopeKey = scopedProjectKey(thread.environmentId, thread.projectId);

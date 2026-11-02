@@ -8,6 +8,7 @@ import type { PendingNewTask } from "../../state/use-pending-new-tasks";
 import {
   buildThreadListV2Items,
   buildThreadListV2ListItems,
+  countThreadListV2WorkingSubagents,
   getThreadListV2OrderedSection,
   threadListInboxReturns,
 } from "./threadListV2";
@@ -37,6 +38,7 @@ export function useThreadListV2(input: {
   readonly pendingTasks: ReadonlyArray<PendingNewTask>;
   readonly environmentId: EnvironmentId | null;
   readonly projectRefs: LayoutInput["projectRefs"];
+  readonly projectFolders: LayoutInput["projectFolders"];
   readonly searchQuery: string;
   /** Threads that match the search by content, keyed like `threadSearchMatchKey`. */
   readonly searchMatches: ReadonlyMap<string, unknown>;
@@ -56,6 +58,11 @@ export function useThreadListV2(input: {
   readonly selectedThreadKey: string | null;
 }) {
   const { threads, workingShelfEnabled } = input;
+  const folderMode = input.projectFolders != null && input.projectRefs == null;
+  const workingSubagentCounts = useMemo(
+    () => countThreadListV2WorkingSubagents(threads),
+    [threads],
+  );
   // A thread can stop working when the threads change, or when its exit grace expires.
   const inboxVersion = useSyncExternalStore(
     threadListInboxReturns.subscribe,
@@ -88,7 +95,7 @@ export function useThreadListV2(input: {
     });
   const moveAvailability = new Map([
     ...sectionAvailability("pinned"),
-    ...(workingShelfEnabled ? [] : sectionAvailability("active")),
+    ...(workingShelfEnabled || folderMode ? [] : sectionAvailability("active")),
   ]);
   // Older settled threads load in pages; the shelf lists them only as far as they are loaded.
   const scopes = olderSettledScopes(input);
@@ -103,6 +110,8 @@ export function useThreadListV2(input: {
     threads: threads.filter((thread) => thread.archivedAt === null),
     environmentId: input.environmentId,
     projectRefs: input.projectRefs,
+    projectFolders: input.projectFolders,
+    workingSubagentCounts,
     searchQuery: input.searchQuery,
     matchedThreadKeys: new Set(input.searchMatches.keys()),
     settlementEnvironmentIds: input.settlementEnvironmentIds,
@@ -163,6 +172,8 @@ export function useThreadListV2(input: {
     queuedThreadKeys: input.queuedThreadKeys,
     moveAvailability,
     shelfPreferencesLoading: !input.shelfPreferencesLoaded,
+    folderHeaders: layout.folderHeaders,
+    workingSubagentCounts,
   });
   return { layout, items, contentOnlyThreadKeys, olderSettledShelf };
 }

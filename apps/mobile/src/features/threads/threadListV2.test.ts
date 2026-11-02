@@ -33,6 +33,7 @@ import { threadJumpTarget } from "../keyboard/threadKeyboardShortcuts";
 import {
   buildThreadListV2Items,
   buildThreadListV2ListItems,
+  countThreadListV2WorkingSubagents,
   getThreadListV2OrderedSection,
   resolveThreadListV2SnoozeMenuSelection,
   resolveThreadListV2SnoozePresets,
@@ -531,6 +532,109 @@ describe("buildThreadListV2Items", () => {
 
     expect(items.map((item) => item.thread.id)).toEqual(["local", "remote"]);
   });
+
+  describe("project folders", () => {
+    const projectA = ProjectId.make("project-a");
+    const projectB = ProjectId.make("project-b");
+    const groups = [
+      { key: "b", title: "B", projectId: projectB },
+      { key: "a", title: "A", projectId: projectA },
+    ].map(({ key, title, projectId }) => ({
+      key,
+      title,
+      memberProjectRefs: [{ environmentId, projectId }],
+      pinned: false,
+      archived: false,
+    }));
+    const threads = [
+      makeThread({
+        id: ThreadId.make("pinned"),
+        title: "Pinned",
+        projectId: projectA,
+        pinnedAt: "2026-06-01T12:00:00.000Z",
+      }),
+      makeThread({ id: ThreadId.make("a1"), title: "A1", projectId: projectA }),
+      makeThread({ id: ThreadId.make("b1"), title: "B1", projectId: projectB }),
+      makeThread({
+        id: ThreadId.make("b2"),
+        title: "B2",
+        projectId: projectB,
+        hasPendingApprovals: true,
+      }),
+      makeThread({
+        id: ThreadId.make("settled"),
+        title: "Settled",
+        projectId: projectA,
+        settledOverride: "settled",
+        settledAt: NOW,
+      }),
+    ];
+    const build = (collapsedKeys: ReadonlySet<string>, selectedThreadKey?: string) =>
+      buildThreadListV2Items({
+        threads,
+        environmentId: null,
+        searchQuery: "",
+        now: NOW,
+        projectFolders: { groups, collapsedKeys },
+        ...(selectedThreadKey === undefined ? {} : { selectedThreadKey }),
+      });
+
+    it("lists pinned first, then a header per project in group order, then the settled shelf", () => {
+      const layout = build(new Set());
+
+      expect(layout.items.map((item) => item.thread.id)).toEqual([
+        "pinned",
+        "b1",
+        "b2",
+        "a1",
+        "settled",
+      ]);
+      expect(
+        layout.folderHeaders.map(({ index, key, title, count, collapsed, dot }) => ({
+          index,
+          key,
+          title,
+          count,
+          collapsed,
+          dot,
+        })),
+      ).toEqual([
+        { index: 1, key: "b", title: "B", count: 2, collapsed: false, dot: null },
+        { index: 3, key: "a", title: "A", count: 1, collapsed: false, dot: null },
+      ]);
+      expect(layout.settledShelfHeaderIndex).toBe(4);
+    });
+
+    it("lists only the selected thread in a collapsed folder and dots the hidden ones", () => {
+      const collapsed = build(new Set(["b"]));
+      const [bHeader] = collapsed.folderHeaders;
+      expect(collapsed.items.map((item) => item.thread.id)).toEqual(["pinned", "a1", "settled"]);
+      expect(bHeader).toMatchObject({ key: "b", count: 2, collapsed: true, dot: "attention" });
+
+      const selected = build(new Set(["b"]), `${environmentId}:b1`);
+      expect(selected.items.map((item) => item.thread.id)).toEqual([
+        "pinned",
+        "b1",
+        "a1",
+        "settled",
+      ]);
+      expect(selected.folderHeaders[0]).toMatchObject({ key: "b", count: 2, dot: "attention" });
+    });
+
+    it("keeps the active block flat under a project filter", () => {
+      const layout = buildThreadListV2Items({
+        threads,
+        environmentId: null,
+        projectRefs: [{ environmentId, projectId: projectA }],
+        searchQuery: "",
+        now: NOW,
+        projectFolders: { groups, collapsedKeys: new Set(["a"]) },
+      });
+
+      expect(layout.folderHeaders).toEqual([]);
+      expect(layout.items.map((item) => item.thread.id)).toEqual(["pinned", "a1", "settled"]);
+    });
+  });
 });
 
 describe("buildThreadListV2Items settled paging", () => {
@@ -829,6 +933,60 @@ describe("buildThreadListV2ListItems", () => {
     expect(threadJumpTarget(items, "thread.jump.1")?.id).toBe("active");
     expect(threadJumpTarget(items, "thread.jump.2")?.id).toBe("settled");
     expect(threadJumpTarget(items, "thread.jump.3")).toBeNull();
+  });
+
+  it("inserts project folder items before the thread at each header, keeping shared indices in order", () => {
+    const folderThreads = ["one", "two"].map((id) =>
+      makeThread({ id: ThreadId.make(id), title: id }),
+    );
+    const folderLayout = buildThreadListV2Items({
+      threads: [
+        ...folderThreads,
+        makeThread({
+          id: ThreadId.make("settled"),
+          title: "settled",
+          settledOverride: "settled",
+          settledAt: NOW,
+        }),
+      ],
+      environmentId: null,
+      searchQuery: "",
+      now: NOW,
+    });
+    const header = (key: string, index: number) => ({
+      index,
+      key,
+      title: key,
+      count: 1,
+      collapsed: false,
+      dot: null,
+    });
+    const items = buildThreadListV2ListItems({
+      items: folderLayout.items,
+      pendingTasks: [],
+      folderHeaders: [
+        header("first", 0),
+        header("empty", 1),
+        header("empty-too", 1),
+        header("end", 2),
+      ],
+      settledCount: folderLayout.settledCount,
+      settledShelfHeaderIndex: folderLayout.settledShelfHeaderIndex,
+    });
+
+    expect(items.map((item) => (item.type === "v2-project-folder" ? item.key : item.type))).toEqual(
+      [
+        "v2-project-folder:first",
+        "v2-thread",
+        "v2-project-folder:empty",
+        "v2-project-folder:empty-too",
+        "v2-thread",
+        "v2-project-folder:end",
+        "v2-settled-shelf",
+        "v2-thread",
+      ],
+    );
+    expect(items[0]).toMatchObject({ type: "v2-project-folder", folderKey: "first" });
   });
 });
 
@@ -1717,5 +1875,70 @@ describe("Working section beta", () => {
       "v2-settled-shelf",
       "settled",
     ]);
+  });
+});
+
+describe("countThreadListV2WorkingSubagents", () => {
+  const parent = (id: string, overrides: Partial<EnvironmentThreadShell> = {}) =>
+    makeThread({ id: ThreadId.make(id), title: id, ...overrides });
+  const running = {
+    status: "running" as const,
+    activeRunId: null,
+    providerInstanceId: ProviderInstanceId.make("codex"),
+    providerName: "Codex",
+    lastError: null,
+    updatedAt: NOW,
+  };
+  const remoteEnvironmentId = EnvironmentId.make("environment-remote");
+  const backgroundParent = parent("background-parent", {
+    pendingBackgroundTasks: [{ taskId: "task-1", kind: "subagent" }],
+  });
+  const delegatingParent = parent("delegating-parent");
+  const child = parent("child", {
+    lineage: {
+      parentThreadId: delegatingParent.id,
+      rootThreadId: delegatingParent.id,
+      relationshipToParent: "subagent",
+    },
+    runtime: running,
+  });
+  const remoteParent = makeThread({
+    environmentId: remoteEnvironmentId,
+    id: ThreadId.make("remote-parent"),
+    title: "remote",
+    pendingBackgroundTasks: [{ taskId: "task-2", kind: "subagent" }],
+  });
+
+  it("counts background subagent tasks and live delegated children, keyed by environment", () => {
+    const counts = countThreadListV2WorkingSubagents([
+      backgroundParent,
+      delegatingParent,
+      child,
+      remoteParent,
+    ]);
+
+    expect([...counts]).toEqual([
+      [`${environmentId}:background-parent`, 1],
+      [`${environmentId}:delegating-parent`, 1],
+      [`${remoteEnvironmentId}:remote-parent`, 1],
+    ]);
+  });
+
+  it("stamps an idle parent's thread item with its working subagents", () => {
+    const [item] = buildThreadListV2ListItems({
+      items: [
+        {
+          thread: backgroundParent,
+          variant: "card",
+          snoozed: false,
+          pinned: false,
+          wokeAt: null,
+          isLast: true,
+        },
+      ],
+      pendingTasks: [],
+    });
+
+    expect(item).toMatchObject({ type: "v2-thread", workingSubagents: 1, timeLabel: "" });
   });
 });
