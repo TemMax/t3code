@@ -25,12 +25,14 @@ import {
   formatWorkingDurationLabel,
   resolveThreadWorkingStartedAt,
 } from "@t3tools/client-runtime/state/models";
+import type { ProjectFolderDot } from "@t3tools/client-runtime/state/project-folders";
+import { withWorkingSubagents } from "@t3tools/client-runtime/state/subagent-activity";
 import { AuthOrchestrationOperateScope, type EnvironmentMachineKind } from "@t3tools/contracts";
 import type { SnoozePresetSetting } from "@t3tools/contracts/settings";
 import { canSnooze } from "@t3tools/client-runtime/state/thread-settled";
 import { threadChipCopyTarget } from "@t3tools/client-runtime/thread-reference";
 import type { MenuAction } from "@react-native-menu/menu";
-import { memo, useCallback, useMemo, useState, type ComponentProps } from "react";
+import { memo, useCallback, useMemo, useState, type ComponentProps, type ReactNode } from "react";
 import { Pressable, useWindowDimensions, View } from "react-native";
 import type { SwipeableMethods } from "react-native-gesture-handler/ReanimatedSwipeable";
 
@@ -170,6 +172,7 @@ function ThreadListV2Section(props: {
   readonly label: string;
   readonly pane?: "screen" | "sidebar";
   readonly tone?: "default" | "snoozed";
+  readonly accessory?: ReactNode;
   readonly disclosure?: {
     readonly expanded: boolean;
     readonly disabled?: boolean;
@@ -198,6 +201,7 @@ function ThreadListV2Section(props: {
       >
         {props.label}
       </Text>
+      {props.accessory}
       <View
         className={cn(
           "h-px flex-1",
@@ -279,6 +283,47 @@ function ThreadListV2ShelfHeader(
     />
   );
 }
+
+const FOLDER_DOT = {
+  attention: { className: "bg-warning-foreground", label: "Needs attention" },
+  failed: { className: "bg-danger-foreground", label: "Failed" },
+  unread: { className: "bg-adaptive-emerald-600-400", label: "Unread" },
+  working: { className: "bg-adaptive-sky-600-400", label: "Working" },
+} as const;
+
+export const ThreadListV2ProjectFolderHeader = memo(
+  function ThreadListV2ProjectFolderHeader(props: {
+    readonly folderKey: string;
+    readonly title: string;
+    readonly count: number;
+    readonly collapsed: boolean;
+    readonly dot: ProjectFolderDot | null;
+    readonly onToggle: (folderKey: string) => void;
+    readonly pane?: "screen" | "sidebar";
+  }) {
+    const dot = props.collapsed && props.dot ? FOLDER_DOT[props.dot] : null;
+    return (
+      <ThreadListV2Section
+        label={props.collapsed ? `${props.title} (${props.count})` : props.title}
+        pane={props.pane}
+        accessory={
+          dot ? (
+            <View
+              accessibilityLabel={dot.label}
+              className={cn("size-2 rounded-full", dot.className)}
+            />
+          ) : undefined
+        }
+        disclosure={{
+          expanded: !props.collapsed,
+          onToggle: () => props.onToggle(props.folderKey),
+          accessibilityLabel: `${props.count} ${props.count === 1 ? "thread" : "threads"} in ${props.title}`,
+          accessibilityHint: props.collapsed ? "Expands the folder." : "Collapses the folder.",
+        }}
+      />
+    );
+  },
+);
 
 export const ThreadListV2WorkingShelfHeader = memo(function ThreadListV2WorkingShelfHeader(
   props: ThreadListV2ShelfHeaderProps,
@@ -583,6 +628,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
   readonly snoozed?: boolean;
   readonly pinned?: boolean;
   readonly wokeAt: string | null;
+  readonly workingSubagents?: number;
   readonly snoozeWakeLabelText?: string;
   readonly timeLabel: string;
   readonly snoozePresetMinute: string;
@@ -686,7 +732,8 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
   const selected = props.selected === true;
   const rowAppearance = getThreadListV2RowAppearance(theme, sidebarPane, selected);
 
-  const status = resolveThreadListV2Status(thread);
+  const workingSubagents = props.workingSubagents ?? 0;
+  const status = withWorkingSubagents(resolveThreadListV2Status(thread), workingSubagents);
   const isUnread = status === "ready" && threadHasUnseenCompletion(thread);
   const workingLabel = STATUS_LABEL_BY_STATUS[status];
   const showsWoke = status === "ready" && props.wokeAt !== null;
@@ -1143,11 +1190,43 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
               >
                 {statusLabel.label}
                 {status === "working" ? (
-                  <ThreadListV2Duration startedAt={resolveThreadWorkingStartedAt(thread)} />
+                  <ThreadListV2Duration
+                    startedAt={
+                      resolveThreadWorkingStartedAt(thread) ??
+                      (workingSubagents > 0 ? (thread.latestRun?.startedAt ?? null) : null)
+                    }
+                  />
                 ) : status === "waiting" ? (
                   <ThreadListV2Duration startedAt={thread.latestRun?.completedAt ?? null} />
                 ) : null}
               </Text>
+              {status === "working" && workingSubagents > 0 ? (
+                <View
+                  accessibilityLabel={`${workingSubagents} subagents working`}
+                  className="flex-row items-center gap-0.5"
+                >
+                  <SymbolView
+                    name="person.2"
+                    size={11}
+                    tintColorClassName={
+                      selected
+                        ? selectedThreadRowColors.iconTintClassName
+                        : statusLabel.iconTintClassName
+                    }
+                    type="monochrome"
+                  />
+                  <Text
+                    className={cn(
+                      "text-xs font-t3-bold tabular-nums",
+                      selected
+                        ? selectedThreadRowColors.foregroundClassName
+                        : statusLabel.className,
+                    )}
+                  >
+                    ×{workingSubagents}
+                  </Text>
+                </View>
+              ) : null}
             </View>
           ) : (
             <Text
