@@ -1030,6 +1030,7 @@ export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps
                 hidden={props.hidden}
                 draftKey={composerDraftKey}
                 environmentId={props.environmentId}
+                mentionableModels={mentionableModels}
                 onOpenMention={(path) => {
                   Keyboard.dismiss();
                   if (props.isDraft) {
