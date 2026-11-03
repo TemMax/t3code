@@ -1,6 +1,7 @@
 import { describe, expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import { AsyncResult, Atom, AtomRegistry } from "effect/reactivity";
 import { vi } from "vite-plus/test";
 import { ProviderInstanceId } from "@t3tools/contracts";
@@ -26,7 +27,9 @@ vi.mock("../lib/runtime", async () => {
 });
 
 import { createMobilePreferencesState } from "./preferences";
+import * as MobileDatabase from "../persistence/mobile-database";
 import * as MobilePreferences from "../persistence/mobile-preferences";
+import * as MobileSecureStorage from "../persistence/mobile-secure-storage";
 
 function deferred<A>() {
   let resolve!: (value: A) => void;
@@ -193,6 +196,48 @@ describe("mobile preferences state", () => {
 
       unmount();
       registry.dispose();
+    }),
+  );
+
+  it.effect("keeps remembered model mention options and drops malformed ones", () =>
+    Effect.gen(function* () {
+      const payload = JSON.stringify({
+        modelMentionOptions: {
+          "codex:gpt-5.5": [
+            { id: "reasoningEffort", value: "xhigh" },
+            { id: "fastMode", value: true },
+          ],
+          "codex:empty": [],
+          "codex:no-value": [{ id: "fastMode" }],
+          "codex:number-value": [{ id: "fastMode", value: 1 }],
+          "codex:not-array": { id: "fastMode", value: true },
+        },
+      });
+      const stored = MobilePreferences.MobilePreferencesStore.pipe(
+        Effect.flatMap((store) => store.load),
+        Effect.provide(
+          MobilePreferences.layer.pipe(
+            Layer.provide(
+              Layer.succeed(MobileDatabase.MobileDatabase, {
+                loadPreferencesJson: Effect.succeed(Option.some({ payload, updatedAt: 1 })),
+              } as unknown as MobileDatabase.MobileDatabase["Service"]),
+            ),
+            Layer.provide(
+              Layer.succeed(MobileSecureStorage.MobileSecureStorage, {
+                getItem: () => Effect.succeed(null),
+                removeItem: () => Effect.void,
+              } as unknown as MobileSecureStorage.MobileSecureStorage["Service"]),
+            ),
+          ),
+        ),
+      );
+      expect((yield* stored).modelMentionOptions).toEqual({
+        "codex:gpt-5.5": [
+          { id: "reasoningEffort", value: "xhigh" },
+          { id: "fastMode", value: true },
+        ],
+        "codex:empty": [],
+      });
     }),
   );
 });
