@@ -27,6 +27,7 @@ import type {
   PreviewAnnotationPayload,
   ThreadContextRecord,
   EnvironmentContextRecord,
+  ModelContextRecord,
   ProviderInteractionMode,
   ResolvedKeybindingsConfig,
   RuntimeMode,
@@ -332,6 +333,7 @@ export interface ChatComposerHandle {
     reviewComments: ReviewCommentContext[];
     threadContexts: ThreadContextRecord[];
     environmentContexts: EnvironmentContextRecord[];
+    modelContexts: ModelContextRecord[];
     selectedPromptEffort: string | null;
     selectedModelSelection: ModelSelection;
     multipleModelSelections: ReadonlyArray<ModelSelection> | null;
@@ -705,6 +707,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const composerReviewComments = composerDraft.reviewComments;
   const composerThreadContexts = attachmentDraft.threadContexts;
   const composerEnvironmentContexts = composerDraft.environmentContexts;
+  const composerModelContexts = composerDraft.modelContexts;
   const {
     pendingSnapShotAnimations,
     pendingSnapShotIds,
@@ -756,6 +759,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     previewAnnotations: composerPreviewAnnotations,
     threadContexts: composerThreadContexts,
     environmentContexts: composerEnvironmentContexts,
+    modelContexts: composerModelContexts,
     images: composerImages,
     files: composerFiles,
     uploadsByImageId,
@@ -1294,6 +1298,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const setComposerDraftEnvironmentContexts = useComposerDraftStore(
     (store) => store.setEnvironmentContexts,
   );
+  const setComposerDraftModelContexts = useComposerDraftStore((store) => store.setModelContexts);
   const buildContextClipboardFragment = (contextIds: ReadonlyArray<string>): string | null => {
     const wanted = new Set(contextIds);
     const copiedFiles = new Map<string, File>();
@@ -1311,6 +1316,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         .map(terminalContextRecord),
       ...composerThreadContexts.filter((record) => wanted.has(record.contextId)),
       ...composerEnvironmentContexts.filter((record) => wanted.has(record.contextId)),
+      ...composerModelContexts.filter((record) => wanted.has(record.contextId)),
       ...composerReviewComments
         .filter((c) => wanted.has(reviewCommentContextId(c.id)))
         .map(reviewCommentContextRecord),
@@ -1662,6 +1668,23 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       restoredEnvironments.length > 0
     ) {
       setComposerDraftEnvironmentContexts(composerDraftTarget, nextEnvironments);
+    }
+
+    const liveModelIds = new Set<string>(composerModelContexts.map((record) => record.contextId));
+    const restoredModels = [...referenced].flatMap((contextId) => {
+      if (liveModelIds.has(contextId)) return [];
+      const record = retained.models.get(contextId);
+      return record ? [record] : [];
+    });
+    const nextModels = [
+      ...composerModelContexts.filter((record) => referenced.has(record.contextId)),
+      ...restoredModels,
+    ];
+    for (const record of composerModelContexts) {
+      if (!referenced.has(record.contextId)) retained.models.set(record.contextId, record);
+    }
+    if (nextModels.length !== composerModelContexts.length || restoredModels.length > 0) {
+      setComposerDraftModelContexts(composerDraftTarget, nextModels);
     }
 
     for (const comment of composerReviewComments) {
@@ -2952,6 +2975,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         reviewComments: composerReviewComments,
         threadContexts: composerThreadContexts,
         environmentContexts: composerEnvironmentContexts,
+        modelContexts: composerModelContexts,
         selectedPromptEffort,
         selectedModelSelection,
         multipleModelSelections:
@@ -3008,6 +3032,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       composerReviewComments,
       composerThreadContexts,
       composerEnvironmentContexts,
+      composerModelContexts,
       focusComposer,
       environmentId,
       primaryEnvironmentId,

@@ -100,7 +100,11 @@ import {
   environmentContextRecord,
   terminalContextReference,
 } from "./lib/composerContextRecords";
-import { threadContextRecord } from "@t3tools/shared/composerContextReferences";
+import {
+  modelContextRecord,
+  threadContextRecord,
+  toKindScopedComposerContextId,
+} from "@t3tools/shared/composerContextReferences";
 import {
   copiedComposerAttachmentFile,
   rememberCopiedComposerAttachments,
@@ -814,6 +818,87 @@ describe("composerDraftStore environment contexts", () => {
     store.addEnvironmentContexts(threadRef, [vps]);
     store.setEnvironmentContexts(threadRef, []);
     expect(draftFor(threadId, TEST_ENVIRONMENT_ID)).toBeUndefined();
+  });
+});
+
+describe("composerDraftStore model contexts", () => {
+  const threadId = ThreadId.make("thread-with-model");
+  const threadRef = scopeThreadRef(TEST_ENVIRONMENT_ID, threadId);
+  const gpt = modelContextRecord({
+    providerInstanceId: CODEX_INSTANCE,
+    model: "gpt-5",
+    label: "GPT [5]",
+    options: [{ id: "reasoningEffort", value: "high" }],
+    optionsLabel: "High",
+  });
+
+  beforeEach(resetComposerDraftStore);
+
+  it("mentions a model once, survives persistence, and sends its exact target", () => {
+    const store = useComposerDraftStore.getState();
+    store.setPrompt(threadRef, "Delegate to");
+    store.addModelContexts(threadRef, [gpt]);
+    store.addModelContexts(threadRef, [{ ...gpt, label: "renamed" }]);
+
+    const draft = draftFor(threadId, TEST_ENVIRONMENT_ID);
+    expect(draft?.modelContexts).toEqual([gpt]);
+    expect(draft?.prompt).toBe(
+      `Delegate to [${gpt.label}](t3-context://v1/model/${gpt.contextId}) `,
+    );
+
+    const merge = useComposerDraftStore.persist.getOptions().merge!;
+    const hydrated = merge(
+      JSON.parse(
+        JSON.stringify(partializeComposerDraftStoreState(useComposerDraftStore.getState())),
+      ),
+      useComposerDraftStore.getInitialState(),
+    );
+    const restored = hydrated.draftsByThreadKey[scopedThreadKey(threadRef)];
+    expect(restored?.modelContexts).toEqual([gpt]);
+    expect(restored?.prompt).toBe(draft?.prompt);
+
+    expect(
+      buildMessageContext({
+        terminalContexts: [],
+        reviewComments: [],
+        previewAnnotations: [],
+        modelContexts: restored?.modelContexts ?? [],
+      })?.records,
+    ).toEqual([gpt]);
+  });
+
+  it("changes a model chip's options without touching the prompt", () => {
+    const store = useComposerDraftStore.getState();
+    store.setPrompt(threadRef, "Delegate to");
+    store.addModelContexts(threadRef, [gpt]);
+    const before = draftFor(threadId, TEST_ENVIRONMENT_ID);
+
+    store.setModelContextOptions(
+      threadRef,
+      gpt.contextId,
+      [{ id: "fastMode", value: true }],
+      "Fast",
+    );
+    const changed = draftFor(threadId, TEST_ENVIRONMENT_ID);
+    expect(changed?.modelContexts).toEqual([
+      { ...gpt, options: [{ id: "fastMode", value: true }], optionsLabel: "Fast" },
+    ]);
+    expect(changed?.prompt).toBe(before?.prompt);
+
+    store.setModelContextOptions(threadRef, gpt.contextId, [], undefined);
+    const { optionsLabel: _dropped, ...unlabelled } = gpt;
+    expect(draftFor(threadId, TEST_ENVIRONMENT_ID)?.modelContexts).toEqual([
+      { ...unlabelled, options: [] },
+    ]);
+
+    const settled = useComposerDraftStore.getState().draftsByThreadKey;
+    store.setModelContextOptions(
+      threadRef,
+      toKindScopedComposerContextId("model", "absent"),
+      [{ id: "fastMode", value: true }],
+      "Fast",
+    );
+    expect(useComposerDraftStore.getState().draftsByThreadKey).toBe(settled);
   });
 });
 

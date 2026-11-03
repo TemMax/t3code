@@ -123,6 +123,7 @@ export function useComposerContextImport(input: {
   const addComposerDraftEnvironmentContexts = useComposerDraftStore(
     (store) => store.addEnvironmentContexts,
   );
+  const addComposerDraftModelContexts = useComposerDraftStore((store) => store.addModelContexts);
   const createAssetUrl = useAtomQueryRunner(assetEnvironment.createUrl, { reportFailure: false });
   const loadThreadTranscript = useAtomCommand(orchestrationEnvironment.threadTranscript, {
     reportFailure: false,
@@ -337,7 +338,9 @@ export function useComposerContextImport(input: {
                     ? existing.record.id
                     : undefined,
                 })
-              : existing?.kind === "thread" || existing?.kind === "environment"
+              : existing?.kind === "thread" ||
+                  existing?.kind === "environment" ||
+                  existing?.kind === "model"
                 ? existing.record
                 : existing
                   ? (uploadedContextRecordFromDraft(existing) ?? undefined)
@@ -409,6 +412,16 @@ export function useComposerContextImport(input: {
           // but not in an answer to an agent's question, which carries no machines.
           if (questionAttachmentTarget !== null) break;
           addComposerDraftEnvironmentContexts(composerDraftTarget, [record], {
+            appendReference: false,
+          });
+          rewritten.set(record.contextId, record.contextId);
+          break;
+        }
+        case "model": {
+          // A model means the same model from any thread, so a pasted one is kept,
+          // but not in an answer to an agent's question, which carries no models.
+          if (questionAttachmentTarget !== null) break;
+          addComposerDraftModelContexts(composerDraftTarget, [record], {
             appendReference: false,
           });
           rewritten.set(record.contextId, record.contextId);
