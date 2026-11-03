@@ -358,6 +358,7 @@ export function useComposerSend(input: ComposerSendInput) {
   const setComposerDraftEnvironmentContexts = useComposerDraftStore(
     (store) => store.setEnvironmentContexts,
   );
+  const setComposerDraftModelContexts = useComposerDraftStore((store) => store.setModelContexts);
   const clearComposerDraftContent = useComposerDraftStore((store) => store.clearComposerContent);
   const sendToMultipleModels = useMultipleModelSend({
     environmentId,
@@ -509,7 +510,8 @@ export function useComposerSend(input: ComposerSendInput) {
         sendCtx.previewAnnotations.length > 0 ||
         sendCtx.reviewComments.length > 0 ||
         sendCtx.threadContexts.length > 0 ||
-        sendCtx.environmentContexts.length > 0
+        sendCtx.environmentContexts.length > 0 ||
+        sendCtx.modelContexts.length > 0
       ) {
         toastManager.add(
           stackedThreadToast({
@@ -585,6 +587,7 @@ export function useComposerSend(input: ComposerSendInput) {
       reviewComments: composerReviewComments,
       threadContexts: composerThreadContexts,
       environmentContexts: composerEnvironmentContexts,
+      modelContexts: composerModelContexts,
       selectedProvider: ctxSelectedProvider,
       selectedModel: ctxSelectedModel,
       selectedProviderModels: ctxSelectedProviderModels,
@@ -639,6 +642,7 @@ export function useComposerSend(input: ComposerSendInput) {
           previewAnnotations: composerPreviewAnnotations,
           threadContexts: composerThreadContexts,
           environmentContexts: composerEnvironmentContexts,
+          modelContexts: composerModelContexts,
         },
         setThreadError,
       );
@@ -657,7 +661,8 @@ export function useComposerSend(input: ComposerSendInput) {
         composerPreviewAnnotations.length +
         composerReviewComments.length +
         composerThreadContexts.length +
-        composerEnvironmentContexts.length,
+        composerEnvironmentContexts.length +
+        composerModelContexts.length,
     });
     const feedbackCommand =
       ctxSelectedProvider === "codex" &&
@@ -667,7 +672,8 @@ export function useComposerSend(input: ComposerSendInput) {
       composerPreviewAnnotations.length === 0 &&
       composerReviewComments.length === 0 &&
       composerThreadContexts.length === 0 &&
-      composerEnvironmentContexts.length === 0
+      composerEnvironmentContexts.length === 0 &&
+      composerModelContexts.length === 0
         ? parseCodexFeedbackCommand(trimmed)
         : null;
     if (feedbackCommand && multipleModelSelections === null) {
@@ -744,6 +750,7 @@ export function useComposerSend(input: ComposerSendInput) {
       const followUpPreviewAnnotations = [...composerPreviewAnnotations];
       const followUpThreadContexts = [...composerThreadContexts];
       const followUpEnvironmentContexts = [...composerEnvironmentContexts];
+      const followUpModelContexts = [...composerModelContexts];
       promptRef.current = "";
       clearComposerDraftContent(composerDraftTarget);
       composerRef.current?.resetCursorState();
@@ -755,6 +762,7 @@ export function useComposerSend(input: ComposerSendInput) {
           previewAnnotations: composerPreviewAnnotations,
           threadContexts: composerThreadContexts,
           environmentContexts: composerEnvironmentContexts,
+          modelContexts: composerModelContexts,
         }),
         interactionMode: followUp.interactionMode,
       });
@@ -769,6 +777,7 @@ export function useComposerSend(input: ComposerSendInput) {
             previewAnnotations: followUpPreviewAnnotations,
             threadContexts: followUpThreadContexts,
             environmentContexts: followUpEnvironmentContexts,
+            modelContexts: followUpModelContexts,
           },
           writePrompt: (prompt) => setComposerDraftPrompt(composerDraftTarget, prompt),
           writeTerminalContexts: (contexts) =>
@@ -781,6 +790,8 @@ export function useComposerSend(input: ComposerSendInput) {
             setComposerDraftThreadContexts(composerDraftTarget, [...records]),
           writeEnvironmentContexts: (records) =>
             setComposerDraftEnvironmentContexts(composerDraftTarget, [...records]),
+          writeModelContexts: (records) =>
+            setComposerDraftModelContexts(composerDraftTarget, [...records]),
           resetCursor: (options) => composerRef.current?.resetCursorState(options),
         });
       } else if (
@@ -799,7 +810,8 @@ export function useComposerSend(input: ComposerSendInput) {
       composerPreviewAnnotations.length === 0 &&
       composerReviewComments.length === 0 &&
       composerThreadContexts.length === 0 &&
-      composerEnvironmentContexts.length === 0
+      composerEnvironmentContexts.length === 0 &&
+      composerModelContexts.length === 0
         ? parseStandaloneComposerSlashCommand(trimmed)
         : null;
     if (standaloneSlashCommand && multipleModelSelections === null) {
@@ -846,6 +858,7 @@ export function useComposerSend(input: ComposerSendInput) {
       reviewComments: composerReviewComments,
       threadContexts: composerThreadContexts,
       environmentContexts: composerEnvironmentContexts,
+      modelContexts: composerModelContexts,
     });
     const {
       files: composerFilesSnapshot,
@@ -855,6 +868,7 @@ export function useComposerSend(input: ComposerSendInput) {
       reviewComments: composerReviewCommentsSnapshot,
       threadContexts: composerThreadContextsSnapshot,
       environmentContexts: composerEnvironmentContextsSnapshot,
+      modelContexts: composerModelContextsSnapshot,
       messageText: messageTextForSend,
     } = sendSnapshot;
     const {
@@ -890,6 +904,7 @@ export function useComposerSend(input: ComposerSendInput) {
         previewAnnotations: composerPreviewAnnotationsSnapshot,
         threadContexts: composerThreadContextsSnapshot,
         environmentContexts: composerEnvironmentContextsSnapshot,
+        modelContexts: composerModelContextsSnapshot,
         attachments: composerAttachmentsSnapshot.map((attachment, index) => ({
           attachment,
           attachmentId: attachmentIds[index] ?? attachment.id,
