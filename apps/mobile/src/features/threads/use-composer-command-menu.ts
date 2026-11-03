@@ -10,6 +10,7 @@ import type {
 import {
   type ComposerEnvironmentCandidate,
   matchComposerEnvironmentItems,
+  matchComposerModelItems,
   matchComposerThreadItems,
 } from "@t3tools/client-runtime/composerThreadItems";
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/models";
@@ -17,12 +18,18 @@ import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/model
 const EMPTY_THREAD_SHELLS: ReadonlyArray<EnvironmentThreadShell> = [];
 const EMPTY_ENVIRONMENTS: ReadonlyArray<ComposerEnvironmentCandidate> = [];
 const NO_LINKED_ENVIRONMENTS: ReadonlyMap<EnvironmentId, string> = new Map();
+const EMPTY_MODELS: ReadonlyArray<MentionableModel> = [];
 import { COMPOSER_CONTEXT_MAX_RECORDS } from "@t3tools/contracts";
 import {
   formatComposerContextReference,
   threadContextRecord,
 } from "@t3tools/shared/composerContextReferences";
-import { environmentComposerContext, pullRequestComposerContext } from "../../lib/composerContext";
+import {
+  environmentComposerContext,
+  modelComposerContext,
+  pullRequestComposerContext,
+  type MentionableModel,
+} from "../../lib/composerContext";
 import { uuidv4 } from "../../lib/uuid";
 import {
   getComposerDraftSnapshot,
@@ -50,11 +57,12 @@ import {
   resolveProviderSkillsForCwd,
   resolveProviderSlashCommandsForCwd,
 } from "@t3tools/client-runtime/providerSkills";
-import { useAtomRefresh } from "@effect/atom-react";
-import { Atom } from "effect/reactivity";
+import { useAtomRefresh, useAtomValue } from "@effect/atom-react";
+import { AsyncResult, Atom } from "effect/reactivity";
 import { useEffect, useState } from "react";
 
 import type { ComposerEditorSelection } from "../../components/ComposerEditor";
+import { mobilePreferencesAtom } from "../../state/preferences";
 import { serverEnvironment } from "../../state/server";
 import {
   useComposerPathSearch,
@@ -212,6 +220,7 @@ export function useComposerCommandMenu({
   threadShells = EMPTY_THREAD_SHELLS,
   environments = EMPTY_ENVIRONMENTS,
   linkedEnvironments = NO_LINKED_ENVIRONMENTS,
+  mentionableModels = EMPTY_MODELS,
   currentThreadId = null,
   projectCwd,
   pullRequestProjectId = null,
@@ -233,6 +242,7 @@ export function useComposerCommandMenu({
   readonly environments?: ReadonlyArray<ComposerEnvironmentCandidate>;
   /** The machines `environmentId` links to, by name, whose threads the picker also offers. */
   readonly linkedEnvironments?: ReadonlyMap<EnvironmentId, string>;
+  readonly mentionableModels?: ReadonlyArray<MentionableModel>;
   readonly currentThreadId?: ThreadId | null;
   readonly projectCwd: string | null;
   readonly pullRequestProjectId?: ProjectId | null;
@@ -247,6 +257,10 @@ export function useComposerCommandMenu({
   readonly onUpdateInteractionMode?: (mode: ProviderInteractionMode) => void;
   readonly onUsageLimits?: () => void;
 }) {
+  const preferencesResult = useAtomValue(mobilePreferencesAtom);
+  const modelMentionOptions = AsyncResult.isSuccess(preferencesResult)
+    ? preferencesResult.value.modelMentionOptions
+    : undefined;
   const [localSelection, setLocalSelection] = useState(() => ({
     ownerKey,
     ...composerSelectionAtEnd(draftMessage),
@@ -471,9 +485,14 @@ export function useComposerCommandMenu({
       const environmentItems = environmentId
         ? matchComposerEnvironmentItems({ environments, environmentId, query: trigger.query })
         : [];
+      const modelItems = matchComposerModelItems({
+        models: mentionableModels,
+        query: trigger.query,
+      });
       return [
         ...threadItems,
         ...environmentItems,
+        ...modelItems,
         ...pathSearch.entries.map((entry) => {
           const parts = entry.path.split("/");
           return {
@@ -516,6 +535,43 @@ export function useComposerCommandMenu({
           records: [...(draft.context?.records ?? []), record],
         });
       }
+      setSelection({ start: result.cursor, end: result.cursor });
+      return;
+    }
+    if (item.type === "model") {
+      if (!ownerKey || trigger.kind !== "path") return;
+      const model = mentionableModels.find(
+        (candidate) =>
+          candidate.providerInstanceId === item.providerInstanceId &&
+          candidate.model === item.model,
+      );
+      if (!model) return;
+      const record = modelComposerContext({
+        model,
+        selections: modelMentionOptions?.[`${model.providerInstanceId}:${model.model}`] ?? [],
+      });
+      const existing = getComposerDraftSnapshot(ownerKey).context?.records ?? [];
+      const alreadyAttached = existing.some((entry) => entry.contextId === record.contextId);
+      if (!alreadyAttached && existing.length >= COMPOSER_CONTEXT_MAX_RECORDS) {
+        Dialog.alert("Too many context items", "Remove some context from the draft and try again.");
+        return;
+      }
+      const result = replaceTextRange(
+        draftMessage,
+        trigger.rangeStart,
+        trigger.rangeEnd,
+        `${formatComposerContextReference(record)} `,
+      );
+      onChangeDraftMessage(result.text);
+      const draft = getComposerDraftSnapshot(ownerKey);
+      // A model has one record, so mentioning it again replaces the options it carried.
+      setComposerDraftContext(ownerKey, {
+        version: 1,
+        records: [
+          ...(draft.context?.records ?? []).filter((entry) => entry.contextId !== record.contextId),
+          record,
+        ],
+      });
       setSelection({ start: result.cursor, end: result.cursor });
       return;
     }

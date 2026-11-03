@@ -1,18 +1,23 @@
 import { isProviderSkillUserInvocable } from "@t3tools/client-runtime/providerSkills";
+import type { ComposerModelCandidate } from "@t3tools/client-runtime/composerThreadItems";
 import { sourceControlClients } from "@t3tools/client-runtime/source-control-clients";
 import { filePreviewKind } from "@t3tools/shared/filePreview";
+import { modelMentionSettings } from "@t3tools/shared/model";
 import { videoMimeType } from "@t3tools/shared/video";
 import {
   COMPOSER_CONTEXT_MAX_RECORDS,
   COMPOSER_CONTEXT_REVIEW_TEXT_MAX_CHARS,
   ComposerContextId,
   type ComposerContextRecord,
+  type ModelCapabilities,
+  type ModelContextRecord,
   OrchestrationMessageContext,
   type PullRequestContextMetadata,
   type ReviewCommentContextRecord,
   type ServerProviderSkill,
   type EnvironmentContextRecord,
   type EnvironmentId,
+  type ProviderOptionSelection,
 } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
 import {
@@ -20,6 +25,7 @@ import {
   collectComposerContextReferences,
   formatComposerContextReference,
   isImageReferencesOnly,
+  modelContextRecord,
   replaceComposerContextReferences,
   sanitizeComposerContextLabel,
 } from "@t3tools/shared/composerContextReferences";
@@ -111,6 +117,23 @@ export function environmentComposerContext(
     label: sanitizeComposerContextLabel(label, "environment"),
     environmentId,
   };
+}
+
+export type MentionableModel = ComposerModelCandidate & {
+  readonly capabilities: ModelCapabilities | null;
+};
+
+export function modelComposerContext(input: {
+  model: MentionableModel;
+  selections: ReadonlyArray<ProviderOptionSelection>;
+}): ModelContextRecord {
+  const { model } = input;
+  return modelContextRecord({
+    providerInstanceId: model.providerInstanceId,
+    model: model.model,
+    label: model.name,
+    ...modelMentionSettings(model.capabilities, input.selections),
+  });
 }
 
 export function pullRequestComposerContext(
