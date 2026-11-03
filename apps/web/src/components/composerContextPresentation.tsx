@@ -11,7 +11,7 @@ import { formatAttachmentSize } from "@t3tools/client-runtime/state/attachments"
 import { videoMimeType } from "@t3tools/shared/video";
 import { MessageCircleIcon, MousePointerClickIcon } from "lucide-react";
 import { createContext, type MouseEvent, type ReactElement, type ReactNode, use } from "react";
-import type { EnvironmentId } from "@t3tools/contracts";
+import type { ComposerContextId, EnvironmentId, ProviderOptionSelection } from "@t3tools/contracts";
 
 import type { ComposerFileAttachment, ComposerImageAttachment } from "~/composerDraftStore";
 import { composerFileNeedsReattach } from "~/composerDraftStore";
@@ -40,6 +40,7 @@ import { ComposerPendingTerminalContextChip } from "./chat/ComposerPendingTermin
 import { EnvironmentContextChip } from "./EnvironmentContextChip";
 import { ModelContextChip } from "./ModelContextChip";
 import { ThreadContextChip } from "./ThreadContextChip";
+import type { ProviderInstanceEntry } from "~/providerInstances";
 import { useLinkedEnvironments } from "~/state/peerLinks";
 import {
   createContextPresentationRegistry,
@@ -89,6 +90,15 @@ export const ComposerContextActionsContext = createContext<ComposerContextAction
   openMention: () => {},
   openPullRequest: () => {},
 });
+
+/** Set around the prompt editor so draft model chips can edit their options. */
+export const ComposerModelMentionContext = createContext<{
+  entries: ReadonlyArray<ProviderInstanceEntry>;
+  onChangeOptions: (
+    contextId: ComposerContextId,
+    options: ReadonlyArray<ProviderOptionSelection>,
+  ) => void;
+} | null>(null);
 
 export type ComposerDraftContextRecords = ReadonlyMap<string, ComposerDraftContextRecord>;
 
@@ -366,6 +376,26 @@ function ComposerThreadContextChip(props: { record: ThreadContextRecord }) {
   );
 }
 
+function ComposerModelContextChip(props: { record: ModelContextRecord }) {
+  const mention = use(ComposerModelMentionContext);
+  const entry = mention?.entries.find(
+    (candidate) => candidate.instanceId === props.record.providerInstanceId,
+  );
+  return (
+    <ModelContextChip
+      record={props.record}
+      editor={
+        mention && entry
+          ? {
+              entry,
+              onChange: (options) => mention.onChangeOptions(props.record.contextId, options),
+            }
+          : undefined
+      }
+    />
+  );
+}
+
 function UnresolvedContextChip(props: { label: string }) {
   return (
     <UnresolvedChip
@@ -503,7 +533,7 @@ const composerContextPresentationRegistry = createContextPresentationRegistry<
       canRender: (entry) => entry.kind === "model",
       render: (entry, context) =>
         entry.kind === "model" ? (
-          <ModelContextChip record={entry.record} />
+          <ComposerModelContextChip record={entry.record} />
         ) : (
           <UnresolvedContextChip label={context.label} />
         ),

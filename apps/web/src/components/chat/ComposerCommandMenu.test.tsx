@@ -1,6 +1,8 @@
+import { ProviderInstanceId } from "@t3tools/contracts";
+import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vite-plus/test";
 
-import { composerSuggestionOptionId } from "./ComposerCommandMenu";
+import { ComposerCommandMenu, composerSuggestionOptionId } from "./ComposerCommandMenu";
 
 describe("composerSuggestionOptionId", () => {
   it("keeps whitespace, escape-like paths, and malformed UTF-16 distinct", () => {
@@ -23,5 +25,34 @@ describe("composerSuggestionOptionId", () => {
     expect(composerSuggestionOptionId("other-composer", paths[0]!)).not.toBe(
       composerSuggestionOptionId("suggestions", paths[0]!),
     );
+  });
+});
+
+describe("ComposerCommandMenu", () => {
+  it("renders a model item with its label and description", () => {
+    const markup = renderToStaticMarkup(
+      <ComposerCommandMenu
+        listId="suggestions"
+        items={[
+          {
+            id: "model:codex:gpt-5",
+            type: "model",
+            providerInstanceId: ProviderInstanceId.make("codex"),
+            model: "gpt-5",
+            driverKind: "codex",
+            label: "GPT-5",
+            description: "Codex",
+          },
+        ]}
+        resolvedTheme="light"
+        isLoading={false}
+        triggerKind="path"
+        activeItemId={null}
+        onHighlightedItemChange={() => {}}
+        onSelect={() => {}}
+      />,
+    );
+    expect(markup).toContain("GPT-5");
+    expect(markup).toContain("Codex");
   });
 });

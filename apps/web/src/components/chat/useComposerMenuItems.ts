@@ -1,6 +1,8 @@
 import {
   matchComposerEnvironmentItems,
+  matchComposerModelItems,
   matchComposerThreadItems,
+  type ComposerModelCandidate,
 } from "@t3tools/client-runtime/composerThreadItems";
 import { useAtomValue } from "@effect/atom-react";
 import { useState } from "react";
@@ -72,6 +74,7 @@ export function useComposerMenuItems({
   selectedProviderSlashCommands,
   showSkillsInSlashMenu,
   questionAttachmentTarget,
+  modelCandidates,
 }: {
   readonly composerTrigger: ComposerTrigger | null;
   readonly environmentId: EnvironmentId;
@@ -90,6 +93,7 @@ export function useComposerMenuItems({
   readonly selectedProviderSlashCommands: ServerProvider["slashCommands"];
   readonly showSkillsInSlashMenu: boolean;
   readonly questionAttachmentTarget: DraftId | null;
+  readonly modelCandidates: ReadonlyArray<ComposerModelCandidate>;
 }) {
   // Thread mentions rank by recency as of when the composer mounted.
   const [now] = useState(() => Date.now());
@@ -201,6 +205,10 @@ export function useComposerMenuItems({
               environmentId,
               query: composerTrigger.query,
             })
+          : []),
+        // An answer to an agent's question carries no models either.
+        ...(questionAttachmentTarget === null
+          ? matchComposerModelItems({ models: modelCandidates, query: composerTrigger.query })
           : []),
         ...workspaceEntries.entries.map((entry) => ({
           id: `path:${entry.kind}:${entry.path}`,
