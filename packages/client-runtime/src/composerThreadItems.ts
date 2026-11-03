@@ -2,11 +2,13 @@ import {
   isListedThreadLineage,
   type EnvironmentId,
   type EnvironmentMachineKind,
+  type ProviderInstanceId,
   type ScopedThreadRef,
   type ThreadId,
 } from "@t3tools/contracts";
 import { foldSearchQuery, rankSearchItems, scoreThreadSearch } from "@t3tools/shared/paletteSearch";
 
+import { rankModelPickerSearch } from "./modelPickerSearch.ts";
 import type { EnvironmentThreadShell } from "./state/models.ts";
 import { threadSearchSubject, type ThreadSearchShell } from "./state/threadSearch.ts";
 
@@ -111,5 +113,54 @@ export function matchComposerEnvironmentItems(input: {
       machine: environment.machine,
       label: environment.label,
       description: "Machine",
+    }));
+}
+
+const COMPOSER_MODEL_RESULT_LIMIT = 6;
+
+export interface ComposerModelCandidate {
+  readonly providerInstanceId: ProviderInstanceId;
+  readonly model: string;
+  readonly name: string;
+  readonly shortName?: string;
+  readonly subProvider?: string;
+  readonly driverKind: string;
+  readonly providerDisplayName: string;
+  readonly isFavorite: boolean;
+}
+
+export interface ComposerModelItem {
+  readonly id: string;
+  readonly type: "model";
+  readonly providerInstanceId: ProviderInstanceId;
+  readonly model: string;
+  readonly driverKind: string;
+  readonly label: string;
+  readonly description: string;
+}
+
+/** Models the `@` picker offers. Like threads and machines they need a query: bare `@` stays a file picker. */
+export function matchComposerModelItems(input: {
+  models: ReadonlyArray<ComposerModelCandidate>;
+  query: string;
+}): ComposerModelItem[] {
+  if (input.query.trim().length === 0) return [];
+  return rankModelPickerSearch(input.models, input.query, (model) => ({
+    name: model.name,
+    ...(model.shortName ? { shortName: model.shortName } : {}),
+    ...(model.subProvider ? { subProvider: model.subProvider } : {}),
+    driverKind: model.driverKind,
+    providerDisplayName: model.providerDisplayName,
+    isFavorite: model.isFavorite,
+  }))
+    .slice(0, COMPOSER_MODEL_RESULT_LIMIT)
+    .map((model) => ({
+      id: `model:${model.providerInstanceId}:${model.model}`,
+      type: "model",
+      providerInstanceId: model.providerInstanceId,
+      model: model.model,
+      driverKind: model.driverKind,
+      label: model.name,
+      description: model.providerDisplayName,
     }));
 }
