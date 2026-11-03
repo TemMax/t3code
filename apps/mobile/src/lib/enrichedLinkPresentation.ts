@@ -1,6 +1,6 @@
 import type { ComposerContextRecord, EnvironmentId, ThreadId } from "@t3tools/contracts";
 import {
-  composerChipSizeSuffix,
+  composerChipDetail,
   contextChipIcon,
   contextChipPresentation,
   contextRecordFileName,
@@ -25,11 +25,11 @@ export function enrichedContextLinkPresentation(
     records && !record
       ? UNAVAILABLE_CONTEXT_CHIP_PRESENTATION
       : contextChipPresentation(reference.kind, record);
-  const size = composerChipSizeSuffix(record);
+  const detail = composerChipDetail(record);
   return {
     ...(presentation.accent ? { accent: presentation.accent } : {}),
     icon: contextChipIcon(presentation, contextRecordFileName(record)),
-    ...(record && size ? { label: `${record.label} · ${size}` } : {}),
+    ...(record && detail ? { label: `${record.label} · ${detail}` } : {}),
   };
 }
 

@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { contextChipAccent, contextChipPresentation } from "./composerChipPresentation";
+import {
+  composerChipDetail,
+  contextChipAccent,
+  contextChipPresentation,
+} from "./composerChipPresentation";
 import {
   flattenThemeColor,
   getMobileThemeVariables,
@@ -117,5 +121,13 @@ describe("contextChipPresentation", () => {
 
   it("draws a mentioned model with its own glyph", () => {
     expect(contextChipPresentation("model")).toEqual({ accent: "#998700", icon: "bot" });
+  });
+});
+
+describe("composerChipDetail", () => {
+  it("shows a file's size and a mentioned model's settings next to the label", () => {
+    expect(composerChipDetail({ kind: "file", sizeBytes: 2048 })).toBe("2 KB");
+    expect(composerChipDetail({ kind: "model", optionsLabel: "Low · Fast" })).toBe("Low · Fast");
+    expect(composerChipDetail({ kind: "model" })).toBe("");
   });
 });

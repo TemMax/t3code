@@ -89,10 +89,12 @@ export const UNAVAILABLE_CONTEXT_CHIP_PRESENTATION: ContextChipPresentation = {
   icon: "circle-dashed",
 };
 
-export function composerChipSizeSuffix(record?: {
+export function composerChipDetail(record?: {
   readonly kind?: string;
   readonly sizeBytes?: number;
+  readonly optionsLabel?: string;
 }): string {
+  if (record?.kind === "model") return record.optionsLabel ?? "";
   if (record?.kind !== "file" && record?.kind !== "image") return "";
   return typeof record.sizeBytes === "number" ? formatAttachmentSize(record.sizeBytes) : "";
 }
