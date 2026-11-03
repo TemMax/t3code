@@ -11,6 +11,7 @@ import {
   PullRequestListFilters,
   PullRequestListState,
   type ProviderInstanceId,
+  type ProviderOptionSelection,
   type PullRequestMergeMethod,
   type SidebarProjectGroupingMode,
 } from "@t3tools/contracts";
@@ -122,6 +123,8 @@ export interface Preferences {
     readonly provider: ProviderInstanceId;
     readonly model: string;
   }>;
+  /** The options each model last carried when mentioned, keyed `${providerInstanceId}:${model}`. */
+  readonly modelMentionOptions?: Readonly<Record<string, ReadonlyArray<ProviderOptionSelection>>>;
   readonly threadListSettledShelfExpanded?: boolean;
   readonly threadListSnoozedShelfExpanded?: boolean;
   readonly threadListWorkingShelfExpanded?: boolean;
@@ -199,6 +202,7 @@ function sanitizePreferences(parsed: Preferences): Preferences {
     useLastProjectForNewThreads?: boolean;
     lastThreadProject?: typeof ThreadProject.Type;
     modelFavorites?: Preferences["modelFavorites"];
+    modelMentionOptions?: Preferences["modelMentionOptions"];
     threadListSettledShelfExpanded?: boolean;
     threadListSnoozedShelfExpanded?: boolean;
     threadListWorkingShelfExpanded?: boolean;
@@ -339,6 +343,25 @@ function sanitizePreferences(parsed: Preferences): Preferences {
         favorite.provider.length > 0 &&
         typeof favorite.model === "string" &&
         favorite.model.trim().length > 0,
+    );
+  }
+  if (
+    typeof parsed.modelMentionOptions === "object" &&
+    parsed.modelMentionOptions !== null &&
+    !Array.isArray(parsed.modelMentionOptions)
+  ) {
+    preferences.modelMentionOptions = Object.fromEntries(
+      Object.entries(parsed.modelMentionOptions).filter(
+        ([, selections]) =>
+          Array.isArray(selections) &&
+          selections.every(
+            (selection) =>
+              typeof selection === "object" &&
+              selection !== null &&
+              typeof selection.id === "string" &&
+              (typeof selection.value === "string" || typeof selection.value === "boolean"),
+          ),
+      ),
     );
   }
   if (typeof parsed.threadListSettledShelfExpanded === "boolean") {
