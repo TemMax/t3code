@@ -25,6 +25,7 @@ import {
 } from "./composerContextReferences.ts";
 
 const ctx = (value: string) => value as ComposerContextId;
+const isComposerContextId = Schema.is(ComposerContextId);
 
 describe("href codec", () => {
   it("round-trips kind and id", () => {
@@ -448,7 +449,7 @@ describe("modelContextRecord", () => {
     const fast = modelContextRecord({ ...input, options: [{ id: "fastMode", value: true }] });
     const slow = modelContextRecord({ ...input, options: [] });
     expect(fast.contextId).toBe(slow.contextId);
-    expect(Schema.is(ComposerContextId)(fast.contextId)).toBe(true);
+    expect(isComposerContextId(fast.contextId)).toBe(true);
 
     const label = modelContextRecord({ ...input, label: "GPT [beta]\nnext", options: [] }).label;
     expect(label).not.toMatch(/[[\]\n]/);
