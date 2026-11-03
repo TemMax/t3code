@@ -2,8 +2,10 @@ import {
   ComposerContextId,
   type ComposerContextRecord,
   EnvironmentId,
+  ProviderInstanceId,
   ThreadId,
 } from "@t3tools/contracts";
+import * as Schema from "effect/Schema";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
@@ -11,6 +13,7 @@ import {
   collectComposerContextReferences,
   formatComposerContextHref,
   isImageReferencesOnly,
+  modelContextRecord,
   parseComposerContextHref,
   projectComposerContextForProvider,
   restoreAttachmentOnlyBootstrapPrompt,
@@ -22,6 +25,7 @@ import {
 } from "./composerContextReferences.ts";
 
 const ctx = (value: string) => value as ComposerContextId;
+const isComposerContextId = Schema.is(ComposerContextId);
 
 describe("href codec", () => {
   it("round-trips kind and id", () => {
@@ -312,6 +316,45 @@ describe("provider projection", () => {
     expect(projected).not.toMatch(/https?:/);
   });
 
+  it("projects a mentioned model as its exact target for delegate_task", () => {
+    const codex = ProviderInstanceId.make("codex");
+    const record = modelContextRecord({
+      providerInstanceId: codex,
+      model: "gpt-6.1-sol",
+      label: "GPT-6.1 Sol",
+      options: [
+        { id: "reasoningEffort", value: "xhigh" },
+        { id: "fastMode", value: true },
+      ],
+      optionsLabel: "Extra High · Fast",
+    });
+    const projected = projectComposerContextForProvider({
+      text: `Review it with [GPT-6.1 Sol](t3-context://v1/model/${record.contextId})`,
+      records: [record],
+    });
+    expect(projected).toContain("[Model: GPT-6.1 Sol; ref=");
+    expect(projected).toContain("settings: Extra High · Fast");
+    expect(projected).toContain("providerInstanceId: codex");
+    expect(projected).toContain("model: gpt-6.1-sol");
+    expect(projected).toContain(
+      'options: [{"id":"reasoningEffort","value":"xhigh"},{"id":"fastMode","value":true}]',
+    );
+    expect(projected).toContain("delegate_task");
+
+    const bare = modelContextRecord({
+      providerInstanceId: codex,
+      model: "gpt-6.1-sol",
+      label: "GPT-6.1 Sol",
+      options: [],
+    });
+    const bareProjected = projectComposerContextForProvider({
+      text: `Review it with [GPT-6.1 Sol](t3-context://v1/model/${bare.contextId})`,
+      records: [bare],
+    });
+    expect(bareProjected).toContain("options: []");
+    expect(bareProjected).not.toContain("settings:");
+  });
+
   it("marks duplicate identities unavailable instead of choosing one payload", () => {
     const projected = projectComposerContextForProvider({
       text: "[log](t3-context://v1/terminal/ctx_t)",
@@ -393,6 +436,23 @@ describe("threadContextsOutsideEnvironment", () => {
         linkedEnvironments: new Map([[linked.environmentId, "VPS"]]),
       }),
     ).toEqual([unlinked]);
+  });
+});
+
+describe("modelContextRecord", () => {
+  it("mints one record per model, whatever its options", () => {
+    const input = {
+      providerInstanceId: ProviderInstanceId.make("codex"),
+      model: "gpt-6.1-sol",
+      label: "GPT-6.1 Sol",
+    };
+    const fast = modelContextRecord({ ...input, options: [{ id: "fastMode", value: true }] });
+    const slow = modelContextRecord({ ...input, options: [] });
+    expect(fast.contextId).toBe(slow.contextId);
+    expect(isComposerContextId(fast.contextId)).toBe(true);
+
+    const label = modelContextRecord({ ...input, label: "GPT [beta]\nnext", options: [] }).label;
+    expect(label).not.toMatch(/[[\]\n]/);
   });
 });
 

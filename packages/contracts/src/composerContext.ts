@@ -11,6 +11,8 @@ import {
   TrimmedNonEmptyString,
 } from "./baseSchemas.ts";
 import { GUEST_MESSAGE_MAX_LENGTH, GUEST_NAME_MAX_LENGTH } from "./guestShare.ts";
+import { ProviderOptionSelection } from "./model.ts";
+import { ProviderInstanceId } from "./providerInstance.ts";
 
 /** Image and file records reference `ChatAttachment` ids, never bytes. */
 
@@ -25,6 +27,7 @@ export const COMPOSER_CONTEXT_KINDS = [
   "skill",
   "thread",
   "environment",
+  "model",
 ] as const;
 export type KnownComposerContextKind = (typeof COMPOSER_CONTEXT_KINDS)[number];
 
@@ -224,6 +227,17 @@ export const EnvironmentContextRecord = Schema.Struct({
 });
 export type EnvironmentContextRecord = typeof EnvironmentContextRecord.Type;
 
+/** A model the user means, from a provider on their machine. The agent passes it to delegate_task. */
+export const ModelContextRecord = Schema.Struct({
+  ...recordBase,
+  kind: Schema.Literal("model"),
+  providerInstanceId: ProviderInstanceId,
+  model: TrimmedNonEmptyString.check(Schema.isMaxLength(255)),
+  options: Schema.Array(ProviderOptionSelection).check(Schema.isMaxLength(32)),
+  optionsLabel: Schema.optionalKey(ContextLabel),
+});
+export type ModelContextRecord = typeof ModelContextRecord.Type;
+
 const isJson = Schema.is(Schema.Json);
 
 /** Excludes known discriminators so malformed known records fail their own schema. */
@@ -255,6 +269,7 @@ export const KnownComposerContextRecord = Schema.Union([
   SkillContextRecord,
   ThreadContextRecord,
   EnvironmentContextRecord,
+  ModelContextRecord,
 ]);
 export type KnownComposerContextRecord = typeof KnownComposerContextRecord.Type;
 

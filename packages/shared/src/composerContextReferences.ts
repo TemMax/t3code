@@ -6,6 +6,9 @@ import {
   type ElementContextDetails,
   type EnvironmentId,
   type KnownComposerContextRecord,
+  type ModelContextRecord,
+  type ProviderInstanceId,
+  type ProviderOptionSelection,
   type ScopedThreadRef,
   type ThreadContextRecord,
 } from "@t3tools/contracts";
@@ -86,6 +89,28 @@ export function threadContextRecord(ref: ScopedThreadRef, title: string): Thread
     environmentId: ref.environmentId,
     threadId: ref.threadId,
     title: label,
+  };
+}
+
+/** One record per model, so mentioning it again reuses its chip with the newer options. */
+export function modelContextRecord(input: {
+  providerInstanceId: ProviderInstanceId;
+  model: string;
+  label: string;
+  options: ReadonlyArray<ProviderOptionSelection>;
+  optionsLabel?: string | undefined;
+}): ModelContextRecord {
+  // An empty kind makes the sanitizer's fallback empty, so a blank label stays absent.
+  const optionsLabel = sanitizeComposerContextLabel(input.optionsLabel ?? "", "");
+  return {
+    version: 1,
+    kind: "model",
+    contextId: toKindScopedComposerContextId("model", `${input.providerInstanceId}:${input.model}`),
+    label: sanitizeComposerContextLabel(input.label, "model"),
+    providerInstanceId: input.providerInstanceId,
+    model: input.model,
+    options: input.options,
+    ...(optionsLabel ? { optionsLabel } : {}),
   };
 }
 
@@ -308,6 +333,15 @@ function formatComposerContextProviderPayload(record: KnownComposerContextRecord
         `label: ${record.label}`,
         `environmentId: ${record.environmentId}`,
         "The user means this machine. Not linked here yet: call t3_environment_link with this environmentId. Linked: pass it as environmentId, or target.environmentId for delegate_task.",
+      ].join("\n");
+    case "model":
+      return [
+        `label: ${record.label}`,
+        ...(record.optionsLabel ? [`settings: ${record.optionsLabel}`] : []),
+        `providerInstanceId: ${record.providerInstanceId}`,
+        `model: ${record.model}`,
+        `options: ${JSON.stringify(record.options)}`,
+        "The user means this model. To involve it, call delegate_task with target.providerInstanceId, target.model and target.options set to these values. Mentioning it does not change this thread's model.",
       ].join("\n");
   }
 }
