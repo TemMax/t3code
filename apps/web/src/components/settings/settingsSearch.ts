@@ -683,6 +683,12 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["generated thread titles prompt custom style naming rename regenerate"],
   },
   {
+    id: "thread-activity-summary",
+    title: "Live activity summary",
+    to: "/settings/threads",
+    searchTerms: ["activity", "status", "working", "phase", "summary"],
+  },
+  {
     id: "app-version",
     title: "Version",
     to: "/settings/about",

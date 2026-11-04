@@ -12,6 +12,7 @@ import {
   getFallbackThreadIdAfterDelete,
   hasUnseenCompletion,
   resolveSidebarRowThreadId,
+  resolveSidebarRowAccessibility,
   orderItemsByPreferredIds,
   pinOrderKeyBetween,
   resolveProjectStatusIndicator,
@@ -1706,6 +1707,33 @@ describe("resolveSidebarFolderDot", () => {
       ]),
     ).toBe("working");
     expect(resolveSidebarFolderDot([{ ...working, blockedOnThreadWait: true }])).toBe("working");
+  });
+});
+
+describe("resolveSidebarRowAccessibility", () => {
+  it.each([
+    {
+      name: "status label",
+      input: { statusLabel: "Working", activity: null },
+      label: "Fix bug, Working, t3code",
+    },
+    {
+      name: "activity replaces the status label",
+      input: {
+        statusLabel: "Working",
+        activity: { phase: "implementing" as const, label: "sidebar status chip" },
+      },
+      label: "Fix bug, Implementing: sidebar status chip, t3code",
+    },
+  ])("labels a row with $name", ({ input, label }) => {
+    expect(
+      resolveSidebarRowAccessibility({
+        title: "Fix bug",
+        projectDisplayName: "t3code",
+        isActive: false,
+        ...input,
+      }).label,
+    ).toBe(label);
   });
 });
 

@@ -1,6 +1,7 @@
 import type { EnvironmentServerConfig } from "@t3tools/client-runtime/connection";
 import { scopeThreadRef, scopedThreadKey } from "@t3tools/client-runtime/environment";
 import { resolveThreadWorkingStartedAt } from "@t3tools/client-runtime/state/models";
+import { THREAD_ACTIVITY_PHASE_LABEL } from "@t3tools/client-runtime/state/thread-execution";
 import { isShownUnderParent } from "@t3tools/client-runtime/state/threads";
 import { backgroundWorkHoldsCompletion } from "@t3tools/shared/orchestrationV2PendingBackgroundWork";
 import {
@@ -72,11 +73,15 @@ const THREAD_JUMP_HINT_SHOW_DELAY_MS = 200;
 export function resolveSidebarRowAccessibility(input: {
   readonly title: string;
   readonly statusLabel: string | null;
+  readonly activity?: SidebarThreadSummary["activity"];
   readonly projectDisplayName: string | null;
   readonly isActive: boolean;
 }): { readonly label: string; readonly current: "page" | undefined } {
+  const statusLabel = input.activity
+    ? `${THREAD_ACTIVITY_PHASE_LABEL[input.activity.phase]}: ${input.activity.label}`
+    : input.statusLabel;
   return {
-    label: [input.title, input.statusLabel, input.projectDisplayName].filter(Boolean).join(", "),
+    label: [input.title, statusLabel, input.projectDisplayName].filter(Boolean).join(", "),
     current: input.isActive ? "page" : undefined,
   };
 }
