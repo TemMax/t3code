@@ -80,6 +80,11 @@ import { useSelectedThreadWorktree } from "../../state/use-selected-thread-workt
 import { useThreadComposerState } from "../../state/use-thread-composer-state";
 import { resolveMergeBackTargetThreadId } from "@t3tools/client-runtime/state/thread-relationships";
 import { resolveLatestMergeBackRun } from "@t3tools/client-runtime/state/thread-workflows";
+import {
+  formatThreadActivity,
+  resolveThreadActivityForDisplay,
+} from "@t3tools/client-runtime/state/thread-execution";
+import { resolveThreadListV2Status } from "./threadListV2";
 import { threadEnvironment, useThreadFamily } from "../../state/threads";
 import { EMPTY_ENVIRONMENT_THREAD_STATE } from "@t3tools/client-runtime/state/threads";
 import { useProjects } from "../../state/entities";
@@ -518,7 +523,14 @@ function ThreadRouteContent(
       : scopeThreadRef(delegatedFrom.environmentId, delegatedFrom.threadId);
   // The title it had at delegation, until this client sees the parent itself.
   const delegatedFromThread = useThreadShell(delegatedFromRef);
-  const headerSubtitle = [
+  const selectedThreadActivity =
+    selectedThread === null
+      ? null
+      : resolveThreadActivityForDisplay({
+          activity: selectedThread.activity,
+          status: resolveThreadListV2Status(selectedThread),
+        });
+  const baseHeaderSubtitle = [
     selectedThreadProject?.title ?? null,
     selectedEnvironmentConnection?.environmentLabel ?? null,
     // A linked environment's delegated task names its parent; other linked work its origin.
@@ -530,6 +542,9 @@ function ThreadRouteContent(
   ]
     .filter(Boolean)
     .join(" · ");
+  const headerSubtitle = selectedThreadActivity
+    ? formatThreadActivity(selectedThreadActivity)
+    : baseHeaderSubtitle;
   const gitStatus = useEnvironmentQuery(
     selectedThread !== null && selectedThreadCwd !== null
       ? vcsEnvironment.status({

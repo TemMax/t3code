@@ -12,6 +12,7 @@ import {
   type OrchestrationV2NotificationSource,
   type OrchestrationV2PendingBackgroundTask,
   type OrchestrationV2ProviderGoal,
+  type OrchestrationV2ThreadActivityPhase,
   type ServerProviderModel,
   type OrchestrationV2ExecutionNode,
   type OrchestrationV2ThreadProjection,
@@ -475,4 +476,33 @@ export function notificationChildThreadId(
       source satisfies never;
       return undefined;
   }
+}
+
+export const THREAD_ACTIVITY_PHASE_LABEL: Record<OrchestrationV2ThreadActivityPhase, string> = {
+  researching: "Researching",
+  planning: "Planning",
+  implementing: "Implementing",
+  testing: "Testing",
+  debugging: "Debugging",
+  reviewing: "Reviewing",
+};
+
+export function formatThreadActivity(activity: {
+  readonly phase: OrchestrationV2ThreadActivityPhase;
+  readonly label: string;
+}): string {
+  return `${THREAD_ACTIVITY_PHASE_LABEL[activity.phase]} · ${activity.label}`;
+}
+
+export function resolveThreadActivityForDisplay(input: {
+  readonly activity:
+    | {
+        readonly phase: OrchestrationV2ThreadActivityPhase;
+        readonly label: string;
+      }
+    | null
+    | undefined;
+  readonly status: string;
+}) {
+  return input.status === "working" ? (input.activity ?? null) : null;
 }

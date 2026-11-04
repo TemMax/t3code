@@ -31,6 +31,8 @@ export type {
   PrContentGenerationResult,
   ReviewGuideGenerationInput,
   ReviewGuideGenerationResult,
+  ThreadActivityGenerationInput,
+  ThreadActivityGenerationResult,
   ThreadTitleGenerationInput,
   ThreadTitleGenerationResult,
 } from "@t3tools/provider-core/server/textGeneration";
@@ -44,7 +46,8 @@ type TextGenerationOp =
   | "generatePrContent"
   | "generateBranchName"
   | "generateThreadTitle"
-  | "generateReviewGuide";
+  | "generateReviewGuide"
+  | "generateThreadActivity";
 
 const resolveInstance = (
   registry: ProviderInstanceRegistry.ProviderInstanceRegistry["Service"],
@@ -80,6 +83,11 @@ export const make = Effect.gen(function* () {
       modelSelection: ModelSelection,
     ) => Effect.Effect<A, TextGenerationError>,
   ) {
+    if (operation === "generateThreadActivity") {
+      return yield* resolveInstance(registry, operation, selection.instanceId).pipe(
+        Effect.flatMap((service) => invoke(service, selection)),
+      );
+    }
     const snapshots = yield* registry.listInstances.pipe(
       Effect.flatMap((instances) =>
         Effect.forEach(instances, (instance) => instance.snapshot.getSnapshot),
@@ -145,6 +153,11 @@ export const make = Effect.gen(function* () {
     generateReviewGuide: Effect.fn("TextGeneration.generateReviewGuide")(function (input) {
       return generate("generateReviewGuide", input.modelSelection, (service, modelSelection) =>
         service.generateReviewGuide({ ...input, modelSelection }),
+      );
+    }),
+    generateThreadActivity: Effect.fn("TextGeneration.generateThreadActivity")(function (input) {
+      return generate("generateThreadActivity", input.modelSelection, (service, modelSelection) =>
+        service.generateThreadActivity({ ...input, modelSelection }),
       );
     }),
     generateThreadTitle: Effect.fn("TextGeneration.generateThreadTitle")(function (input) {

@@ -11,7 +11,9 @@ import {
   buildCommitMessagePrompt,
   buildPrContentPrompt,
   buildReviewGuidePrompt,
+  buildThreadActivityPrompt,
   buildThreadTitlePrompt,
+  sanitizeThreadActivityLabel,
 } from "./textGenerationPrompts.ts";
 import {
   sanitizeCommitSubject,
@@ -30,9 +32,11 @@ export interface Request<S extends Schema.Top> {
   readonly attachments?: ReadonlyArray<ChatAttachment> | undefined;
   /** Investigate cwd with read-only tools across turns; fail if the runner cannot guarantee read-only access. */
   readonly investigate?: { readonly timeoutMs: number } | undefined;
+  readonly timeoutMs?: number | undefined;
 }
 
 const INVESTIGATION_TIMEOUT_MS = 15 * 60_000;
+const THREAD_ACTIVITY_TIMEOUT_MS = 45_000;
 
 export const investigationUnsupported = (operation: Operation, provider: string) =>
   new TextGenerationError({
@@ -167,11 +171,32 @@ export function fromRunner(name: string, run: Runner): ProviderTextGeneration {
     });
   });
 
+  const generateThreadActivity: ProviderTextGeneration["generateThreadActivity"] = Effect.fn(
+    `${name}.generateThreadActivity`,
+  )(function* (input) {
+    const generated = yield* run({
+      operation: "generateThreadActivity",
+      cwd: input.cwd,
+      modelSelection: input.modelSelection,
+      timeoutMs: THREAD_ACTIVITY_TIMEOUT_MS,
+      ...buildThreadActivityPrompt(input),
+    });
+    const label = sanitizeThreadActivityLabel(generated.label);
+    if (label === null) {
+      return yield* new TextGenerationError({
+        operation: "generateThreadActivity",
+        detail: "empty activity label",
+      });
+    }
+    return { phase: generated.phase, label };
+  });
+
   return {
     generateCommitMessage,
     generatePrContent,
     generateBranchName,
     generateThreadTitle,
     generateReviewGuide,
+    generateThreadActivity,
   } satisfies ProviderTextGeneration;
 }

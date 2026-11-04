@@ -1,4 +1,5 @@
 import { ThreadHoverCard, ThreadHoverCardPopup } from "../ThreadHoverCard";
+import { THREAD_ACTIVITY_PRESENTATION } from "./threadActivityPresentation";
 import { ThreadTerminalStatusButton } from "../ThreadStatusIndicators";
 import { discardComposerDraft } from "../../lib/discardComposerDraft";
 import { requestCustomSnooze } from "../CustomSnoozeDialog";
@@ -20,6 +21,10 @@ import {
   resolveThreadProviderStack,
 } from "@t3tools/client-runtime/state/models";
 import { scopeThreadRef, scopedThreadKey } from "@t3tools/client-runtime/environment";
+import {
+  resolveThreadActivityForDisplay,
+  THREAD_ACTIVITY_PHASE_LABEL,
+} from "@t3tools/client-runtime/state/thread-execution";
 import {
   AuthOrchestrationOperateScope,
   type EnvironmentId,
@@ -243,6 +248,8 @@ function SidebarThreadTooltip({
   branchMismatch,
   terminalStatus,
   terminalProcessCount,
+  activity,
+  workingSubagents,
 }: {
   thread: SidebarThreadSummary;
   project: ProjectFaviconProject | null;
@@ -260,7 +267,10 @@ function SidebarThreadTooltip({
   } | null;
   terminalStatus: TerminalStatusIndicator | null;
   terminalProcessCount: number;
+  activity: SidebarThreadSummary["activity"];
+  workingSubagents: number;
 }) {
+  const activityPresentation = activity ? THREAD_ACTIVITY_PRESENTATION[activity.phase] : null;
   const driverKind = providerEntry?.driverKind ?? null;
   const previousProviderNames = thread.providerInstanceHistory
     .filter((instanceId) => instanceId !== modelInstanceId)
@@ -278,6 +288,26 @@ function SidebarThreadTooltip({
           ) : null
         }
       >
+        {activity && activityPresentation ? (
+          <div className="flex min-w-0 items-center gap-2">
+            <activityPresentation.Icon
+              aria-hidden
+              className={cn("size-3 shrink-0", activityPresentation.className)}
+            />
+            <div className="min-w-0 truncate">
+              <span className={cn("font-medium", activityPresentation.className)}>
+                {THREAD_ACTIVITY_PHASE_LABEL[activity.phase]}
+              </span>
+              <span className="text-foreground/80">{` · ${activity.label}`}</span>
+            </div>
+          </div>
+        ) : null}
+        {workingSubagents > 0 ? (
+          <div className="flex min-w-0 items-center gap-2">
+            <BotIcon aria-hidden className="size-3 shrink-0 stroke-muted-foreground" />
+            <div className="min-w-0 truncate text-foreground/75">{`${workingSubagents} ${workingSubagents === 1 ? "subagent" : "subagents"}`}</div>
+          </div>
+        ) : null}
         {projectDisplayName ? (
           <div className="flex min-w-0 items-center gap-2">
             {project ? <ProjectFavicon project={project} className="size-3 shrink-0" /> : null}
@@ -727,6 +757,8 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     ownWorkingSubagentCount(thread),
   );
   const status = withWorkingSubagents(resolveSidebarThreadStatus(thread), workingSubagents);
+  const activity = resolveThreadActivityForDisplay({ activity: thread.activity, status });
+  const activityPresentation = activity ? THREAD_ACTIVITY_PRESENTATION[activity.phase] : null;
   const lastVisitedDate = lastVisitedAt === undefined ? null : parseTimestampDate(lastVisitedAt);
   const wokeAtDate = props.wokeAt === null ? null : parseTimestampDate(props.wokeAt);
   const isWoke =
@@ -836,6 +868,8 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
       branchMismatch={branchMismatch}
       terminalStatus={terminalStatus}
       terminalProcessCount={terminalProcessCount}
+      activity={activity}
+      workingSubagents={workingSubagents}
     />
   );
 
@@ -1018,6 +1052,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
   const accessibility = resolveSidebarRowAccessibility({
     title: thread.title,
     statusLabel: topStatus?.label ?? null,
+    activity,
     projectDisplayName: props.projectDisplayName,
     isActive: props.isActive,
   });
@@ -1318,11 +1353,17 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                       <span
                         className={cn(
                           "inline-flex items-center gap-1 text-xs font-medium",
-                          topStatus.className,
+                          activityPresentation?.className ?? topStatus.className,
                         )}
                       >
-                        <TopStatusIcon icon={topStatus.icon} className="size-3" />
-                        {topStatus.label}
+                        {activityPresentation ? (
+                          <activityPresentation.Icon aria-hidden className="size-3 shrink-0" />
+                        ) : (
+                          <>
+                            <TopStatusIcon icon={topStatus.icon} className="size-3" />
+                            {topStatus.label}
+                          </>
+                        )}
                         {status === "working" && workingSubagents > 0 ? (
                           <WorkingSubagentsBadge count={workingSubagents} className="size-3" />
                         ) : null}
@@ -1455,7 +1496,21 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
               {/* Left of the status slot, the pin would slide when hover swaps the
                 label for the wider row controls. */}
               {pinIndicator}
-              {props.projectDisplayName ? (
+              {activity && activityPresentation ? (
+                <span className="min-w-0 flex-1 truncate text-xs">
+                  <activityPresentation.Icon
+                    aria-hidden
+                    className={cn(
+                      "mr-1 inline size-3.5 align-text-bottom",
+                      activityPresentation.className,
+                    )}
+                  />
+                  <span className={cn("font-medium", activityPresentation.className)}>
+                    {THREAD_ACTIVITY_PHASE_LABEL[activity.phase]}
+                  </span>
+                  <span className="text-foreground/80">{` · ${activity.label}`}</span>
+                </span>
+              ) : props.projectDisplayName ? (
                 <span
                   className={cn("min-w-0 flex-1 truncate font-normal text-secondary-label text-xs")}
                 >
@@ -1510,11 +1565,15 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                             topStatus.className,
                           )}
                         >
-                          <TopStatusIcon icon={topStatus.icon} className="size-4" />
-                          {/* Not a live region: a collapsed sidebar is inert, so
-                            BackgroundThreadAnnouncer and the open thread's
-                            timeline speak status changes instead. */}
-                          {topStatus.label}
+                          {activity ? null : (
+                            <>
+                              <TopStatusIcon icon={topStatus.icon} className="size-4" />
+                              {/* Not a live region: a collapsed sidebar is inert, so
+                                BackgroundThreadAnnouncer and the open thread's
+                                timeline speak status changes instead. */}
+                              {topStatus.label}
+                            </>
+                          )}
                           {status === "working" && workingSubagents > 0 ? (
                             <WorkingSubagentsBadge count={workingSubagents} className="size-4" />
                           ) : null}
@@ -1804,6 +1863,8 @@ export const SidebarSearchResultRow = memo(function SidebarSearchResultRow(props
           branchMismatch={branchMismatch}
           terminalStatus={terminalStatus}
           terminalProcessCount={runningTerminalIds.length}
+          activity={null}
+          workingSubagents={0}
         />
       </Tooltip>
     </li>

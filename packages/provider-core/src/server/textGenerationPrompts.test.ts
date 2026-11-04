@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vite-plus/test";
 
+import * as Schema from "effect/Schema";
+
+import { buildThreadActivityPrompt, sanitizeThreadActivityLabel } from "./textGenerationPrompts.ts";
 import { normalizeCliError } from "./textGenerationUtils.ts";
 
 describe("normalizeCliError", () => {
@@ -13,5 +16,37 @@ describe("normalizeCliError", () => {
 
     expect(result.detail).toBe("Failed to generate a commit message");
     expect(result.message).not.toContain("secret-token");
+  });
+});
+
+describe("thread activity", () => {
+  it.each([
+    ["  Sidebar status chip. ", "sidebar status"],
+    ["fixing the android pairing reconnect flow", "fixing the"],
+    ['"auth"', "auth"],
+    ["", null],
+    ["...", null],
+    [
+      "supercalifragilisticexpialidocious extraordinarily long",
+      "supercalifragilisticexpialidocious",
+    ],
+  ])("cleans activity labels: %j", (raw, expected) => {
+    expect(sanitizeThreadActivityLabel(raw)).toBe(expected);
+  });
+
+  it("puts the digest and previous label in the prompt", () => {
+    const { prompt, outputSchema } = buildThreadActivityPrompt({
+      digest: "ran ./gradlew assembleDebug",
+      previous: { phase: "implementing", label: "pairing flow" },
+    });
+
+    expect(prompt).toContain("ran ./gradlew assembleDebug");
+    expect(prompt).toContain("Previous phase: implementing");
+    expect(prompt).toContain("Previous label: pairing flow");
+    expect(Schema.decodeSync(outputSchema)({ phase: "testing", label: "gradle build" })).toEqual({
+      phase: "testing",
+      label: "gradle build",
+    });
+    expect(() => Schema.decodeUnknownSync(outputSchema)({ phase: "coding", label: "x" })).toThrow();
   });
 });

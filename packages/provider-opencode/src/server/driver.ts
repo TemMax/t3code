@@ -1,4 +1,4 @@
-import { ProviderDriverKind } from "@t3tools/contracts";
+import { ProviderDriverKind, TextGenerationError } from "@t3tools/contracts";
 import { OpenCodeSettings } from "../settings.ts";
 import * as Crypto from "effect/Crypto";
 import * as Deferred from "effect/Deferred";
@@ -151,6 +151,13 @@ function selectOpenCodeRuntimeTextGeneration(
         v1: v1.generateReviewGuide(input),
         v2: v2.generateReviewGuide(input),
       }),
+    generateThreadActivity: () =>
+      Effect.fail(
+        new TextGenerationError({
+          operation: "generateThreadActivity",
+          detail: "OpenCode does not provide thread activity generation.",
+        }),
+      ),
   };
 }
 

@@ -8,6 +8,7 @@ import type {
   OrchestrationV2ProviderGoal,
   OrchestrationV2RunStatus,
   OrchestrationV2ProviderFailureClass,
+  OrchestrationV2ThreadActivityPhase,
   OrchestrationV2ThreadProjection,
   OrchestrationV2ThreadShell,
   PlanId,
@@ -195,6 +196,10 @@ export interface EnvironmentThreadShell {
   /** Server-tracked open history for search ranking. */
   readonly opens?: import("@t3tools/contracts").OrchestrationV2ThreadOpens | null;
   readonly titleRegeneration?: { readonly requestId: string; readonly startedAt: string } | null;
+  readonly activity: {
+    readonly phase: OrchestrationV2ThreadActivityPhase;
+    readonly label: string;
+  } | null;
   readonly deletedAt: string | null;
   readonly source: OrchestrationV2ThreadShell;
 }
@@ -356,6 +361,10 @@ export function presentThreadShell(
             requestId: thread.titleRegeneration.requestId,
             startedAt: iso(thread.titleRegeneration.startedAt),
           },
+    activity:
+      thread.activity && thread.activity.runId === thread.activeRunId
+        ? { phase: thread.activity.phase, label: thread.activity.label }
+        : null,
     deletedAt: nullableIso(thread.deletedAt),
     source: thread,
   };

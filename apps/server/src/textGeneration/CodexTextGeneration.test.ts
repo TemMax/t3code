@@ -454,6 +454,7 @@ it.effect.each([false, true])("text generation preflight: exhausted=%s", (exhaus
       options: [{ id: "effort", value: "high" }],
     };
     const calls: ModelSelection[] = [];
+    const activityCalls: ModelSelection[] = [];
     const instances: ProviderInstance[] = [primary, fallback].map((instanceId) => {
       const driver = ProviderDriverKind.make(instanceId === primary ? "codex" : "claudeAgent");
       const snapshot: ServerProvider = {
@@ -490,6 +491,11 @@ it.effect.each([false, true])("text generation preflight: exhausted=%s", (exhaus
           generatePrContent: () => Effect.die("unused"),
           generateBranchName: () => Effect.die("unused"),
           generateReviewGuide: () => Effect.die("unused"),
+          generateThreadActivity: (input) =>
+            Effect.sync(() => {
+              activityCalls.push(input.modelSelection);
+              return { phase: "testing", label: "gradle build" };
+            }),
           generateThreadTitle: (input) =>
             Effect.sync(() => {
               calls.push(input.modelSelection);
@@ -534,5 +540,14 @@ it.effect.each([false, true])("text generation preflight: exhausted=%s", (exhaus
           }
         : selection,
     ]);
+    expect(
+      yield* service.generateThreadActivity({
+        cwd: "/tmp",
+        digest: "ran gradle build",
+        previous: null,
+        modelSelection: selection,
+      }),
+    ).toEqual({ phase: "testing", label: "gradle build" });
+    expect(activityCalls).toEqual([selection]);
   }),
 );
