@@ -127,7 +127,7 @@ export const cases: ReadonlyArray<Case> = [
     id: "testing-todo-beats-edits",
     source: "synthetic: running todo step says testing while the last tools were edits",
     phase: "testing",
-    keywords: ["test", "suite", "verification", "checks"],
+    keywords: ["test", "suite", "verification", "checks", "rename", "project", "workspace"],
     digest: digest({
       request: "Rename the Workspace type to Project across the app.",
       todo: "Run the test suite",
@@ -144,7 +144,7 @@ export const cases: ReadonlyArray<Case> = [
     id: "debugging-failing-test",
     source: "synthetic: failure investigation",
     phase: "debugging",
-    keywords: ["fail", "failing", "test", "bug", "error", "timeout", "debug"],
+    keywords: ["fail", "failing", "test", "bug", "error", "timeout", "debug", "search", "debounce"],
     digest: digest({
       request: "Add a debounce to the search box.",
       tools: [
@@ -159,7 +159,7 @@ export const cases: ReadonlyArray<Case> = [
     id: "debugging-reproduce-crash",
     source: "synthetic: reproducing a bug",
     phase: "debugging",
-    keywords: ["crash", "bug", "error", "null", "startup", "repro", "debug", "fail"],
+    keywords: ["crash", "bug", "error", "null", "startup", "repro", "debug", "fail", "config"],
     digest: digest({
       request: "The app crashes on startup when the config file is missing. Fix it.",
       tools: ["$ node bin.js", "$ cat logs/crash.log", "search files: loadConfig"],
@@ -182,7 +182,18 @@ export const cases: ReadonlyArray<Case> = [
     id: "debugging-edits-while-failing",
     source: "synthetic: boundary with testing, edits answering a red run",
     phase: "debugging",
-    keywords: ["fail", "failing", "test", "bug", "error", "debug", "regression", "snapshot"],
+    keywords: [
+      "fail",
+      "failing",
+      "test",
+      "bug",
+      "error",
+      "debug",
+      "regression",
+      "snapshot",
+      "date",
+      "library",
+    ],
     digest: digest({
       request: "Upgrade the date library.",
       tools: [
@@ -209,7 +220,7 @@ export const cases: ReadonlyArray<Case> = [
     id: "reviewing-final-self-check",
     source: "synthetic: final self-check",
     phase: "reviewing",
-    keywords: ["review", "diff", "changes", "check", "final", "self"],
+    keywords: ["review", "diff", "changes", "check", "final", "self", "dark", "toggle"],
     digest: digest({
       request: "Add a dark mode toggle.",
       todo: "Review the full diff before finishing",
