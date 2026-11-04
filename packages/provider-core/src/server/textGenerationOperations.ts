@@ -36,7 +36,7 @@ export interface Request<S extends Schema.Top> {
 }
 
 const INVESTIGATION_TIMEOUT_MS = 15 * 60_000;
-export const THREAD_ACTIVITY_TIMEOUT_MS = 45_000;
+const THREAD_ACTIVITY_TIMEOUT_MS = 45_000;
 
 export const investigationUnsupported = (operation: Operation, provider: string) =>
   new TextGenerationError({

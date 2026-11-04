@@ -15,6 +15,7 @@ import {
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as TestClock from "effect/testing/TestClock";
 import type * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
 
 import * as SqlitePersistence from "../persistence/Sqlite.ts";
@@ -132,6 +133,7 @@ describe("thread activity", () => {
       const threads = yield* ThreadManagement.ThreadManagementService;
       yield* startRun;
       const before = yield* threads.getThreadShell(threadId);
+      yield* TestClock.adjust("1 minute");
       const result = yield* recordActivity({
         command: "command:thread-activity:record",
         runId,
