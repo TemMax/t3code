@@ -157,6 +157,14 @@ Pinned threads stay above the folders, and Snoozed and Settled stay below them. 
 cannot drag threads, and the Working section is off. The choice syncs through your servers, so
 the mobile app groups the same way; on mobile it is under **Settings → Labs → Project folders**.
 
+## Live activity summary
+
+While a thread works, its sidebar row can show a phase, such as Implementing, and a few words about
+what the agent is doing. It works only for Claude and Codex threads. The summary uses Claude Haiku or
+Codex Luna on the thread's own account, so it counts against that account's limits. Turn it on in
+**Settings → Threads → Text generation** on web and desktop, or **Settings → Threads** on iOS and
+Android. Hover a thread in the sidebar to see the full phrase.
+
 ## Settle finished work
 
 Choose **Settle thread** from its menu to move finished work out of the active list

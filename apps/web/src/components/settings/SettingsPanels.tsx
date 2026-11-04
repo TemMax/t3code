@@ -1807,6 +1807,22 @@ export function ThreadsSettingsPanel() {
             )
           }
         />
+        <SettingsRow
+          serverScoped
+          settingKeys={["threadActivitySummaryEnabled"]}
+          {...searchableSetting("thread-activity-summary")}
+          description="While Claude or Codex works, show what it is doing in a few words. Uses Claude Haiku or Codex Luna on the thread's own account."
+          control={
+            <ScopedSwitch
+              settingKeys={["threadActivitySummaryEnabled"]}
+              checked={settings.threadActivitySummaryEnabled}
+              onCheckedChange={(checked) =>
+                updateSettings({ threadActivitySummaryEnabled: Boolean(checked) })
+              }
+              aria-label="Live activity summary"
+            />
+          }
+        />
         <AdvancedSettings
           targetIds={[
             searchableSetting("thread-title-instructions").id,
