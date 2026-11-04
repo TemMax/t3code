@@ -2,6 +2,7 @@ import type {
   BranchNamingOptions,
   ChatAttachment,
   ModelSelection,
+  OrchestrationV2ThreadActivityPhase,
   PullRequestReviewGuide,
   TextGenerationError,
 } from "@t3tools/contracts";
@@ -72,6 +73,18 @@ export interface ThreadTitleGenerationResult {
   needsRefinement?: boolean | undefined;
 }
 
+export interface ThreadActivityGenerationInput {
+  cwd: string;
+  digest: string;
+  previous: { phase: OrchestrationV2ThreadActivityPhase; label: string } | null;
+  modelSelection: ModelSelection;
+}
+
+export interface ThreadActivityGenerationResult {
+  phase: OrchestrationV2ThreadActivityPhase;
+  label: string;
+}
+
 export interface ReviewGuideStackLayer {
   readonly number: number;
   readonly title: string | null;
@@ -117,4 +130,8 @@ export interface ProviderTextGeneration {
   readonly generateReviewGuide: (
     input: ReviewGuideGenerationInput,
   ) => Effect.Effect<ReviewGuideGenerationResult, TextGenerationError>;
+
+  readonly generateThreadActivity: (
+    input: ThreadActivityGenerationInput,
+  ) => Effect.Effect<ThreadActivityGenerationResult, TextGenerationError>;
 }
