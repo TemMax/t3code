@@ -13,12 +13,12 @@ export interface Expectation {
   readonly keywords: ReadonlyArray<string>;
 }
 
-/** A label passes when it survives sanitizing unchanged and names an accepted keyword. */
+/** A label passes when it survives sanitizing unchanged and a word starts with an accepted keyword. */
 export const labelProblem = (label: string, keywords: ReadonlyArray<string>) => {
   if (sanitizeThreadActivityLabel(label) !== label) return "label fails sanitizing";
   if (keywords.length === 0) return undefined;
-  const lower = label.toLowerCase();
-  return keywords.some((keyword) => lower.includes(keyword.toLowerCase()))
+  const words = label.toLowerCase().split(/\s+/);
+  return keywords.some((keyword) => words.some((word) => word.startsWith(keyword.toLowerCase())))
     ? undefined
     : "label has no accepted keyword";
 };
