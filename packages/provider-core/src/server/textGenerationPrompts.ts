@@ -503,7 +503,7 @@ export function buildThreadActivityPrompt(input: ThreadActivityPromptInput) {
     "- testing: running tests, builds, typecheck, lint, verification (not writing them)",
     "- debugging: investigating a failure, reproducing a bug, fixing failing tests",
     "- reviewing: reviewing a diff or PR, final self-check",
-    "label is 1-3 lowercase English words naming the subject of the work, not the tool.",
+    "label is 1-2 lowercase English words naming the subject of the work, not the tool.",
     "Do not use file names unless the file itself is the subject.",
     "Keep the previous label while the subject of the work has not changed.",
     ...(input.previous
@@ -522,7 +522,7 @@ export function buildThreadActivityPrompt(input: ThreadActivityPromptInput) {
   return { prompt, outputSchema };
 }
 
-const ACTIVITY_LABEL_MAX_WORDS = 3;
+const ACTIVITY_LABEL_MAX_WORDS = 2;
 const ACTIVITY_LABEL_MAX_CHARS = 40;
 
 export function sanitizeThreadActivityLabel(raw: string): string | null {

@@ -21,7 +21,7 @@ describe("gradeCase", () => {
     ["label without a keyword", [testing("login flow"), testing("test suite")], false],
     ["keyword only inside a word", [testing("update deps"), testing("test suite")], false],
     ["label sanitizing would change", [testing("Test Suite"), testing("test suite")], false],
-    ["label over three words", [testing("full test suite run"), testing("test suite")], false],
+    ["label over two words", [testing("full test suite"), testing("test suite")], false],
     ["no samples", [], false],
   ] as const)("%s", (_name, answers, pass) => {
     expect(gradeCase(expected, answers).pass).toBe(pass);

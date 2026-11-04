@@ -21,8 +21,8 @@ describe("normalizeCliError", () => {
 
 describe("thread activity", () => {
   it.each([
-    ["  Sidebar status chip. ", "sidebar status chip"],
-    ["fixing the android pairing reconnect flow", "fixing the android"],
+    ["  Sidebar status chip. ", "sidebar status"],
+    ["fixing the android pairing reconnect flow", "fixing the"],
     ['"auth"', "auth"],
     ["", null],
     ["...", null],
