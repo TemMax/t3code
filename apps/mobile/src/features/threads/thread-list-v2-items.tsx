@@ -15,6 +15,7 @@ import { threadArrangementOpenAtom } from "../../state/thread-order";
 import { threadEnvironment } from "../../state/threads";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { useVisibleSecondClock } from "./use-visible-second-clock";
+import { THREAD_ACTIVITY_PRESENTATION } from "./threadActivityPresentation";
 import type { ThreadMoveDestination } from "./threadOrder";
 import type {
   EnvironmentProject,
@@ -27,6 +28,11 @@ import {
 } from "@t3tools/client-runtime/state/models";
 import type { ProjectFolderDot } from "@t3tools/client-runtime/state/project-folders";
 import { withWorkingSubagents } from "@t3tools/client-runtime/state/subagent-activity";
+import {
+  formatThreadActivity,
+  resolveThreadActivityForDisplay,
+  THREAD_ACTIVITY_PHASE_LABEL,
+} from "@t3tools/client-runtime/state/thread-execution";
 import { AuthOrchestrationOperateScope, type EnvironmentMachineKind } from "@t3tools/contracts";
 import type { SnoozePresetSetting } from "@t3tools/contracts/settings";
 import { canSnooze } from "@t3tools/client-runtime/state/thread-settled";
@@ -734,6 +740,8 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
 
   const workingSubagents = props.workingSubagents ?? 0;
   const status = withWorkingSubagents(resolveThreadListV2Status(thread), workingSubagents);
+  const activity = resolveThreadActivityForDisplay({ activity: thread.activity, status });
+  const activityPresentation = activity ? THREAD_ACTIVITY_PRESENTATION[activity.phase] : null;
   const isUnread = status === "ready" && threadHasUnseenCompletion(thread);
   const workingLabel = STATUS_LABEL_BY_STATUS[status];
   const showsWoke = status === "ready" && props.wokeAt !== null;
@@ -1170,17 +1178,19 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
             </Pressable>
           ) : statusLabel ? (
             <View className="flex-row items-center gap-1">
-              <SymbolView
-                name={statusLabel.icon}
-                size={13}
-                tintColorClassName={
-                  selected
-                    ? selectedThreadRowColors.iconTintClassName
-                    : statusLabel.iconTintClassName
-                }
-                type="monochrome"
-                weight="semibold"
-              />
+              {activity ? null : (
+                <SymbolView
+                  name={statusLabel.icon}
+                  size={13}
+                  tintColorClassName={
+                    selected
+                      ? selectedThreadRowColors.iconTintClassName
+                      : statusLabel.iconTintClassName
+                  }
+                  type="monochrome"
+                  weight="semibold"
+                />
+              )}
               <Text
                 className={cn(
                   "text-xs font-t3-bold",
@@ -1188,7 +1198,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
                   selected ? selectedThreadRowColors.foregroundClassName : statusLabel.className,
                 )}
               >
-                {statusLabel.label}
+                {activity ? null : statusLabel.label}
                 {status === "working" ? (
                   <ThreadListV2Duration
                     startedAt={
@@ -1267,6 +1277,41 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
           >
             {thread.runtime.lastError}
           </Text>
+        ) : activity && activityPresentation ? (
+          <View className="min-w-0 flex-1 flex-row items-center gap-1">
+            <SymbolView
+              name={activityPresentation.icon}
+              size={12}
+              tintColorClassName={
+                selected
+                  ? selectedThreadRowColors.iconTintClassName
+                  : activityPresentation.iconTintClassName
+              }
+              type="monochrome"
+              weight="semibold"
+            />
+            <Text
+              className={cn(
+                "text-xs font-t3-bold",
+                selected
+                  ? selectedThreadRowColors.foregroundClassName
+                  : activityPresentation.textClassName,
+              )}
+            >
+              {THREAD_ACTIVITY_PHASE_LABEL[activity.phase]}
+            </Text>
+            <Text
+              className={cn(
+                "shrink text-xs",
+                selected
+                  ? selectedThreadRowColors.foregroundClassName
+                  : rowAppearance.foregroundClassName,
+              )}
+              numberOfLines={1}
+            >
+              {` · ${activity.label}`}
+            </Text>
+          </View>
         ) : props.environmentLabel ? (
           <View className="min-w-0 flex-1 flex-row items-center gap-1">
             {props.environmentMachine ? (
@@ -1506,6 +1551,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
       >
         {(close) => (
           <Menu
+            title={activity ? formatThreadActivity(activity) : undefined}
             actions={[
               ...(thread.branch
                 ? [

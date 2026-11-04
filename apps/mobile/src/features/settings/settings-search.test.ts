@@ -62,6 +62,11 @@ describe("filterSettingsSections", () => {
     expect(visible(query)).toEqual(expected);
   });
 
+  it("finds the Threads page by live activity keywords", () => {
+    const sections = [{ rows: [{ id: "SettingsThreads", label: "Threads" }] }];
+    expect(filterSettingsSections(sections, "phase")).toEqual(sections);
+  });
+
   it("drops sections that start empty", () => {
     expect(filterSettingsSections([{ rows: [] }, ...SECTIONS], "").length).toBe(SECTIONS.length);
   });
