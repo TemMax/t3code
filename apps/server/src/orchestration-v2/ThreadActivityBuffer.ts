@@ -8,12 +8,12 @@ import type {
   TurnItemId,
 } from "@t3tools/contracts";
 
-export const FIRST_MIN_SIGNALS = 3;
-export const FIRST_DELAY_MS = 8_000;
-export const REFRESH_INTERVAL_MS = 30_000;
-export const PRIORITY_INTERVAL_MS = 10_000;
-export const FAILURE_BACKOFF_MS = 60_000;
-export const MAX_DIGEST_TOOL_LINES = 12;
+const FIRST_MIN_SIGNALS = 3;
+const FIRST_DELAY_MS = 8_000;
+const REFRESH_INTERVAL_MS = 30_000;
+const PRIORITY_INTERVAL_MS = 10_000;
+const FAILURE_BACKOFF_MS = 60_000;
+const MAX_DIGEST_TOOL_LINES = 12;
 export const MAX_CONCURRENT_SUMMARIES = 3;
 
 const MAX_TOOL_LINE_CHARS = 200;

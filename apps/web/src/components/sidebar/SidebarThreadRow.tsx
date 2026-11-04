@@ -305,7 +305,7 @@ function SidebarThreadTooltip({
         {workingSubagents > 0 ? (
           <div className="flex min-w-0 items-center gap-2">
             <BotIcon aria-hidden className="size-3 shrink-0 stroke-muted-foreground" />
-            <div className="min-w-0 truncate text-foreground/75">{`${workingSubagents} subagents`}</div>
+            <div className="min-w-0 truncate text-foreground/75">{`${workingSubagents} ${workingSubagents === 1 ? "subagent" : "subagents"}`}</div>
           </div>
         ) : null}
         {projectDisplayName ? (
