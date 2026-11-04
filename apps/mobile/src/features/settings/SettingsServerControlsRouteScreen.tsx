@@ -377,6 +377,16 @@ function ServerSettingsDetail(props: { readonly page: SettingsPage }) {
                       onValueChange={(value) => write({ enableAgentBrowserAccess: value })}
                     />
                   </SettingsSection>
+                  <SettingsSection title="Live activity">
+                    <SettingsSwitchRow
+                      icon="sparkles"
+                      label="Live activity summary"
+                      subtitle="While Claude or Codex works, show what it is doing in a few words. Uses Claude Haiku or Codex Luna on the thread's own account."
+                      value={uniform("threadActivitySummaryEnabled")}
+                      disabled={disabledFor("threadActivitySummaryEnabled")}
+                      onValueChange={(value) => write({ threadActivitySummaryEnabled: value })}
+                    />
+                  </SettingsSection>
                   <AutoSettleSettingsRows write={write} pending={pendingWrites > 0} />
                 </>
               ) : null}
