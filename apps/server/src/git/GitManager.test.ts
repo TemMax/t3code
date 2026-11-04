@@ -288,6 +288,7 @@ function createTextGeneration(
         title: "Update workflow",
       }),
     generateReviewGuide: () => Effect.succeed({ stops: [] }),
+    generateThreadActivity: () => Effect.succeed({ phase: "implementing", label: "git actions" }),
     ...overrides,
   };
 
@@ -337,6 +338,7 @@ function createTextGeneration(
         ),
       ),
     generateReviewGuide: (input) => implementation.generateReviewGuide(input),
+    generateThreadActivity: (input) => implementation.generateThreadActivity(input),
   };
 }
 
