@@ -38,6 +38,7 @@ import {
   OrchestrationV2Actor,
   OrchestrationV2CreationSource,
   OrchestrationV2RunStatus,
+  OrchestrationV2ThreadActivitySummary,
   OrchestrationV2TurnItemStatus,
 } from "./orchestrationV2.ts";
 import { ProviderOptionSelection, ProviderOptionSelectionValue } from "./model.ts";
@@ -367,6 +368,7 @@ export const OrchestratorMcpThreadListItem = Schema.Struct({
   interactionMode: ProviderInteractionMode,
   linkedPullRequest: Schema.NullOr(ThreadLinkedPullRequest),
   pullRequests: Schema.optional(Schema.Array(OrchestratorMcpThreadPullRequest)),
+  activity: Schema.NullOr(OrchestrationV2ThreadActivitySummary),
   settled: Schema.Boolean,
   settledAt: Schema.NullOr(IsoDateTime),
   snoozed: Schema.Boolean,
@@ -439,6 +441,7 @@ export const OrchestratorMcpThreadDetail = Schema.Struct({
   linkedPullRequest: Schema.NullOr(ThreadLinkedPullRequest),
   pullRequests: Schema.optional(Schema.Array(OrchestratorMcpThreadPullRequest)),
   titleRegeneration: Schema.NullOr(ThreadTitleRegeneration),
+  activity: Schema.NullOr(OrchestrationV2ThreadActivitySummary),
   branch: Schema.NullOr(Schema.String),
   worktreePath: Schema.NullOr(Schema.String),
   parentThreadId: Schema.NullOr(ThreadId),

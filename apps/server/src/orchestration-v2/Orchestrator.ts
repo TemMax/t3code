@@ -519,6 +519,7 @@ function commandThreadId(command: OrchestrationV2ServerCommand): ThreadId {
     case "thread.pull-request-watch.sync":
     case "thread.pull-request.sync":
     case "thread.title.regeneration.complete":
+    case "thread.activity.record":
     case "thread.project.adopt-folder":
     case "thread.runtime-mode.set":
     case "thread.interaction-mode.set":
@@ -2976,6 +2977,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           | "thread.pull-request-watch.sync"
           | "thread.pull-request.sync"
           | "thread.title.regeneration.complete"
+          | "thread.activity.record"
           | "thread.runtime-mode.set"
           | "thread.interaction-mode.set"
           | "thread.model-selection.set"
@@ -3387,6 +3389,17 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       }
       markUnreadVisitedAt = DateTime.subtract(latestRunCompletedAt, { milliseconds: 1 });
     }
+    let activeRunId: RunId | null = null;
+    if (command.type === "thread.activity.record") {
+      const shell = yield* projectionStore
+        .getThreadShell(command.threadId)
+        .pipe(
+          Effect.mapError(
+            (cause) => new OrchestratorProjectionError({ threadId: command.threadId, cause }),
+          ),
+        );
+      activeRunId = shell?.activeRunId ?? null;
+    }
     const updatedThread: OrchestrationV2AppThread = (() => {
       switch (command.type) {
         case "thread.archive":
@@ -3394,6 +3407,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
             ...thread,
             archivedAt: now,
             titleRegeneration: null,
+            activity: null,
             guestShare: null,
             pullRequests: thread.pullRequests?.map((link) => withPullRequestWatch(link, undefined)),
             updatedAt: now,
@@ -3813,6 +3827,22 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
                 updatedAt: now,
               }
             : thread;
+        case "thread.activity.record":
+          return command.runId !== activeRunId ||
+            (thread.activity?.runId === command.runId &&
+              thread.activity.phase === command.phase &&
+              thread.activity.label === command.label)
+            ? thread
+            : {
+                ...thread,
+                activity: {
+                  runId: command.runId,
+                  phase: command.phase,
+                  label: command.label,
+                  updatedAt: now,
+                },
+                updatedAt: thread.updatedAt,
+              };
         case "thread.runtime-mode.set":
           return { ...thread, runtimeMode: command.runtimeMode, updatedAt: now };
         case "thread.interaction-mode.set":
@@ -3848,6 +3878,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       });
       return;
     }
+    if (command.type === "thread.activity.record" && updatedThread === thread) return;
     const eventType = (() => {
       switch (command.type) {
         case "thread.archive":
@@ -3876,6 +3907,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           return "thread.marked-unread" as const;
         case "thread.metadata.update":
         case "thread.title.regeneration.complete":
+        case "thread.activity.record":
           return "thread.metadata-updated" as const;
         case "thread.pull-request.link":
         case "thread.pull-request.unlink":
@@ -12972,6 +13004,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       case "thread.pull-request.watch":
       case "thread.pull-request.sync":
       case "thread.title.regeneration.complete":
+      case "thread.activity.record":
       case "thread.runtime-mode.set":
       case "thread.interaction-mode.set":
       case "thread.model-selection.set":
@@ -13326,6 +13359,8 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           command.type === "thread.interrupt.unresponsive" ||
           command.type === "thread.stop" ||
           command.type === "subagent.stop" ||
+          // A stale or repeated activity record changes nothing.
+          command.type === "thread.activity.record" ||
           // Closing a share again, or after it ended, is not an error.
           command.type === "thread.guest-share.close" ||
           (command.type === "thread.delete" && command.onlyIfUnused === true),
