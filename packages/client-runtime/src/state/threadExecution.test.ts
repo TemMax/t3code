@@ -25,8 +25,10 @@ import {
   deriveRunlessWorkStartedAt,
   deriveThreadActivityRun,
   deriveThreadRuntime,
+  formatThreadActivity,
   presentProviderGoal,
   presentRunStop,
+  resolveThreadActivityForDisplay,
   threadRuntimeHasInterruptibleRun,
 } from "./threadExecution.ts";
 
@@ -486,5 +488,17 @@ describe("presentProviderGoal", () => {
         false,
       ).usage,
     ).toBe("1m / 1m tokens");
+  });
+});
+
+describe("thread activity", () => {
+  it("formats and gates thread activity", () => {
+    const activity = { phase: "testing", label: "gradle build" } as const;
+    expect(formatThreadActivity(activity)).toBe("Testing · gradle build");
+    for (const status of ["approval", "input", "waiting", "failed"]) {
+      expect(resolveThreadActivityForDisplay({ activity, status })).toBeNull();
+    }
+    expect(resolveThreadActivityForDisplay({ activity: null, status: "working" })).toBeNull();
+    expect(resolveThreadActivityForDisplay({ activity, status: "working" })).toBe(activity);
   });
 });

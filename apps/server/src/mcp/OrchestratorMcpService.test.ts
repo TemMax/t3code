@@ -2731,6 +2731,14 @@ describe("OrchestratorMcpService thread list", () => {
     projectId: ProjectId.make(projectId),
     status: "completed" as const,
     snoozedUntil: snoozed ? DateTime.makeUnsafe("2099-01-01T00:00:00Z") : null,
+    activity: snoozed
+      ? null
+      : {
+          runId: RunId.make("run:list-activity"),
+          phase: "testing" as const,
+          label: "gradle build",
+          updatedAt: DateTime.makeUnsafe("2026-10-05T00:00:00Z"),
+        },
   });
   const shells = [
     shell("thread:a-snoozed", "project:a", true),
@@ -2777,6 +2785,11 @@ describe("OrchestratorMcpService thread list", () => {
           ["thread:a-snoozed", "project:a"],
           ["thread:b-snoozed", "project:b"],
         ],
+      );
+      const awake = yield* mcp.listThreads(client, { projectId: ProjectId.make("project:a") });
+      assert.deepStrictEqual(
+        awake.threads.map((thread) => thread.activity),
+        [null, { phase: "testing", label: "gradle build" }],
       );
     }).pipe(Effect.provide(service)),
   );

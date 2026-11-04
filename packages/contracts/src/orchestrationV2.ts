@@ -3409,6 +3409,14 @@ const OrchestrationV2InternalCommand = Schema.Union([
     text: Schema.String,
     attachments: Schema.optional(Schema.Array(ChatAttachment)),
   }),
+  Schema.Struct({
+    type: Schema.Literal("thread.activity.record"),
+    commandId: CommandId,
+    threadId: ThreadId,
+    runId: RunId,
+    phase: OrchestrationV2ThreadActivityPhase,
+    label: TrimmedNonEmptyString,
+  }),
   /** Moves a thread to a project rooted at the folder it already works in, so its cwd never changes. */
   Schema.Struct({
     type: Schema.Literal("thread.project.adopt-folder"),
