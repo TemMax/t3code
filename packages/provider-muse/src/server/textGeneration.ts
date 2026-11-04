@@ -342,11 +342,19 @@ export const makeMuseTextGeneration = Effect.fn("makeMuseTextGeneration")(functi
   });
   const generateReviewGuide: ProviderTextGeneration["generateReviewGuide"] = () =>
     Effect.fail(investigationUnsupported("generateReviewGuide", "Muse Code"));
+  const generateThreadActivity: ProviderTextGeneration["generateThreadActivity"] = () =>
+    Effect.fail(
+      new TextGenerationError({
+        operation: "generateThreadActivity",
+        detail: "Muse Code does not provide thread activity generation.",
+      }),
+    );
   return {
     generateCommitMessage,
     generatePrContent,
     generateBranchName,
     generateThreadTitle,
     generateReviewGuide,
+    generateThreadActivity,
   } satisfies ProviderTextGeneration;
 });
