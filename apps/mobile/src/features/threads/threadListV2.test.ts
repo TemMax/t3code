@@ -621,6 +621,38 @@ describe("buildThreadListV2Items", () => {
       expect(selected.folderHeaders[0]).toMatchObject({ key: "b", count: 2, dot: "attention" });
     });
 
+    it("lists a project pin at the top of its folder instead of the Pinned section", () => {
+      const layout = buildThreadListV2Items({
+        threads: [
+          ...threads,
+          makeThread({
+            id: ThreadId.make("project-pin"),
+            title: "Project pin",
+            projectId: projectA,
+            pinnedAt: "2026-06-01T11:00:00.000Z",
+            pinScope: "project",
+          }),
+        ],
+        environmentId: null,
+        searchQuery: "",
+        now: NOW,
+        projectFolders: { groups, collapsedKeys: new Set() },
+      });
+
+      expect(layout.items.map((item) => [item.thread.id, item.pinned])).toEqual([
+        ["pinned", true],
+        ["b1", false],
+        ["b2", false],
+        ["project-pin", true],
+        ["a1", false],
+        ["settled", false],
+      ]);
+      expect(layout.folderHeaders.map(({ key, index, count }) => [key, index, count])).toEqual([
+        ["b", 1, 2],
+        ["a", 3, 2],
+      ]);
+    });
+
     it("moves a folder only past listed folders of its own section", () => {
       const projectC = ProjectId.make("project-c");
       const layout = buildThreadListV2Items({

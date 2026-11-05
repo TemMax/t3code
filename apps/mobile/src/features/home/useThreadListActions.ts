@@ -3,7 +3,7 @@ import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell
 import * as ThreadUndo from "@t3tools/client-runtime/state/thread-undo";
 import { showThreadUndoNotice } from "./thread-undo-notice";
 import { canSnooze } from "@t3tools/client-runtime/state/thread-settled";
-import { AuthOrchestrationOperateScope } from "@t3tools/contracts";
+import { AuthOrchestrationOperateScope, type ThreadPinScope } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
 import * as Haptics from "expo-haptics";
 import { useRef } from "react";
@@ -196,7 +196,10 @@ export function useThreadListActions(): {
   readonly snoozeThread: (thread: EnvironmentThreadShell, snoozedUntil: string) => Promise<boolean>;
   readonly unsnoozeThread: (thread: EnvironmentThreadShell) => Promise<boolean>;
   readonly unsettleThread: (thread: EnvironmentThreadShell) => Promise<boolean>;
-  readonly pinThread: (thread: EnvironmentThreadShell) => Promise<boolean>;
+  readonly pinThread: (
+    thread: EnvironmentThreadShell,
+    options?: { readonly orderKey?: string; readonly scope?: ThreadPinScope },
+  ) => Promise<boolean>;
   readonly unpinThread: (thread: EnvironmentThreadShell) => Promise<boolean>;
   readonly setThreadAutoSettle: (
     thread: EnvironmentThreadShell,
@@ -244,7 +247,10 @@ export function useThreadListActions(): {
                 case "unsnooze":
                   return unsnoozeThread(thread);
                 case "pin":
-                  return pinThread(thread, step.orderKey);
+                  return pinThread(thread, {
+                    ...(step.orderKey !== undefined ? { orderKey: step.orderKey } : {}),
+                    ...(step.scope !== undefined ? { scope: step.scope } : {}),
+                  });
                 case "snooze": {
                   const failureTitle =
                     action === "Unpinned" ? "Could not undo unpin" : "Could not undo settle";
@@ -392,7 +398,10 @@ export function useThreadListActions(): {
   };
   const unsettleThread = async (thread: EnvironmentThreadShell) =>
     (await executeAction("unsettle", thread)) === true;
-  const pinThread = async (thread: EnvironmentThreadShell, restoreOrderKey?: string) => {
+  const pinThread = async (
+    thread: EnvironmentThreadShell,
+    options: { readonly orderKey?: string; readonly scope?: ThreadPinScope } = {},
+  ) => {
     if (!checkThreadOperationPermission(thread, "Could not pin thread")) return false;
     if (!environmentConfigLoaded(thread.environmentId)) {
       Dialog.alert(
@@ -408,7 +417,7 @@ export function useThreadListActions(): {
       if (shell.pinnedAt == null || shell.pinOrderKey == null) continue;
       if (firstKey === null || shell.pinOrderKey < firstKey) firstKey = shell.pinOrderKey;
     }
-    const orderKey = restoreOrderKey ?? pinOrderKeyBetween(null, firstKey) ?? undefined;
+    const orderKey = options.orderKey ?? pinOrderKeyBetween(null, firstKey) ?? undefined;
     ThreadUndo.invalidate("pin", scopedThreadKey(thread.environmentId, thread.id));
     // Pinning clears snooze, so older Settled or Snoozed undos would fight this pin.
     ThreadUndo.invalidate("settle", scopedThreadKey(thread.environmentId, thread.id));
@@ -418,7 +427,11 @@ export function useThreadListActions(): {
       () =>
         pinMutation({
           environmentId: thread.environmentId,
-          input: { threadId: thread.id, ...(orderKey !== undefined ? { orderKey } : {}) },
+          input: {
+            threadId: thread.id,
+            ...(orderKey !== undefined ? { orderKey } : {}),
+            ...(options.scope !== undefined ? { scope: options.scope } : {}),
+          },
         }),
       (result) => result._tag === "Success",
     );

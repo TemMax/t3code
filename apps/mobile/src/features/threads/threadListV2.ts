@@ -328,10 +328,13 @@ export function getThreadListV2OrderedSection(input: {
   readonly settlementEnvironmentIds?: ReadonlySet<EnvironmentId>;
   readonly snoozeEnvironmentIds?: ReadonlySet<EnvironmentId>;
   readonly queuedThreadKeys?: ReadonlySet<string>;
+  /** Folder mode lists project pins in their folders, out of the Pinned section. */
+  readonly projectPinsInFolders?: boolean;
 }): EnvironmentThreadShell[] {
   const queuedThreadKeys = input.queuedThreadKeys?.size ? input.queuedThreadKeys : undefined;
   const threads = input.threads.filter((thread) => {
     if (thread.archivedAt !== null || !isListedThreadLineage(thread.lineage)) return false;
+    if (input.projectPinsInFolders === true && thread.pinScope === "project") return false;
     if (
       (input.settlementEnvironmentIds?.has(thread.environmentId) ?? true) &&
       thread.settledOverride === "settled" &&
@@ -954,9 +957,14 @@ export function buildThreadListV2Items(input: {
           (thread) => `${thread.environmentId}:${thread.id}` === selectedThreadKey,
         );
 
+  // Folders lead with their own pins; only pins above projects stay in the Pinned section.
+  const folderPinned =
+    projectFolders === null ? [] : pinned.filter((thread) => thread.pinScope === "project");
+  const shelfPinned =
+    folderPinned.length === 0 ? pinned : pinned.filter((thread) => thread.pinScope !== "project");
   const items: ThreadListV2Item[] = [];
   for (const thread of applyPendingThreadOrder(
-    sortPinnedThreadsByOrderKey(pinned),
+    sortPinnedThreadsByOrderKey(shelfPinned),
     "pinned",
     pending,
   )) {
@@ -975,7 +983,7 @@ export function buildThreadListV2Items(input: {
       thread,
       variant: "card",
       snoozed: false,
-      pinned: false,
+      pinned: thread.pinnedAt != null,
       wokeAt: resolveThreadListV2WokeAt(thread, { now }),
       isLast: false,
     });
@@ -983,7 +991,7 @@ export function buildThreadListV2Items(input: {
   if (projectFolders) {
     const folders = groupThreadsByProject(
       projectFolders.groups,
-      orderedActive,
+      [...sortPinnedThreadsByOrderKey(folderPinned), ...orderedActive],
       (group) => group.pinned && !group.archived,
     );
     for (const folder of folders) {

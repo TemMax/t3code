@@ -33,7 +33,11 @@ import {
   resolveThreadActivityForDisplay,
   THREAD_ACTIVITY_PHASE_LABEL,
 } from "@t3tools/client-runtime/state/thread-execution";
-import { AuthOrchestrationOperateScope, type EnvironmentMachineKind } from "@t3tools/contracts";
+import {
+  AuthOrchestrationOperateScope,
+  type EnvironmentMachineKind,
+  type ThreadPinScope,
+} from "@t3tools/contracts";
 import type { SnoozePresetSetting } from "@t3tools/contracts/settings";
 import { canSnooze } from "@t3tools/client-runtime/state/thread-settled";
 import { threadChipCopyTarget } from "@t3tools/client-runtime/thread-reference";
@@ -736,7 +740,10 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
   readonly onUnsnoozeThread: (thread: EnvironmentThreadShell) => void;
   readonly onUnsettleThread: (thread: EnvironmentThreadShell) => void;
   readonly onArchiveThread: (thread: EnvironmentThreadShell) => void;
-  readonly onPinThread: (thread: EnvironmentThreadShell) => void;
+  readonly onPinThread: (
+    thread: EnvironmentThreadShell,
+    options?: { readonly scope?: ThreadPinScope },
+  ) => void;
   readonly onUnpinThread: (thread: EnvironmentThreadShell) => void;
   readonly onSetThreadAutoSettle: (thread: EnvironmentThreadShell, enabled: boolean) => void;
   readonly settlementSupported: boolean;
@@ -874,6 +881,10 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
   const handleUnsnooze = useCallback(() => onUnsnoozeThread(thread), [onUnsnoozeThread, thread]);
   const handleUnsettle = useCallback(() => onUnsettleThread(thread), [onUnsettleThread, thread]);
   const handlePin = useCallback(() => onPinThread(thread), [onPinThread, thread]);
+  const handlePinInProject = useCallback(
+    () => onPinThread(thread, { scope: "project" }),
+    [onPinThread, thread],
+  );
   const handleUnpin = useCallback(() => onUnpinThread(thread), [onUnpinThread, thread]);
   const handleSetAutoSettle = useCallback(
     (enabled: boolean) => onSetThreadAutoSettle(thread, enabled),
@@ -935,12 +946,19 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
             } satisfies MenuAction,
           ]
         : []),
+      // Unpin sits beside the other pin scope, so a pin moves between the two in one step.
       ...(props.pinningSupported
-        ? [
-            thread.pinnedAt != null
-              ? { id: "unpin", title: "Unpin", image: "pin.slash" }
-              : { id: "pin", title: "Pin", image: "pin" },
-          ]
+        ? thread.pinnedAt == null
+          ? [
+              { id: "pin", title: "Pin", image: "pin" },
+              { id: "pin-project", title: "Pin in project", image: "pin" },
+            ]
+          : [
+              { id: "unpin", title: "Unpin", image: "pin.slash" },
+              thread.pinScope === "project"
+                ? { id: "pin", title: "Pin above projects", image: "pin" }
+                : { id: "pin-project", title: "Pin in project", image: "pin" },
+            ]
         : []),
     ],
     [
@@ -949,6 +967,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
       props.reorderSupported,
       props.pinningSupported,
       thread.pinnedAt,
+      thread.pinScope,
     ],
   );
   const autoSettleMenuItems = useMemo<MenuAction[]>(
@@ -1064,6 +1083,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
       if (nativeEvent.event === "unsettle") handleUnsettle();
       if (nativeEvent.event === "unsnooze") handleUnsnooze();
       if (nativeEvent.event === "pin") handlePin();
+      if (nativeEvent.event === "pin-project") handlePinInProject();
       if (nativeEvent.event === "unpin") handleUnpin();
       if (nativeEvent.event === "auto-settle:enabled") handleSetAutoSettle(true);
       if (nativeEvent.event === "auto-settle:disabled") handleSetAutoSettle(false);
@@ -1116,6 +1136,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
       handleMoveDown,
       handleMoveUp,
       handlePin,
+      handlePinInProject,
       handleSettle,
       handleSnooze,
       handleSetAutoSettle,

@@ -107,6 +107,7 @@ export function useThreadListV2(input: {
           settlementEnvironmentIds: input.settlementEnvironmentIds,
           snoozeEnvironmentIds: input.snoozeEnvironmentIds,
           queuedThreadKeys: input.queuedThreadKeys,
+          projectPinsInFolders: folderMode,
         }),
       });
     return new Map([
@@ -123,6 +124,7 @@ export function useThreadListV2(input: {
     input.snoozeEnvironmentIds,
     input.queuedThreadKeys,
     activeRowsReorderable,
+    folderMode,
   ]);
   // Older settled threads load in pages; the shelf lists them only as far as they are loaded.
   const scopes = useMemo(

@@ -11,7 +11,11 @@ import {
 } from "@t3tools/client-runtime/state/shell";
 import { pickableProjectGroups } from "@t3tools/client-runtime/state/project-grouping";
 import { threadSearchMatchKey } from "@t3tools/client-runtime/state/thread-search";
-import { type EnvironmentId, type SidebarProjectGroupingMode } from "@t3tools/contracts";
+import {
+  type EnvironmentId,
+  type SidebarProjectGroupingMode,
+  type ThreadPinScope,
+} from "@t3tools/contracts";
 import { useAtomValue } from "@effect/atom-react";
 import { use, useEffect, useMemo, useRef, useState, type ComponentProps } from "react";
 import {
@@ -125,7 +129,10 @@ interface HomeScreenProps {
   ) => Promise<boolean>;
   readonly onUnsnoozeThread: (thread: EnvironmentThreadShell) => Promise<boolean>;
   readonly onUnsettleThread: (thread: EnvironmentThreadShell) => void;
-  readonly onPinThread: (thread: EnvironmentThreadShell) => Promise<boolean>;
+  readonly onPinThread: (
+    thread: EnvironmentThreadShell,
+    options?: { readonly scope?: ThreadPinScope },
+  ) => Promise<boolean>;
   readonly onUnpinThread: (thread: EnvironmentThreadShell) => Promise<boolean>;
   readonly onSetThreadAutoSettle: (
     thread: EnvironmentThreadShell,
