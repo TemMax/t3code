@@ -12,6 +12,7 @@ const SHARED_SERVER_SETTING_KEYS = [
   "snoozeLimitedThreads",
   "snoozePresets",
   "sidebarProjectFoldersEnabled",
+  "sidebarProjectOrder",
   "newWorktreesStartFromOrigin",
   "sourceControlWritingStyle",
   "textGenerationModelSelection",

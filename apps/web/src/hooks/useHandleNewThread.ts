@@ -40,7 +40,8 @@ import { appAtomRegistry } from "../rpc/atomRegistry";
 import { environmentSummaries } from "../state/presentation";
 import { environmentServerConfigsAtom } from "../state/server";
 import { resolveThreadRouteTarget } from "../threadRoutes";
-import { legacyProjectCwdPreferenceKey, useUiStateStore } from "../uiStateStore";
+import { useProjectOrder } from "../projectOrder";
+import { legacyProjectCwdPreferenceKey } from "../uiStateStore";
 import { getClientSettings } from "./useSettings";
 import { useThreadRouteTarget } from "./useThreadRouteTarget";
 import { readUnloadedThreadCount } from "../state/olderSettledShelf";
@@ -440,7 +441,7 @@ export function resolveDefaultProjectRef(
 }
 
 export function useHandleNewThread() {
-  const projectOrder = useUiStateStore((store) => store.projectOrder);
+  const projectOrder = useProjectOrder();
   const routeTarget = useThreadRouteTarget();
   const routeThreadRef = routeTarget?.kind === "server" ? routeTarget.threadRef : null;
   const routeDraftId = routeTarget?.kind === "draft" ? routeTarget.draftId : null;

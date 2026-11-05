@@ -306,9 +306,14 @@ export const ThreadListV2ProjectFolderHeader = memo(
     readonly dot: ProjectFolderDot | null;
     readonly onToggle: (folderKey: string) => void;
     readonly pane?: "screen" | "sidebar";
+    readonly moveUpKey?: string | null;
+    readonly moveDownKey?: string | null;
+    /** Absent when no server takes the shared project order. */
+    readonly onMove?: ((folderKey: string, targetKey: string) => void) | null;
   }) {
     const dot = props.collapsed && props.dot ? FOLDER_DOT[props.dot] : null;
-    return (
+    const { folderKey, moveUpKey, moveDownKey, onMove } = props;
+    const header = (
       <ThreadListV2Section
         label={props.collapsed ? `${props.title} (${props.count})` : props.title}
         pane={props.pane}
@@ -327,6 +332,32 @@ export const ThreadListV2ProjectFolderHeader = memo(
           accessibilityHint: props.collapsed ? "Expands the folder." : "Collapses the folder.",
         }}
       />
+    );
+    if (!onMove) return header;
+    return (
+      <Menu
+        actions={[
+          {
+            id: "move-up",
+            title: "Move up",
+            image: "arrow.up",
+            attributes: { disabled: moveUpKey == null },
+          },
+          {
+            id: "move-down",
+            title: "Move down",
+            image: "arrow.down",
+            attributes: { disabled: moveDownKey == null },
+          },
+        ]}
+        onPressAction={({ nativeEvent }) => {
+          const target = nativeEvent.event === "move-up" ? moveUpKey : moveDownKey;
+          if (target != null) onMove(folderKey, target);
+        }}
+        shouldOpenOnLongPress
+      >
+        {header}
+      </Menu>
     );
   },
 );

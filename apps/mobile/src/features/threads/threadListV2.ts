@@ -385,6 +385,9 @@ export interface ThreadListV2FolderHeader {
   readonly count: number;
   readonly collapsed: boolean;
   readonly dot: ProjectFolderDot | null;
+  /** The listed folders this one trades places with; pinned and archived folders keep their section. */
+  readonly moveUpKey: string | null;
+  readonly moveDownKey: string | null;
 }
 
 export interface ThreadListV2Layout {
@@ -430,6 +433,8 @@ export interface ThreadListV2ProjectFolderListItem {
   readonly count: number;
   readonly collapsed: boolean;
   readonly dot: ProjectFolderDot | null;
+  readonly moveUpKey: string | null;
+  readonly moveDownKey: string | null;
 }
 
 export interface ThreadListV2PendingListItem {
@@ -517,7 +522,9 @@ export function threadListV2ListItemsAreEqual(
         previous.title === item.title &&
         previous.count === item.count &&
         previous.collapsed === item.collapsed &&
-        previous.dot === item.dot
+        previous.dot === item.dot &&
+        previous.moveUpKey === item.moveUpKey &&
+        previous.moveDownKey === item.moveDownKey
       );
     case "v2-pending":
       return (
@@ -664,6 +671,8 @@ export function buildThreadListV2ListItems(input: {
         count: header.count,
         collapsed: header.collapsed,
         dot: header.dot,
+        moveUpKey: header.moveUpKey,
+        moveDownKey: header.moveDownKey,
       });
       nextFolder += 1;
       header = folderHeaders[nextFolder];
@@ -1004,9 +1013,23 @@ export function buildThreadListV2Items(input: {
         count: folder.threads.length,
         collapsed,
         dot,
+        moveUpKey: null,
+        moveDownKey: null,
       });
       visible.forEach(pushActive);
     }
+    const sectionOf = (group: ThreadListV2FolderGroup) =>
+      group.archived ? "archived" : group.pinned ? "pinned" : "open";
+    folders.forEach((folder, index) => {
+      const previous = folders[index - 1];
+      const next = folders[index + 1];
+      const section = sectionOf(folder.group);
+      folderHeaders[index] = {
+        ...folderHeaders[index]!,
+        moveUpKey: previous && sectionOf(previous.group) === section ? previous.group.key : null,
+        moveDownKey: next && sectionOf(next.group) === section ? next.group.key : null,
+      };
+    });
   } else {
     orderedActive.forEach(pushActive);
   }

@@ -8,8 +8,11 @@ import {
   deriveLogicalProjectKeyFromSettings,
   pickableProjectGroups,
   derivePhysicalProjectKey,
+  orderProjectsByProjectOrder,
+  pendingProjectOrder,
   resolveScratchProjectScopeKey,
   sortProjectsByGroupOrder,
+  visibleProjectOrder,
   type ProjectGroupingSettings,
 } from "./projectGrouping.ts";
 
@@ -419,5 +422,28 @@ describe("sortProjectsByGroupOrder", () => {
       [{ memberProjectRefs: [ref("shared", remote)] }, { memberProjectRefs: [ref("shared")] }],
     );
     expect(sorted.map((entry) => entry.environmentId)).toEqual([remote, environmentId]);
+  });
+});
+
+describe("shared project order", () => {
+  const project = (workspaceRoot: string) => ({ environmentId, workspaceRoot });
+
+  it("lists ordered projects first and keeps the rest in their order", () => {
+    const projects = [project("/a"), project("/b"), project("/c"), project("/d")];
+    const order = [
+      derivePhysicalProjectKey(project("/c")),
+      derivePhysicalProjectKey(project("/a")),
+    ];
+    expect(
+      orderProjectsByProjectOrder(projects, order).map((entry) => entry.workspaceRoot),
+    ).toEqual(["/c", "/a", "/b", "/d"]);
+  });
+
+  it("shows a reorder until the servers' order moves off the one it replaced", () => {
+    const pending = pendingProjectOrder(["a", "b"], ["b", "a"]);
+    expect(visibleProjectOrder(["a", "b"], pending)).toEqual(["b", "a"]);
+    expect(visibleProjectOrder(["b", "a"], pending)).toEqual(["b", "a"]);
+    expect(visibleProjectOrder(["c", "a", "b"], pending)).toEqual(["c", "a", "b"]);
+    expect(visibleProjectOrder([], pendingProjectOrder([], ["a"]))).toEqual(["a"]);
   });
 });

@@ -129,10 +129,8 @@ import {
 import { useHandleNewThread } from "../hooks/useHandleNewThread";
 import { useOrderWhileOpen } from "../hooks/useOrderWhileOpen";
 import { useProjectPin } from "../hooks/useProjectGroupUpdate";
-import {
-  reorderSidebarProjectGroups,
-  useSidebarProjectGroups,
-} from "../hooks/useSidebarProjectGroups";
+import { useSidebarProjectGroups } from "../hooks/useSidebarProjectGroups";
+import { useMoveProjects } from "../projectOrder";
 import { useTerminalFocus } from "../hooks/useTerminalFocus";
 import { isCommandPaletteOpen, openCommandPalette } from "../commandPaletteBus";
 import { registerSettleAndAdvance } from "../settleAndAdvance";
@@ -1314,9 +1312,13 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
       current?.overKey === group.projectKey ? { ...current, overKey: null } : current,
     );
   });
+  const moveProjects = useMoveProjects();
   const dropFolderReorder = useStableCallback((group: SidebarProjectSnapshot) => {
     if (folderDrag !== null && canDropFolderOn(folderDrag.dragged, group)) {
-      reorderSidebarProjectGroups(folderDrag.dragged, group);
+      moveProjects(
+        folderDrag.dragged.memberProjects.map((member) => member.physicalProjectKey),
+        group.memberProjects.map((member) => member.physicalProjectKey),
+      );
     }
     setFolderDrag(null);
   });

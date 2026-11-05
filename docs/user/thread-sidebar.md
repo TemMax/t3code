@@ -159,7 +159,8 @@ project's folder comes last and shows only while it has active threads. Click a 
 close it. A closed folder shows how many threads it holds, and a dot when one of them
 needs you. Use the pen button on a folder, or right-click it, to start a thread in that project.
 Folders follow **Settings → General → Project order**; with **Manual**, drag a folder onto another
-to take its place. Pinned folders move only among pinned ones.
+to take its place. Pinned folders move only among pinned ones. The manual order syncs through your
+servers. The mobile app always uses it; long-press a folder there to move it up or down.
 Pinned threads stay above the folders, and Snoozed and Settled stay below them. In this mode you
 cannot drag threads, and the Working section is off. The choice syncs through your servers, so
 the mobile app groups the same way; on mobile it is under **Settings → Labs → Project folders**.

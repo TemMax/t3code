@@ -1,50 +1,10 @@
-import { orderItemsByPreferredIds, sortSidebarV2ProjectGroups } from "../components/Sidebar.logic";
-import {
-  getProjectOrderKey,
-  selectProjectGroupingSettings,
-} from "@t3tools/client-runtime/state/project-grouping";
-import type { EnvironmentProject } from "@t3tools/client-runtime/state/models";
-import {
-  buildSidebarProjectSnapshots,
-  type SidebarProjectSnapshot,
-} from "../sidebarProjectGrouping";
+import { sortSidebarV2ProjectGroups } from "../components/Sidebar.logic";
+import { selectProjectGroupingSettings } from "@t3tools/client-runtime/state/project-grouping";
+import { buildSidebarProjectSnapshots } from "../sidebarProjectGrouping";
 import { useEnvironmentIdentities, usePrimaryEnvironmentId } from "../state/environments";
-import {
-  readProjects,
-  useDelegatedUnderParent,
-  useProjects,
-  useQuietThreadShells,
-} from "../state/entities";
-import { legacyProjectCwdPreferenceKey, useUiStateStore } from "../uiStateStore";
+import { useDelegatedUnderParent, useProjects, useQuietThreadShells } from "../state/entities";
+import { orderProjectsManually, useProjectOrder } from "../projectOrder";
 import { useClientSettings } from "./useSettings";
-
-function orderProjectsManually<TProject extends EnvironmentProject>(
-  projects: readonly TProject[],
-  projectOrder: readonly string[],
-) {
-  return orderItemsByPreferredIds({
-    items: projects,
-    preferredIds: projectOrder,
-    getId: getProjectOrderKey,
-    getPreferenceIds: (project) => [
-      getProjectOrderKey(project),
-      legacyProjectCwdPreferenceKey(project.workspaceRoot),
-    ],
-  });
-}
-
-/** Moves the dragged folder's projects to the target folder's place in the manual order. */
-export function reorderSidebarProjectGroups(
-  dragged: SidebarProjectSnapshot,
-  target: SidebarProjectSnapshot,
-) {
-  const { projectOrder, reorderProjects } = useUiStateStore.getState();
-  reorderProjects(
-    orderProjectsManually(readProjects(), projectOrder).map(getProjectOrderKey),
-    dragged.memberProjects.map((member) => member.physicalProjectKey),
-    target.memberProjects.map((member) => member.physicalProjectKey),
-  );
-}
 
 export function useSidebarProjectGroups() {
   const projects = useProjects();
@@ -52,7 +12,7 @@ export function useSidebarProjectGroups() {
   // real change; reading every tick re-rendered the whole sidebar with it.
   const threads = useQuietThreadShells();
   const delegatedUnderParent = useDelegatedUnderParent();
-  const projectOrder = useUiStateStore((store) => store.projectOrder);
+  const projectOrder = useProjectOrder();
   const sortOrder = useClientSettings((s) => s.sidebarProjectSortOrder);
   const groupingSettings = useClientSettings(selectProjectGroupingSettings);
   const environments = useEnvironmentIdentities();

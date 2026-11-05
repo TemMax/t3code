@@ -10,7 +10,8 @@ import { getProjectOrderKey } from "@t3tools/client-runtime/state/project-groupi
 import { useProjects, useVisibleThreadShells } from "../state/entities";
 import { useEnvironments, usePrimaryEnvironmentId } from "../state/environments";
 import { buildSidebarProjectSnapshots } from "../sidebarProjectGrouping";
-import { legacyProjectCwdPreferenceKey, useUiStateStore } from "../uiStateStore";
+import { useProjectOrder } from "../projectOrder";
+import { legacyProjectCwdPreferenceKey } from "../uiStateStore";
 import { orderItemsByPreferredIds, sortLogicalProjectsForSidebar } from "./Sidebar.logic";
 
 // Each helper reads its own source hook so the compiler caches the derived value on that
@@ -56,7 +57,7 @@ export const selectCommandPaletteClientSettings = (settings: ClientSettings) => 
 export function useSortedProjectGroups(environmentLabelById: ReadonlyMap<EnvironmentId, string>) {
   const projects = useProjects();
   const threads = useVisibleThreadShells();
-  const projectOrder = useUiStateStore((store) => store.projectOrder);
+  const projectOrder = useProjectOrder();
   const clientSettings = useClientSettings(selectCommandPaletteClientSettings);
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const projectGroupingSettings = {

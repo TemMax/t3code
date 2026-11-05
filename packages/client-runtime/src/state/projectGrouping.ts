@@ -90,6 +90,80 @@ export function getProjectOrderKey(
   return derivePhysicalProjectKey(project);
 }
 
+/** Projects in `order`, by project order key; projects it does not list keep their order after it. */
+export function orderProjectsByProjectOrder<
+  TProject extends Pick<EnvironmentProject, "environmentId" | "workspaceRoot">,
+>(projects: ReadonlyArray<TProject>, order: ReadonlyArray<string>): TProject[] {
+  if (order.length === 0) return [...projects];
+  const rankByKey = new Map<string, number>();
+  order.forEach((key, rank) => {
+    if (!rankByKey.has(key)) rankByKey.set(key, rank);
+  });
+  const rankOf = (project: TProject) =>
+    rankByKey.get(getProjectOrderKey(project)) ?? Number.POSITIVE_INFINITY;
+  return [...projects].sort((left, right) => {
+    const delta = rankOf(left) - rankOf(right);
+    return Number.isNaN(delta) ? 0 : delta;
+  });
+}
+
+/** Moves the dragged keys to the target's place in `order`; null when nothing moves. */
+export function moveProjectOrderKeys(
+  order: ReadonlyArray<string>,
+  draggedKeys: ReadonlyArray<string>,
+  targetKeys: ReadonlyArray<string>,
+): string[] | null {
+  if (draggedKeys.length === 0) return null;
+  const draggedSet = new Set(draggedKeys);
+  const targetSet = new Set(targetKeys);
+  if (draggedKeys.every((key) => targetSet.has(key))) return null;
+  const originalTargetIndex = order.findIndex((key) => targetSet.has(key));
+  if (originalTargetIndex < 0) return null;
+
+  const next = [...order];
+  const removed: string[] = [];
+  let draggedBeforeTarget = 0;
+  for (let i = next.length - 1; i >= 0; i--) {
+    if (draggedSet.has(next[i]!)) {
+      removed.unshift(next.splice(i, 1)[0]!);
+      if (i < originalTargetIndex) draggedBeforeTarget++;
+    }
+  }
+  if (removed.length === 0) return null;
+  next.splice(originalTargetIndex - Math.max(0, draggedBeforeTarget - 1), 0, ...removed);
+  return next;
+}
+
+/** Clients write the shared order to every server they reach, so the first one that has it wins. */
+export function readSharedProjectOrder(
+  settings: Iterable<{ readonly sidebarProjectOrder: ReadonlyArray<string> } | null | undefined>,
+): ReadonlyArray<string> {
+  for (const entry of settings) {
+    if (entry && entry.sidebarProjectOrder.length > 0) return entry.sidebarProjectOrder;
+  }
+  return [];
+}
+
+/** A reorder this client sent, shown until the servers' shared order moves off the one it replaced. */
+export interface PendingProjectOrder {
+  readonly order: ReadonlyArray<string>;
+  readonly replaces: string;
+}
+
+export function pendingProjectOrder(
+  shared: ReadonlyArray<string>,
+  order: ReadonlyArray<string>,
+): PendingProjectOrder {
+  return { order, replaces: shared.join("\n") };
+}
+
+export function visibleProjectOrder(
+  shared: ReadonlyArray<string>,
+  pending: PendingProjectOrder | null,
+): ReadonlyArray<string> {
+  return pending !== null && pending.replaces === shared.join("\n") ? pending.order : shared;
+}
+
 function resolveProjectGroupingMode(
   project: Pick<EnvironmentProject, "environmentId" | "workspaceRoot">,
   settings: ProjectGroupingSettings,
