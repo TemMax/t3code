@@ -3573,6 +3573,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
             unsettledAt: null,
             pinnedAt: null,
             pinOrderKey: null,
+            pinScope: null,
             activeOrderKey: null,
             snoozedUntil: null,
             snoozedAt: null,
@@ -3623,9 +3624,12 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         case "thread.pin": {
           const alreadyPinned = thread.pinnedAt != null;
           const promotes = thread.settledOverride === "settled" || thread.snoozedUntil != null;
+          const pinScope = command.scope ?? null;
+          const rescoped = alreadyPinned && (thread.pinScope ?? null) !== pinScope;
           return {
             ...thread,
             pinnedAt: alreadyPinned ? thread.pinnedAt : now,
+            pinScope,
             ...(alreadyPinned || command.orderKey === undefined
               ? {}
               : { pinOrderKey: command.orderKey }),
@@ -3636,7 +3640,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
             snoozedUntil: null,
             snoozedAt: null,
             lastSnoozeWakeAt: thread.snoozedUntil == null ? thread.lastSnoozeWakeAt : now,
-            updatedAt: alreadyPinned && !promotes ? thread.updatedAt : now,
+            updatedAt: alreadyPinned && !promotes && !rescoped ? thread.updatedAt : now,
           };
         }
         case "thread.unpin": {
@@ -3645,6 +3649,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
             ...thread,
             pinnedAt: null,
             pinOrderKey: null,
+            pinScope: null,
             updatedAt: alreadyUnpinned ? thread.updatedAt : now,
           };
         }

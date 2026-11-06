@@ -61,6 +61,9 @@ and worktree while you stay in the new thread composer. This requires a Git proj
 ## Pin and reorder threads
 
 Pin a thread from its menu to keep it above your active work.
+Choose **Pin in project** instead to keep it at the top of its project's folder, on desktop and
+in the mobile app's project folders. Without folders it shows with your other pins. The same menu
+switches a pin between the two.
 
 On web and desktop, unpinning, settling, snoozing, and archiving a thread each show
 a notification with **Undo** for five seconds. Undo restores the thread's previous
@@ -156,6 +159,9 @@ threads has no folder unless it is pinned or you pick it in the project filter. 
 project's folder comes last and shows only while it has active threads. Click a folder to open or
 close it. A closed folder shows how many threads it holds, and a dot when one of them
 needs you. Use the pen button on a folder, or right-click it, to start a thread in that project.
+Folders follow **Settings → General → Project order**; with **Manual**, drag a folder onto another
+to take its place. Pinned folders move only among pinned ones. The manual order syncs through your
+servers. The mobile app always uses it; long-press a folder there to move it up or down.
 Pinned threads stay above the folders, and Snoozed and Settled stay below them. In this mode you
 cannot drag threads, and the Working section is off. The choice syncs through your servers, so
 the mobile app groups the same way; on mobile it is under **Settings → Labs → Project folders**.

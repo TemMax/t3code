@@ -25,6 +25,9 @@ const FOLDER_DOT_LABEL = {
   working: ", working",
 } as const;
 
+// A private type, so file drop targets in the sidebar ignore a dragged folder.
+const FOLDER_DRAG_TYPE = "application/x-t3code-project-folder";
+
 /** The folder's sidebar tree row; its thread rows name it as their parent. */
 export function sidebarFolderRowId(projectKey: string) {
   return `folder:${projectKey}`;
@@ -42,8 +45,17 @@ export const SidebarProjectFolderHeader = memo(function SidebarProjectFolderHead
   onToggle: (group: SidebarProjectSnapshot) => void;
   onNewThread: (group: SidebarProjectSnapshot) => void;
   onContextMenu: (group: SidebarProjectSnapshot, position: { x: number; y: number }) => void;
+  // Set while the project order is manual: the folder drags onto other folders.
+  reorderable: boolean;
+  // The dragged folder would take this folder's place.
+  isDropTarget: boolean;
+  onReorderStart: (group: SidebarProjectSnapshot) => void;
+  onReorderOver: (group: SidebarProjectSnapshot) => void;
+  onReorderDrop: (group: SidebarProjectSnapshot) => void;
+  onReorderLeave: (group: SidebarProjectSnapshot) => void;
+  onReorderEnd: () => void;
 }) {
-  const { group, collapsed, hiddenThreads } = props;
+  const { group, collapsed, hiddenThreads, reorderable } = props;
   const rowId = sidebarFolderRowId(group.projectKey);
   const localLastVisitedAtById = useUiStateStore((state) => state.threadLastVisitedAtById);
   const dot = collapsed
@@ -63,17 +75,58 @@ export const SidebarProjectFolderHeader = memo(function SidebarProjectFolderHead
     <li
       data-testid="sidebar-project-folder"
       className="group/project-folder relative mt-2 list-none first:mt-0"
+      onDragOver={
+        reorderable
+          ? (event) => {
+              if (!event.dataTransfer.types.includes(FOLDER_DRAG_TYPE)) return;
+              event.preventDefault();
+              event.dataTransfer.dropEffect = "move";
+              props.onReorderOver(group);
+            }
+          : undefined
+      }
+      onDragLeave={
+        reorderable
+          ? (event) => {
+              if (event.currentTarget.contains(event.relatedTarget as Node | null)) return;
+              props.onReorderLeave(group);
+            }
+          : undefined
+      }
+      onDrop={
+        reorderable
+          ? (event) => {
+              if (!event.dataTransfer.types.includes(FOLDER_DRAG_TYPE)) return;
+              event.preventDefault();
+              props.onReorderDrop(group);
+            }
+          : undefined
+      }
     >
       <button
         type="button"
         data-sidebar-row={rowId}
         aria-expanded={!collapsed}
+        draggable={reorderable}
+        onDragStart={
+          reorderable
+            ? (event) => {
+                event.dataTransfer.setData(FOLDER_DRAG_TYPE, group.projectKey);
+                event.dataTransfer.effectAllowed = "move";
+                props.onReorderStart(group);
+              }
+            : undefined
+        }
+        onDragEnd={reorderable ? props.onReorderEnd : undefined}
         onClick={() => props.onToggle(group)}
         onContextMenu={(event) => {
           event.preventDefault();
           props.onContextMenu(group, { x: event.clientX, y: event.clientY });
         }}
-        className="flex h-8 w-full cursor-pointer items-center gap-2.5 rounded-(--control-radius) px-(--sidebar-row-content-inset) text-left outline-none hover:bg-sidebar-row-hover focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+        className={cn(
+          "flex h-8 w-full cursor-pointer items-center gap-2.5 rounded-(--control-radius) px-(--sidebar-row-content-inset) text-left outline-none hover:bg-sidebar-row-hover focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
+          props.isDropTarget && "bg-sidebar-row-hover ring-2 ring-inset ring-primary",
+        )}
       >
         <ProjectFavicon project={group} className="size-4 shrink-0" />
         <span className="min-w-0 flex-1 truncate text-sm font-medium text-sidebar-foreground/90">

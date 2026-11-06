@@ -328,10 +328,13 @@ export function getThreadListV2OrderedSection(input: {
   readonly settlementEnvironmentIds?: ReadonlySet<EnvironmentId>;
   readonly snoozeEnvironmentIds?: ReadonlySet<EnvironmentId>;
   readonly queuedThreadKeys?: ReadonlySet<string>;
+  /** Folder mode lists project pins in their folders, out of the Pinned section. */
+  readonly projectPinsInFolders?: boolean;
 }): EnvironmentThreadShell[] {
   const queuedThreadKeys = input.queuedThreadKeys?.size ? input.queuedThreadKeys : undefined;
   const threads = input.threads.filter((thread) => {
     if (thread.archivedAt !== null || !isListedThreadLineage(thread.lineage)) return false;
+    if (input.projectPinsInFolders === true && thread.pinScope === "project") return false;
     if (
       (input.settlementEnvironmentIds?.has(thread.environmentId) ?? true) &&
       thread.settledOverride === "settled" &&
@@ -385,6 +388,9 @@ export interface ThreadListV2FolderHeader {
   readonly count: number;
   readonly collapsed: boolean;
   readonly dot: ProjectFolderDot | null;
+  /** The listed folders this one trades places with; pinned and archived folders keep their section. */
+  readonly moveUpKey: string | null;
+  readonly moveDownKey: string | null;
 }
 
 export interface ThreadListV2Layout {
@@ -430,6 +436,8 @@ export interface ThreadListV2ProjectFolderListItem {
   readonly count: number;
   readonly collapsed: boolean;
   readonly dot: ProjectFolderDot | null;
+  readonly moveUpKey: string | null;
+  readonly moveDownKey: string | null;
 }
 
 export interface ThreadListV2PendingListItem {
@@ -517,7 +525,9 @@ export function threadListV2ListItemsAreEqual(
         previous.title === item.title &&
         previous.count === item.count &&
         previous.collapsed === item.collapsed &&
-        previous.dot === item.dot
+        previous.dot === item.dot &&
+        previous.moveUpKey === item.moveUpKey &&
+        previous.moveDownKey === item.moveDownKey
       );
     case "v2-pending":
       return (
@@ -664,6 +674,8 @@ export function buildThreadListV2ListItems(input: {
         count: header.count,
         collapsed: header.collapsed,
         dot: header.dot,
+        moveUpKey: header.moveUpKey,
+        moveDownKey: header.moveDownKey,
       });
       nextFolder += 1;
       header = folderHeaders[nextFolder];
@@ -945,9 +957,14 @@ export function buildThreadListV2Items(input: {
           (thread) => `${thread.environmentId}:${thread.id}` === selectedThreadKey,
         );
 
+  // Folders lead with their own pins; only pins above projects stay in the Pinned section.
+  const folderPinned =
+    projectFolders === null ? [] : pinned.filter((thread) => thread.pinScope === "project");
+  const shelfPinned =
+    folderPinned.length === 0 ? pinned : pinned.filter((thread) => thread.pinScope !== "project");
   const items: ThreadListV2Item[] = [];
   for (const thread of applyPendingThreadOrder(
-    sortPinnedThreadsByOrderKey(pinned),
+    sortPinnedThreadsByOrderKey(shelfPinned),
     "pinned",
     pending,
   )) {
@@ -966,7 +983,7 @@ export function buildThreadListV2Items(input: {
       thread,
       variant: "card",
       snoozed: false,
-      pinned: false,
+      pinned: thread.pinnedAt != null,
       wokeAt: resolveThreadListV2WokeAt(thread, { now }),
       isLast: false,
     });
@@ -974,7 +991,7 @@ export function buildThreadListV2Items(input: {
   if (projectFolders) {
     const folders = groupThreadsByProject(
       projectFolders.groups,
-      orderedActive,
+      [...sortPinnedThreadsByOrderKey(folderPinned), ...orderedActive],
       (group) => group.pinned && !group.archived,
     );
     for (const folder of folders) {
@@ -1004,9 +1021,23 @@ export function buildThreadListV2Items(input: {
         count: folder.threads.length,
         collapsed,
         dot,
+        moveUpKey: null,
+        moveDownKey: null,
       });
       visible.forEach(pushActive);
     }
+    const sectionOf = (group: ThreadListV2FolderGroup) =>
+      group.archived ? "archived" : group.pinned ? "pinned" : "open";
+    folders.forEach((folder, index) => {
+      const previous = folders[index - 1];
+      const next = folders[index + 1];
+      const section = sectionOf(folder.group);
+      folderHeaders[index] = {
+        ...folderHeaders[index]!,
+        moveUpKey: previous && sectionOf(previous.group) === section ? previous.group.key : null,
+        moveDownKey: next && sectionOf(next.group) === section ? next.group.key : null,
+      };
+    });
   } else {
     orderedActive.forEach(pushActive);
   }

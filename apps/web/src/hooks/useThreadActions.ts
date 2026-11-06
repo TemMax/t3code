@@ -14,6 +14,7 @@ import {
   EnvironmentId,
   type ScopedThreadRef,
   ThreadId,
+  type ThreadPinScope,
   sessionGrantsScope,
 } from "@t3tools/contracts";
 import { resolveWorktreeCleanup } from "@t3tools/shared/projectSettings";
@@ -687,7 +688,10 @@ export function useThreadActions() {
     });
   };
 
-  const pinThread = async (target: ScopedThreadRef, opts: { orderKey?: string } = {}) => {
+  const pinThread = async (
+    target: ScopedThreadRef,
+    opts: { orderKey?: string; scope?: ThreadPinScope } = {},
+  ) => {
     if (!readEnvironmentServerConfigLoaded(target.environmentId)) {
       return AsyncResult.failure(
         Cause.fail(
@@ -708,6 +712,7 @@ export function useThreadActions() {
       input: {
         threadId: target.threadId,
         ...(orderKey !== undefined ? { orderKey } : {}),
+        ...(opts.scope !== undefined ? { scope: opts.scope } : {}),
       },
     });
   };
@@ -907,10 +912,10 @@ export function useThreadActions() {
           case "unsnooze":
             return unsnoozeThread(target);
           case "pin":
-            return pinThread(
-              target,
-              step.orderKey === undefined ? {} : { orderKey: step.orderKey },
-            );
+            return pinThread(target, {
+              ...(step.orderKey === undefined ? {} : { orderKey: step.orderKey }),
+              ...(step.scope === undefined ? {} : { scope: step.scope }),
+            });
           case "snooze":
             return snoozeThreadMutation({
               environmentId: target.environmentId,

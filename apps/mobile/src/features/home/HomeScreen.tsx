@@ -11,7 +11,11 @@ import {
 } from "@t3tools/client-runtime/state/shell";
 import { pickableProjectGroups } from "@t3tools/client-runtime/state/project-grouping";
 import { threadSearchMatchKey } from "@t3tools/client-runtime/state/thread-search";
-import { type EnvironmentId, type SidebarProjectGroupingMode } from "@t3tools/contracts";
+import {
+  type EnvironmentId,
+  type SidebarProjectGroupingMode,
+  type ThreadPinScope,
+} from "@t3tools/contracts";
 import { useAtomValue } from "@effect/atom-react";
 import { use, useEffect, useMemo, useRef, useState, type ComponentProps } from "react";
 import {
@@ -77,7 +81,12 @@ import {
   type ThreadListV2ListItem,
 } from "../threads/threadListV2";
 import { useThreadListV2ShelfPreferences } from "../threads/use-thread-list-v2-shelf-preferences";
-import { useProjectFolderCollapse, useProjectFoldersEnabled } from "../threads/use-project-folders";
+import {
+  useProjectFolderCollapse,
+  useProjectFolderMove,
+  useProjectFoldersEnabled,
+  useProjectsInFolderOrder,
+} from "../threads/use-project-folders";
 import type { HomeListFilterMenuEnvironment } from "./home-list-filter-menu";
 import {
   buildHomeProjectScopes,
@@ -120,7 +129,10 @@ interface HomeScreenProps {
   ) => Promise<boolean>;
   readonly onUnsnoozeThread: (thread: EnvironmentThreadShell) => Promise<boolean>;
   readonly onUnsettleThread: (thread: EnvironmentThreadShell) => void;
-  readonly onPinThread: (thread: EnvironmentThreadShell) => Promise<boolean>;
+  readonly onPinThread: (
+    thread: EnvironmentThreadShell,
+    options?: { readonly scope?: ThreadPinScope },
+  ) => Promise<boolean>;
   readonly onUnpinThread: (thread: EnvironmentThreadShell) => Promise<boolean>;
   readonly onSetThreadAutoSettle: (
     thread: EnvironmentThreadShell,
@@ -365,14 +377,15 @@ export function HomeScreen(props: HomeScreenProps) {
   });
 
   const { projects, selectedEnvironmentId, projectGroupingMode } = props;
+  const projectsInFolderOrder = useProjectsInFolderOrder(projects);
   const projectScopes = useMemo(
     () =>
       buildHomeProjectScopes({
-        projects,
+        projects: projectsInFolderOrder,
         environmentId: selectedEnvironmentId,
         projectGroupingMode,
       }),
-    [projects, selectedEnvironmentId, projectGroupingMode],
+    [projectsInFolderOrder, selectedEnvironmentId, projectGroupingMode],
   );
   const hasSearchQuery = props.searchQuery.trim().length > 0;
   const projectByKey = (() => {
@@ -439,6 +452,7 @@ export function HomeScreen(props: HomeScreenProps) {
   } = useThreadListV2ShelfPreferences();
   const projectFoldersEnabled = useProjectFoldersEnabled();
   const { collapsedKeys, toggleFolder } = useProjectFolderCollapse();
+  const moveFolder = useProjectFolderMove(projectScopes, projects);
   const projectFolderGroups = useMemo(
     () =>
       [
@@ -529,6 +543,9 @@ export function HomeScreen(props: HomeScreenProps) {
           collapsed={item.collapsed}
           dot={item.dot}
           onToggle={toggleFolder}
+          moveUpKey={item.moveUpKey}
+          moveDownKey={item.moveDownKey}
+          onMove={moveFolder}
           pane={primaryColumn ? "sidebar" : "screen"}
         />
       );

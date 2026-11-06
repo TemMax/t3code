@@ -1,12 +1,9 @@
-import { orderItemsByPreferredIds, sortSidebarV2ProjectGroups } from "../components/Sidebar.logic";
-import {
-  getProjectOrderKey,
-  selectProjectGroupingSettings,
-} from "@t3tools/client-runtime/state/project-grouping";
+import { sortSidebarV2ProjectGroups } from "../components/Sidebar.logic";
+import { selectProjectGroupingSettings } from "@t3tools/client-runtime/state/project-grouping";
 import { buildSidebarProjectSnapshots } from "../sidebarProjectGrouping";
 import { useEnvironmentIdentities, usePrimaryEnvironmentId } from "../state/environments";
 import { useDelegatedUnderParent, useProjects, useQuietThreadShells } from "../state/entities";
-import { legacyProjectCwdPreferenceKey, useUiStateStore } from "../uiStateStore";
+import { orderProjectsManually, useProjectOrder } from "../projectOrder";
 import { useClientSettings } from "./useSettings";
 
 export function useSidebarProjectGroups() {
@@ -15,20 +12,12 @@ export function useSidebarProjectGroups() {
   // real change; reading every tick re-rendered the whole sidebar with it.
   const threads = useQuietThreadShells();
   const delegatedUnderParent = useDelegatedUnderParent();
-  const projectOrder = useUiStateStore((store) => store.projectOrder);
+  const projectOrder = useProjectOrder();
   const sortOrder = useClientSettings((s) => s.sidebarProjectSortOrder);
   const groupingSettings = useClientSettings(selectProjectGroupingSettings);
   const environments = useEnvironmentIdentities();
   const primaryEnvironmentId = usePrimaryEnvironmentId();
-  const orderedProjects = orderItemsByPreferredIds({
-    items: projects,
-    preferredIds: projectOrder,
-    getId: getProjectOrderKey,
-    getPreferenceIds: (project) => [
-      getProjectOrderKey(project),
-      legacyProjectCwdPreferenceKey(project.workspaceRoot),
-    ],
-  });
+  const orderedProjects = orderProjectsManually(projects, projectOrder);
   const labels = new Map(
     environments.map((environment) => [environment.environmentId, environment.label] as const),
   );

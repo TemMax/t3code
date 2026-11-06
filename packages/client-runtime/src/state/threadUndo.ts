@@ -1,3 +1,5 @@
+import type { ThreadPinScope } from "@t3tools/contracts";
+
 // Shared across hook instances so sidebar, header and menu actions invalidate each other.
 const currentActions = new Map<string, symbol>();
 const listeners = new Set<() => void>();
@@ -38,7 +40,7 @@ export function invalidate(kind: string, threadKey: string) {
 export type ThreadUndoStep =
   | { readonly action: "unsettle" }
   | { readonly action: "unsnooze" }
-  | { readonly action: "pin"; readonly orderKey?: string }
+  | { readonly action: "pin"; readonly orderKey?: string; readonly scope?: ThreadPinScope }
   | { readonly action: "snooze"; readonly snoozedUntil: string };
 
 export type ThreadUndoPlan = readonly [ThreadUndoStep, ...ThreadUndoStep[]];
@@ -48,6 +50,7 @@ export function planThreadUndo(
   thread?: {
     readonly pinnedAt?: string | null;
     readonly pinOrderKey?: string | null;
+    readonly pinScope?: ThreadPinScope | null;
     readonly snoozedUntil?: string | null;
   } | null,
 ): ThreadUndoPlan {
@@ -55,6 +58,7 @@ export function planThreadUndo(
   const pin: ThreadUndoStep = {
     action: "pin",
     ...(thread?.pinOrderKey != null ? { orderKey: thread.pinOrderKey } : {}),
+    ...(thread?.pinScope != null ? { scope: thread.pinScope } : {}),
   };
   // Pinning clears snooze on the server; restore it after restoring pin placement.
   const snooze =

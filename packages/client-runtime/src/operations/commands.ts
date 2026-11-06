@@ -25,6 +25,7 @@ import {
   type RuntimeRequestId,
   type ThreadId,
   type ThreadEnvMode,
+  type ThreadPinScope,
   type UploadChatAttachment,
   type GuestMessageId,
 } from "@t3tools/contracts";
@@ -98,6 +99,7 @@ export interface UnsettleThreadInput extends ThreadCommandInput {
 
 export interface PinThreadInput extends ThreadCommandInput {
   readonly orderKey?: string;
+  readonly scope?: ThreadPinScope;
 }
 export type UnpinThreadInput = ThreadCommandInput;
 
@@ -504,6 +506,7 @@ export const pinThread = Effect.fn("EnvironmentCommands.pinThread")(function* (
     commandId,
     threadId: input.threadId,
     ...(input.orderKey === undefined ? {} : { orderKey: input.orderKey }),
+    ...(input.scope === undefined ? {} : { scope: input.scope }),
   });
 });
 

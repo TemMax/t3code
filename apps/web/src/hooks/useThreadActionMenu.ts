@@ -139,6 +139,7 @@ export function useThreadActionMenu(input: {
         branch: thread.branch ?? null,
         projectFilter: null,
         isPinned: thread.pinnedAt != null,
+        isPinnedInProject: thread.pinnedAt != null && thread.pinScope === "project",
         isSettled: supports.settlement && thread.settledOverride === "settled",
         autoSettleEnabled: thread.autoSettleDisabledAt == null,
         isSnoozed: supports.snooze && effectiveSnoozed(thread, { now: now.toISOString() }),
@@ -233,6 +234,11 @@ export function useThreadActionMenu(input: {
           return;
         case "pin":
           await reportFailure("Failed to pin thread", () => pinThread(threadRef));
+          return;
+        case "pin-project":
+          await reportFailure("Failed to pin thread", () =>
+            pinThread(threadRef, { scope: "project" }),
+          );
           return;
         case "unpin": {
           await reportFailure("Failed to unpin thread", () => confirmAndUnpinThread(threadRef));

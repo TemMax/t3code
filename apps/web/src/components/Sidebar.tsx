@@ -58,6 +58,7 @@ import {
   ProjectId,
   type ScopedThreadRef,
   type ThreadId,
+  type ThreadPinScope,
 } from "@t3tools/contracts";
 import type { OlderSettledScope } from "@t3tools/client-runtime/state/threads";
 
@@ -129,6 +130,7 @@ import { useHandleNewThread } from "../hooks/useHandleNewThread";
 import { useOrderWhileOpen } from "../hooks/useOrderWhileOpen";
 import { useProjectPin } from "../hooks/useProjectGroupUpdate";
 import { useSidebarProjectGroups } from "../hooks/useSidebarProjectGroups";
+import { useMoveProjects } from "../projectOrder";
 import { useTerminalFocus } from "../hooks/useTerminalFocus";
 import { isCommandPaletteOpen, openCommandPalette } from "../commandPaletteBus";
 import { registerSettleAndAdvance } from "../settleAndAdvance";
@@ -324,6 +326,16 @@ const sidebarProviderEntriesAtom = Atom.make((get) => {
 }).pipe(Atom.withLabel("sidebar-provider-entries"));
 
 const EMPTY_PROVIDER_ENTRIES: ReadonlyMap<string, SidebarProviderEntry> = new Map();
+
+// Pinned folders always lead and archived ones trail, so a drop only reorders within its section.
+function canDropFolderOn(dragged: SidebarProjectSnapshot, target: SidebarProjectSnapshot) {
+  return (
+    dragged.projectKey !== target.projectKey &&
+    dragged.pinned === target.pinned &&
+    dragged.archived === target.archived
+  );
+}
+
 const EMPTY_THREADS: readonly EnvironmentThreadShell[] = [];
 
 const SETTLED_TAIL_INITIAL_COUNT = 10;
@@ -502,8 +514,16 @@ function useSidebarThreads(input: {
     clockKey: `${nowMinute}:${snoozeWakeClock}:${inboxReturnsVersion}`,
   });
 
-  const { pinnedThreads, activeThreads, workingThreads, snoozedThreads, settledThreads } =
-    partition;
+  const { activeThreads, workingThreads, snoozedThreads, settledThreads } = partition;
+  // Folders lead with their own pins; only pins above projects stay in the Pinned section.
+  const folderPinnedThreads =
+    folderGroups === null
+      ? EMPTY_THREADS
+      : partition.pinnedThreads.filter((thread) => thread.pinScope === "project");
+  const pinnedThreads =
+    folderPinnedThreads.length === 0
+      ? partition.pinnedThreads
+      : partition.pinnedThreads.filter((thread) => thread.pinScope !== "project");
   // Older settled threads load in pages; the shelf lists them only as far as they are loaded.
   const olderSettledShelf = useOlderSettledShelf({
     scopes: olderSettledScopes([...serverConfigs.keys()], scopedProjectKeys),
@@ -539,7 +559,11 @@ function useSidebarThreads(input: {
   const projectFolders =
     folderGroups === null
       ? null
-      : groupSidebarThreadsByProject(folderGroups, activeThreads, keepEmpty).map((folder) => {
+      : groupSidebarThreadsByProject(
+          folderGroups,
+          [...folderPinnedThreads, ...activeThreads],
+          keepEmpty,
+        ).map((folder) => {
           const collapsed = !resolveProjectExpanded(
             projectExpandedById,
             sidebarFolderExpansionKeys(folder.group),
@@ -567,7 +591,7 @@ function useSidebarThreads(input: {
   ];
   const sectionByThreadKey = new Map<string, SidebarSection>();
   for (const [list, section] of [
-    [pinnedThreads, "pinned"],
+    [partition.pinnedThreads, "pinned"],
     [activeThreads, "active"],
     [workingThreads, "working"],
     [snoozedThreads, "snoozed"],
@@ -577,10 +601,11 @@ function useSidebarThreads(input: {
   }
   return {
     ...partition,
+    pinnedThreads,
     threads,
     workingShelfEnabled,
     searchableThreads: [
-      ...pinnedThreads,
+      ...partition.pinnedThreads,
       ...activeThreads,
       ...workingThreads,
       ...snoozedThreads,
@@ -1265,6 +1290,39 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     if (isMobile) setOpenMobile(false);
     void handleNewThread(scopeProjectRef(group.environmentId, group.id));
   });
+  const manualProjectOrder = useClientSettings(
+    (settings) => settings.sidebarProjectSortOrder === "manual",
+  );
+  const [folderDrag, setFolderDrag] = useState<{
+    readonly dragged: SidebarProjectSnapshot;
+    readonly overKey: string | null;
+  } | null>(null);
+  const startFolderReorder = useStableCallback((group: SidebarProjectSnapshot) => {
+    setFolderDrag({ dragged: group, overKey: null });
+  });
+  const overFolderReorder = useStableCallback((group: SidebarProjectSnapshot) => {
+    setFolderDrag((current) =>
+      current === null || current.overKey === group.projectKey
+        ? current
+        : { ...current, overKey: group.projectKey },
+    );
+  });
+  const leaveFolderReorder = useStableCallback((group: SidebarProjectSnapshot) => {
+    setFolderDrag((current) =>
+      current?.overKey === group.projectKey ? { ...current, overKey: null } : current,
+    );
+  });
+  const moveProjects = useMoveProjects();
+  const dropFolderReorder = useStableCallback((group: SidebarProjectSnapshot) => {
+    if (folderDrag !== null && canDropFolderOn(folderDrag.dragged, group)) {
+      moveProjects(
+        folderDrag.dragged.memberProjects.map((member) => member.physicalProjectKey),
+        group.memberProjects.map((member) => member.physicalProjectKey),
+      );
+    }
+    setFolderDrag(null);
+  });
+  const endFolderReorder = useStableCallback(() => setFolderDrag(null));
   const handleProjectFolderContextMenu = useStableCallback(
     (group: SidebarProjectSnapshot, position: { x: number; y: number }) => {
       const api = readLocalApi();
@@ -1863,9 +1921,9 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
   ) {
     setOptimisticDrop(null);
   }
-  const attemptPin = (threadRef: ScopedThreadRef) => {
+  const attemptPin = (threadRef: ScopedThreadRef, scope?: ThreadPinScope) => {
     void (async () => {
-      const result = await pinThread(threadRef);
+      const result = await pinThread(threadRef, scope === undefined ? {} : { scope });
       if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
         const error = squashAtomCommandFailure(result);
         toastManager.add(
@@ -2636,6 +2694,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                     }
                   : null,
               isPinned,
+              isPinnedInProject: isPinned && thread.pinScope === "project",
               isSettled,
               autoSettleEnabled: thread.autoSettleDisabledAt == null,
               isSnoozed,
@@ -2722,6 +2781,9 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
             return;
           case "pin":
             attemptPin(threadRef);
+            return;
+          case "pin-project":
+            attemptPin(threadRef, "project");
             return;
           case "unpin":
             attemptUnpin(threadRef);
@@ -3455,6 +3517,17 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                                 onToggle={toggleProjectFolder}
                                 onNewThread={startThreadInProjectFolder}
                                 onContextMenu={handleProjectFolderContextMenu}
+                                reorderable={manualProjectOrder}
+                                isDropTarget={
+                                  folderDrag !== null &&
+                                  folderDrag.overKey === folder.group.projectKey &&
+                                  canDropFolderOn(folderDrag.dragged, folder.group)
+                                }
+                                onReorderStart={startFolderReorder}
+                                onReorderOver={overFolderReorder}
+                                onReorderLeave={leaveFolderReorder}
+                                onReorderDrop={dropFolderReorder}
+                                onReorderEnd={endFolderReorder}
                               />,
                             );
                             for (const thread of folder.threads) {

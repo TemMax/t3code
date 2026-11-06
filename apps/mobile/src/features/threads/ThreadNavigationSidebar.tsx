@@ -37,7 +37,12 @@ import { scopedProjectKey, scopedThreadKey } from "../../lib/scopedEntities";
 import { useProjects, useNavigationThreadShells } from "../../state/entities";
 import { useThreadSearch } from "../../state/queries";
 import { useThreadListV2ShelfPreferences } from "./use-thread-list-v2-shelf-preferences";
-import { useProjectFolderCollapse, useProjectFoldersEnabled } from "./use-project-folders";
+import {
+  useProjectFolderCollapse,
+  useProjectFolderMove,
+  useProjectFoldersEnabled,
+  useProjectsInFolderOrder,
+} from "./use-project-folders";
 import { useThreadListNow } from "./use-thread-list-now";
 import { usePendingThreadOrder } from "../../state/thread-order";
 import { threadListEnvironmentsAtom } from "../../state/presentation";
@@ -212,14 +217,15 @@ function ThreadNavigationSidebarPane(
     sidebarProjectGroupingMode: options.projectGroupingMode,
     sidebarProjectGroupingOverrides: {},
   });
+  const projectsInFolderOrder = useProjectsInFolderOrder(projects);
   const projectScopes = useMemo(
     () =>
       buildHomeProjectScopes({
-        projects,
+        projects: projectsInFolderOrder,
         environmentId: options.selectedEnvironmentId,
         projectGroupingMode: options.projectGroupingMode,
       }),
-    [projects, options.selectedEnvironmentId, options.projectGroupingMode],
+    [projectsInFolderOrder, options.selectedEnvironmentId, options.projectGroupingMode],
   );
   const projectFilterOptions = pickableProjectGroups(projectScopes).map((scope) => ({
     key: scope.key,
@@ -285,6 +291,7 @@ function ThreadNavigationSidebarPane(
   } = useThreadListV2ShelfPreferences();
   const projectFoldersEnabled = useProjectFoldersEnabled();
   const { collapsedKeys, toggleFolder } = useProjectFolderCollapse();
+  const moveFolder = useProjectFolderMove(projectScopes, projects);
   const projectFolderGroups = useMemo(
     () =>
       [
@@ -571,6 +578,9 @@ function ThreadNavigationSidebarPane(
             collapsed={item.collapsed}
             dot={item.dot}
             onToggle={toggleFolder}
+            moveUpKey={item.moveUpKey}
+            moveDownKey={item.moveDownKey}
+            onMove={moveFolder}
             pane="sidebar"
           />
         );

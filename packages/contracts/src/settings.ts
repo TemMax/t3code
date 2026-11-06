@@ -1252,6 +1252,10 @@ export const ServerSettings = Schema.Struct({
   sidebarProjectFoldersEnabled: Schema.Boolean.pipe(
     Schema.withDecodingDefault(Effect.succeed(false)),
   ),
+  /** The manual project order as physical project keys, shared so every client sorts folders alike. */
+  sidebarProjectOrder: Schema.Array(Schema.String).pipe(
+    Schema.withDecodingDefault(Effect.succeed([])),
+  ),
   sidebarAutoSettleAfterDays: Schema.NullOr(SidebarAutoSettleAfterDays).pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_SIDEBAR_AUTO_SETTLE_AFTER_DAYS)),
   ),
@@ -1657,6 +1661,7 @@ export const ServerSettingsPatch = Schema.Struct({
   simlockDeviceHosts: Schema.optionalKey(SimlockDeviceHostConfigs),
   simlockDeviceHostsEnabled: Schema.optionalKey(Schema.Boolean),
   sidebarProjectFoldersEnabled: Schema.optionalKey(Schema.Boolean),
+  sidebarProjectOrder: Schema.optionalKey(Schema.Array(Schema.String)),
   sidebarAutoSettleAfterDays: Schema.optionalKey(Schema.NullOr(SidebarAutoSettleAfterDays)),
   compactIdleThreads: Schema.optionalKey(LegacyCompactIdleThreads),
   idleCompaction: Schema.optionalKey(IdleCompactionMode),
