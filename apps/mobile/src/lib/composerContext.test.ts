@@ -1,10 +1,14 @@
 import {
   ComposerContextId,
+  EnvironmentId,
+  MessageId,
   ProviderInstanceId,
+  ThreadId,
   type ModelCapabilities,
   type OrchestrationMessageContext,
   type ServerProviderSkill,
 } from "@t3tools/contracts";
+import { serializeAssistantCitation } from "@t3tools/shared/assistantCitations";
 import { collectComposerInlineTokens } from "@t3tools/shared/composerInlineTokens";
 import {
   ATTACHMENT_ONLY_BOOTSTRAP_PROMPT,
@@ -160,7 +164,19 @@ describe("mobile composer context", () => {
   });
   it("keeps exact source positions and repeated references alongside existing native tokens", () => {
     const reference = formatComposerContextReference(terminal);
-    const text = `Use $babysit with $disabled $agentOnly $HOME $PATH $anything $notaskill $20 $20k and [app.ts](src/app.ts) with ${reference} then ${reference}`;
+    const citation = serializeAssistantCitation({
+      version: 1,
+      environmentId: EnvironmentId.make("environment-1"),
+      threadId: ThreadId.make("thread-1"),
+      messageId: MessageId.make("message-1"),
+      text: "Cost $babysit [x](y.ts)",
+      start: 0,
+      end: 23,
+      prefix: "",
+      suffix: "",
+      comment: "Why $babysit?",
+    });
+    const text = `Use $babysit with $disabled $agentOnly $HOME $PATH $anything $notaskill $20 $20k and [app.ts](src/app.ts) with ${reference} then ${reference} ${citation} `;
     const babysit: ServerProviderSkill = {
       name: "babysit",
       path: "/skills/babysit",
@@ -179,7 +195,9 @@ describe("mobile composer context", () => {
       "[app.ts](src/app.ts)",
       reference,
       reference,
+      citation,
     ]);
+    expect(tokens.at(-1)).toMatchObject({ type: "citation", value: "Why $babysit?" });
     for (const token of tokens) expect(text.slice(token.start, token.end)).toBe(token.source);
     expect(
       composerContextEditorTokens(
@@ -187,7 +205,7 @@ describe("mobile composer context", () => {
         collectComposerInlineTokens(text),
         composerSkillLabels([]),
       ).map((token) => token.type),
-    ).toEqual(["mention", "context", "context"]);
+    ).toEqual(["mention", "context", "context", "citation"]);
     expect(
       composerContextEditorTokens(
         text,

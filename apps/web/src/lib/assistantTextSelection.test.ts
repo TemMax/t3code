@@ -6,16 +6,13 @@ import {
   ThreadId,
 } from "@t3tools/contracts";
 import {
+  type AssistantTextSelector,
+  createAssistantTextSelector,
   formatAssistantCitationHref,
   parseAssistantCitationHref,
 } from "@t3tools/shared/assistantCitations";
 
-import {
-  type AssistantTextSelector,
-  captureAssistantTextSelection,
-  createAssistantTextSelector,
-  findAssistantCitationText,
-} from "./assistantTextSelection";
+import { captureAssistantTextSelection, findAssistantCitationText } from "./assistantTextSelection";
 
 function selector(
   text: string,

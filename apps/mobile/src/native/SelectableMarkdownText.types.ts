@@ -62,6 +62,16 @@ export interface MarkdownLinkCustomization {
   readonly chip?: { readonly accent?: string; readonly tintsIcon: boolean };
 }
 
+export interface MarkdownSelectionMenuItem {
+  readonly text: string;
+  /** SF Symbol name; Android menus show text only. */
+  readonly icon?: string;
+  readonly onPress: (event: {
+    readonly text: string;
+    readonly selection: { readonly start: number; readonly end: number };
+  }) => void;
+}
+
 export interface SelectableMarkdownTextProps {
   readonly markdown: string;
   readonly textStyle: NativeMarkdownTextStyle;
@@ -72,6 +82,8 @@ export interface SelectableMarkdownTextProps {
   readonly onFileContextMenuAction?: (href: string, actionId: string) => void;
   readonly linkCustomization?: (href: string) => MarkdownLinkCustomization | undefined;
   readonly contextClipboardFragment?: string;
+  /** Extra actions in the text selection menu. Offsets index the rendered text, not the markdown. */
+  readonly selectionMenuItems?: ReadonlyArray<MarkdownSelectionMenuItem>;
   readonly renderImage?: MarkdownImageRenderer;
   readonly fileEmbedLabel?: (href: string, standalone: boolean) => string | null;
   readonly resolveImageSource?: MarkdownImageSourceResolver;

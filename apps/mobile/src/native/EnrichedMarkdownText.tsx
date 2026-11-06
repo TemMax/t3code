@@ -164,6 +164,10 @@ function enrichedStyle(
 export function MobileEnrichedMarkdownText(props: SelectableMarkdownTextProps) {
   const { renderImage, resolveImageSource, fileEmbedLabel } = props;
   const { themeAppearance, mathRenderingEnabled } = useAppearancePreferences();
+  const selectionMenuItems = useMemo(
+    () => (props.selectionMenuItems ? [...props.selectionMenuItems] : undefined),
+    [props.selectionMenuItems],
+  );
   const { markdown, fileHrefs } = useMemo(() => {
     if (!fileEmbedLabel) {
       return {
@@ -346,6 +350,7 @@ export function MobileEnrichedMarkdownText(props: SelectableMarkdownTextProps) {
           onLinkLongPress={onLinkLongPress}
           linkContextMenuItems={linkContextMenuItems}
           linkPillContent={linkPillContent}
+          contextMenuItems={selectionMenuItems}
         />
       </View>
     );
