@@ -40,6 +40,7 @@ import { HeaderHeightContext } from "@react-navigation/elements";
 import { NativeLayoutObserver } from "../../native/NativeLayoutObserver";
 import { deriveBottomControlInsets, type NativeLayoutMetrics } from "../../lib/reserved-regions";
 import type {
+  AssistantCitation,
   EnvironmentId,
   MessageId,
   ProviderInteractionMode,
@@ -148,8 +149,10 @@ import { scopedThreadKey } from "../../lib/scopedEntities";
 import {
   finishThreadMessageJump,
   pendingThreadMessageJump,
+  pendingThreadMessageJumpIsCitation,
   subscribeThreadMessageJump,
 } from "./threadMessageJump";
+import { citeInComposerDraft } from "../../state/composerCitations";
 import {
   clearThreadComposerError,
   threadComposerErrorsAtom,
@@ -864,6 +867,9 @@ function ThreadDetailBody(
   const jumpMessageId = useSyncExternalStore(subscribeThreadMessageJump, () =>
     pendingThreadMessageJump(selectedThreadKey),
   );
+  const jumpIsCitation = useSyncExternalStore(subscribeThreadMessageJump, () =>
+    pendingThreadMessageJumpIsCitation(selectedThreadKey),
+  );
   const jumpMessageLoaded =
     jumpMessageId !== null &&
     selectedThreadFeed.some((entry) => entry.type === "message" && entry.id === jumpMessageId);
@@ -879,10 +885,22 @@ function ThreadDetailBody(
     if (historyForJump?.loading) return;
     if (!historyForJump?.hasMoreHistory || historyForJump.error !== null) {
       finishThreadMessageJump(selectedThreadKey);
+      if (jumpIsCitation && historyForJump?.error) {
+        Dialog.alert(
+          "Could not load the cited response",
+          "Load earlier turns, then tap the citation to try again. Your saved quote is unchanged.",
+        );
+      } else if (jumpIsCitation) {
+        Dialog.alert(
+          "The cited response is unavailable",
+          "It may have been removed. The selected text is still saved in your citation.",
+        );
+      }
       return;
     }
     loadEarlierForJump();
   }, [
+    jumpIsCitation,
     contentPresentationKind,
     historyForJump?.error,
     historyForJump?.hasMoreHistory,
@@ -1356,6 +1374,12 @@ function ThreadDetailBody(
     });
   };
 
+  const handleCiteAssistantText = (citation: AssistantCitation) => {
+    if (props.composerDraftKey === null) return;
+    void Haptics.selectionAsync();
+    citeInComposerDraft(props.composerDraftKey, citation);
+  };
+
   const handleScrollToEnd = () => {
     void Haptics.selectionAsync();
     void scrollMessageToEnd({ animated: !reduceMotion, closeKeyboard: false }).catch(() => {
@@ -1486,6 +1510,10 @@ function ThreadDetailBody(
                 onEndFollowEnabledChange={handleEndFollowEnabledChange}
                 skills={selectedProviderSkills}
                 onUseArtifactTemplate={handleUseArtifactTemplate}
+                {...(props.composerDraftKey !== null
+                  ? { onCiteAssistantText: handleCiteAssistantText }
+                  : {})}
+                highlightJumpTarget={jumpIsCitation}
               />
             </WorkspaceMutationIdProvider>
           </RenderErrorBoundary>

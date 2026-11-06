@@ -21,6 +21,10 @@ import {
 } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
 import {
+  assistantCitationLabel,
+  collectAssistantCitations,
+} from "@t3tools/shared/assistantCitations";
+import {
   ATTACHMENT_ONLY_BOOTSTRAP_PROMPT,
   collectComposerContextReferences,
   formatComposerContextReference,
@@ -192,17 +196,26 @@ export function composerContextEditorTokens(
   knownSkills: { has(name: string): boolean },
 ) {
   const references = collectComposerContextReferences(text);
+  const citations = collectAssistantCitations(text);
+  const covered = [...references, ...citations];
   return [
     ...tokens.filter(
       (token) =>
         // `$HOME` and other `$name` text that is not one of the provider's skills stays prose.
         (token.type !== "skill" || knownSkills.has(token.value)) &&
-        !references.some((ref) => token.start < ref.end && token.end > ref.start),
+        !covered.some((range) => token.start < range.end && token.end > range.start),
     ),
     ...references.map((ref) => ({
       type: "context" as const,
       value: ref.label,
       ...ref,
+    })),
+    ...citations.map(({ citation, source, start, end }) => ({
+      type: "citation" as const,
+      value: assistantCitationLabel(citation),
+      source,
+      start,
+      end,
     })),
   ].sort((a, b) => a.start - b.start);
 }

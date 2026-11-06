@@ -3,10 +3,15 @@ import { ComposerContextId } from "@t3tools/contracts";
 import { useAtomSet, useAtomValue } from "@effect/atom-react";
 import { AsyncResult } from "effect/reactivity";
 import { settlePromise, squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import type { EnvironmentId, ProviderOptionSelection } from "@t3tools/contracts";
 import { encodeComposerContextFragment } from "@t3tools/shared/composerContextClipboard";
 import { collectComposerContextReferences } from "@t3tools/shared/composerContextReferences";
+import {
+  collectAssistantCitations,
+  serializeAssistantCitation,
+  withAssistantCitationComment,
+} from "@t3tools/shared/assistantCitations";
 import { ComposerEditor as NativeComposerEditor } from "../native/T3ComposerEditor";
 import type { ComposerEditorProps as NativeComposerEditorProps } from "../native/T3ComposerEditor";
 import {
@@ -29,6 +34,13 @@ import { mobilePreferencesAtom, updateMobilePreferencesAtom } from "../state/pre
 import { useOpenLinkedThread } from "../features/threads/useOpenLinkedThread";
 import { useLinkedEnvironments } from "../state/peerLinks";
 import { ComposerContextSheet } from "./ComposerContextSheet";
+import { AssistantCitationSheet } from "./AssistantCitationSheet";
+import {
+  finishComposerCitation,
+  pendingComposerCitation,
+  subscribeComposerCitation,
+} from "../state/composerCitations";
+import { useOpenAssistantCitationSource } from "../features/threads/useOpenAssistantCitationSource";
 import { AppText as Text } from "./ui/AppText";
 import {
   composerDocumentAttachment,
@@ -83,6 +95,41 @@ export function ComposerEditor({
   const [selected, setSelected] = useState<{ source: string; start: number; end: number } | null>(
     null,
   );
+  const requestedCitation = useSyncExternalStore(subscribeComposerCitation, () =>
+    pendingComposerCitation(draftKey ?? null),
+  );
+  const [pressedCitation, setPressedCitation] = useState<{
+    source: string;
+    start: number;
+  } | null>(null);
+  const openCitation =
+    requestedCitation ?? (pressedCitation && { ...pressedCitation, insertedSpaces: null });
+  const citation =
+    openCitation && props.value.startsWith(openCitation.source, openCitation.start)
+      ? collectAssistantCitations(openCitation.source)[0]?.citation
+      : undefined;
+  const openCitationSource = useOpenAssistantCitationSource();
+  const closeCitation = () => {
+    setPressedCitation(null);
+    if (draftKey) finishComposerCitation(draftKey);
+  };
+  const replaceCitation = (next: string, removeInsertedSpaces = false) => {
+    if (!openCitation) return;
+    let start = openCitation.start;
+    let end = start + openCitation.source.length;
+    const spaces = removeInsertedSpaces ? openCitation.insertedSpaces : null;
+    if (spaces?.before && props.value[start - 1] === " ") start -= 1;
+    if (spaces?.after && props.value[end] === " ") end += 1;
+    changeText(props.value.slice(0, start) + next + props.value.slice(end));
+    const caret = start + next.length + (next && props.value[end] === " " ? 1 : 0);
+    props.onSelectionChange?.({ start: caret, end: caret });
+    closeCitation();
+  };
+  const saveCitationComment = (comment: string) => {
+    if (citation) {
+      replaceCitation(serializeAssistantCitation(withAssistantCitationComment(citation, comment)));
+    }
+  };
   const linkedEnvironments = useLinkedEnvironments(environmentId ?? null);
   const contextImports = useAtomValue(composerContextImportsAtom);
   const importing = draftKey ? contextImports[draftKey] === true : false;
@@ -222,6 +269,10 @@ export function ComposerEditor({
             onInertChipPress?.();
             return;
           }
+          if (collectAssistantCitations(selection.source)[0]?.source === selection.source) {
+            setPressedCitation({ source: selection.source, start: selection.start });
+            return;
+          }
           const path = composerMentionPath(selection.source, draft.context);
           if (path && onOpenMention) {
             onOpenMention(path);
@@ -246,6 +297,34 @@ export function ComposerEditor({
       />
       {importing ? (
         <Text className="py-2 text-xs text-foreground-muted">Copying context…</Text>
+      ) : null}
+      {citation ? (
+        <AssistantCitationSheet
+          key={openCitation?.source}
+          citation={citation}
+          {...(props.readOnly || props.editable === false
+            ? {}
+            : {
+                editor: {
+                  fresh: (openCitation?.insertedSpaces ?? null) !== null,
+                  onSave: saveCitationComment,
+                  ...(props.onSubmit
+                    ? {
+                        onSaveAndSend: (comment: string) => {
+                          saveCitationComment(comment);
+                          requestAnimationFrame(() => props.onSubmit?.(false));
+                        },
+                      }
+                    : {}),
+                  onRemove: () => replaceCitation("", true),
+                },
+              })}
+          onGoToSource={() => openCitationSource(citation)}
+          onClose={(comment) => {
+            if (comment === null) closeCitation();
+            else saveCitationComment(comment);
+          }}
+        />
       ) : null}
       {selected && (selectedReference || selectedSkill) ? (
         <ComposerContextSheet

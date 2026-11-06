@@ -45,8 +45,10 @@ import type { ThreadCheckpointSummary } from "@t3tools/client-runtime/state/thre
 import { formatDiffCount } from "@t3tools/client-runtime/diff-count";
 import type { WorkflowOpening } from "@t3tools/client-runtime/state/subagentRuntime";
 import {
+  ASSISTANT_CITATION_MAX_TEXT_LENGTH,
   AuthFilesystemReadScope,
   idleCompactionOf,
+  type AssistantCitation,
   type OrchestrationMessageContext,
   ThreadId,
   type ChatAttachment,
@@ -59,7 +61,11 @@ import {
   type ScheduledTaskId,
   type ScopedThreadRef,
 } from "@t3tools/contracts";
-import { renderAssistantCitationsAsText } from "@t3tools/shared/assistantCitations";
+import {
+  assistantCitationLabel,
+  parseAssistantCitationHref,
+  renderAssistantCitationsAsText,
+} from "@t3tools/shared/assistantCitations";
 import { encodeComposerContextFragment } from "@t3tools/shared/composerContextClipboard";
 import { hostedThreadLink, parseThreadLinkHref } from "@t3tools/shared/threadLinks";
 import { PROMPT_LINK_MAX_PROMPT_LENGTH } from "@t3tools/shared/promptLinks";
@@ -71,6 +77,9 @@ import {
 } from "@t3tools/shared/composerContextReferences";
 import { ComposerContextSheet } from "../../components/ComposerContextSheet";
 import { writeComposerContextClipboard } from "../../lib/composerContextClipboard";
+import { assistantCitationFromSelection } from "../../lib/assistantCitationSelection";
+import { AssistantCitationSheet } from "../../components/AssistantCitationSheet";
+import { useOpenAssistantCitationSource } from "./useOpenAssistantCitationSource";
 import {
   codexArtifactTemplatePresentationLabel,
   type CodexArtifactTemplate,
@@ -148,7 +157,7 @@ import { flattenThemeColor } from "../../lib/mobileTheme";
 import { PresentationSource } from "../../components/ui/NativePresentation";
 import { NativeScrollViewMarker } from "../../native/NativeScrollViewMarker";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import Animated, { FadeIn, FadeInDown, type SharedValue } from "react-native-reanimated";
+import Animated, { FadeIn, FadeInDown, FadeOut, type SharedValue } from "react-native-reanimated";
 import { useUniwindTheme } from "../../lib/useUniwindTheme";
 import { IOS_NAV_BAR_HEIGHT } from "../../lib/layoutMetrics";
 import { FONT_FAMILIES } from "../../lib/fontFamilies";
@@ -379,6 +388,10 @@ export interface ThreadFeedProps {
   readonly onEndFollowEnabledChange?: (enabled: boolean) => void;
   readonly skills?: ReadonlyArray<SelectableMarkdownSkill>;
   readonly onUseArtifactTemplate?: (template: CodexArtifactTemplate) => void;
+  /** Selecting reply text offers Cite, which hands the citation to the composer. */
+  readonly onCiteAssistantText?: (citation: AssistantCitation) => void;
+  /** The jump comes from a citation, so its reply flashes once it lands. */
+  readonly highlightJumpTarget?: boolean;
 }
 
 async function waitForThreadShell(
@@ -1186,6 +1199,10 @@ function ArtifactTemplateCard(props: {
 const AssistantMarkdownContent = memo(function AssistantMarkdownContent(props: {
   readonly markdown: string;
   readonly environmentId: EnvironmentId;
+  /** Reasoning has no message to cite, so it leaves these out. */
+  readonly threadId?: ThreadId;
+  readonly messageId?: MessageId;
+  readonly onCiteAssistantText?: ((citation: AssistantCitation) => void) | undefined;
   readonly markdownStyles: MarkdownStyleSet;
   readonly linkHandlers: MarkdownLinkHandlers;
   readonly onUseArtifactTemplate?: ((template: CodexArtifactTemplate) => void) | undefined;
@@ -1200,6 +1217,28 @@ const AssistantMarkdownContent = memo(function AssistantMarkdownContent(props: {
       withChipIcon(props.linkHandlers.linkCustomization?.(href), threadIcons.get(href)),
   };
 
+  const { onCiteAssistantText: onCite, threadId, messageId } = props;
+  const citeSelection =
+    onCite && threadId && messageId
+      ? (blockMarkdown: string, selection: { text: string; start: number }) => {
+          const result = assistantCitationFromSelection({
+            environmentId: props.environmentId,
+            threadId,
+            messageId,
+            messageText: props.markdown,
+            blockMarkdown,
+            selection,
+          });
+          if (result._tag === "citation") onCite(result.citation);
+          else if (result._tag === "too-long") {
+            Dialog.alert(
+              "Selection is too long to cite",
+              `Select at most ${ASSISTANT_CITATION_MAX_TEXT_LENGTH.toLocaleString()} characters.`,
+            );
+          }
+        }
+      : undefined;
+
   return (
     <AssistantMarkdownBlocks
       markdown={liveMarkdown}
@@ -1208,6 +1247,7 @@ const AssistantMarkdownContent = memo(function AssistantMarkdownContent(props: {
       onUseArtifactTemplate={props.onUseArtifactTemplate}
       renderImage={props.renderImage}
       skills={props.skills}
+      onCiteSelection={citeSelection}
     />
   );
 });
@@ -1220,6 +1260,9 @@ function AssistantMarkdownBlocks(props: {
   readonly onUseArtifactTemplate?: ((template: CodexArtifactTemplate) => void) | undefined;
   readonly renderImage: MarkdownImageRenderer;
   readonly skills?: ReadonlyArray<SelectableMarkdownSkill> | undefined;
+  readonly onCiteSelection?:
+    | ((blockMarkdown: string, selection: { text: string; start: number }) => void)
+    | undefined;
 }) {
   const blocks = useMemo(
     () =>
@@ -1254,6 +1297,7 @@ function AssistantMarkdownBlocks(props: {
         );
       }
       if (segment.markdown.trim().length === 0) return null;
+      const onCiteSelection = props.onCiteSelection;
       return (
         <SelectableMarkdownText
           key={`markdown:${offset}`}
@@ -1262,6 +1306,18 @@ function AssistantMarkdownBlocks(props: {
           textStyle={props.markdownStyles.nativeTextStyle}
           {...props.linkHandlers}
           renderImage={props.renderImage}
+          {...(onCiteSelection
+            ? {
+                selectionMenuItems: [
+                  {
+                    text: "Cite",
+                    icon: "quote.opening",
+                    onPress: ({ text, selection }) =>
+                      onCiteSelection(segment.markdown, { text, start: selection.start }),
+                  },
+                ],
+              }
+            : {})}
         />
       );
     });
@@ -1662,6 +1718,7 @@ function renderFeedEntry(
     ThreadFeedProps,
     | "environmentId"
     | "onUseArtifactTemplate"
+    | "onCiteAssistantText"
     | "skills"
     | "dispatchingMessageId"
     | "onEditPendingMessage"
@@ -1669,6 +1726,7 @@ function renderFeedEntry(
     | "workspaceRoot"
   > & {
     readonly copiedRowId: string | null;
+    readonly flashedMessageId: MessageId | null;
     readonly expandedWorkRows: Record<string, boolean>;
     readonly workRowSizing: ReturnType<typeof deriveThreadWorkLogSizing>;
     readonly workGroupScrollPositions: Map<string, ThreadWorkGroupScrollPosition>;
@@ -1879,7 +1937,7 @@ function renderFeedEntry(
     const attachments = message.attachments ?? [];
     const hasReviewCommentContext = presentation.text.includes("<review_comment");
     // Android does not reposition children after maxWidth clamps bubbles; definite width prevents wide-block overlap.
-    const hasWideBlock = hasWideMarkdownBlock(renderedText, WIDE_MARKDOWN_BLOCK_OPTIONS);
+    const hasWideBlock = hasWideMarkdownBlock(presentation.text, WIDE_MARKDOWN_BLOCK_OPTIONS);
     const assistantTurnStillInProgress =
       message.role === "assistant" &&
       props.unsettledTurnId !== null &&
@@ -2152,7 +2210,7 @@ function renderFeedEntry(
                       value={props.userBubbleMaxWidth - USER_BUBBLE_HORIZONTAL_PADDING * 2}
                     >
                       <UserMessageContent
-                        text={renderedText}
+                        text={presentation.text}
                         environmentId={props.environmentId}
                         context={message.context}
                         markdownStyles={styles}
@@ -2256,11 +2314,17 @@ function renderFeedEntry(
         )}
         {...(enterAnimated ? { entering: FadeIn.duration(220) } : {})}
       >
+        {props.flashedMessageId === message.id ? <CitedMessageFlash /> : null}
         {renderedText.trim().length > 0 ? (
           <MarkdownImageAvailableWidthContext value={props.markdownContentWidth}>
             <AssistantMarkdownContent
-              markdown={renderedText}
+              markdown={presentation.text}
               environmentId={props.environmentId}
+              threadId={props.threadId}
+              messageId={message.id}
+              onCiteAssistantText={
+                message.role === "assistant" ? props.onCiteAssistantText : undefined
+              }
               markdownStyles={styles}
               linkHandlers={props.markdownLinkHandlers}
               onUseArtifactTemplate={props.onUseArtifactTemplate}
@@ -2329,6 +2393,19 @@ function renderFeedEntry(
       renderImage={props.renderViewedImage}
       renderReasoning={props.renderReasoning}
       onPressPreview={props.onPressPreview}
+    />
+  );
+}
+
+const CITED_MESSAGE_FLASH_MS = 1600;
+
+/** Marks the reply a citation opened; the feed unmounts it after CITED_MESSAGE_FLASH_MS. */
+function CitedMessageFlash() {
+  return (
+    <Animated.View
+      pointerEvents="none"
+      exiting={FadeOut.duration(600)}
+      className="absolute inset-0 rounded-xl bg-focus/15"
     />
   );
 }
@@ -2753,6 +2830,9 @@ export const ThreadFeed = memo(function ThreadFeed({
     expandedTurnIds: new Set(),
   });
   const { copiedRowId, expandedWorkGroups, expandedWorkRows, expandedTurnIds } = interactionState;
+  const [flashedMessageId, setFlashedMessageId] = useState<MessageId | null>(null);
+  const [viewedCitation, setViewedCitation] = useState<AssistantCitation | null>(null);
+  const openCitationSource = useOpenAssistantCitationSource();
   const markdownLinkRequest = useRef<AbortController | null>(null);
   const onInlinePlaybackStart = () => {
     markdownLinkRequest.current?.abort();
@@ -2863,6 +2943,11 @@ export const ThreadFeed = memo(function ThreadFeed({
     markdownLinkRequest.current?.abort();
     const request = new AbortController();
     markdownLinkRequest.current = request;
+    const citation = parseAssistantCitationHref(href);
+    if (citation) {
+      setViewedCitation(citation);
+      return;
+    }
     const skill = enrichedSkillReference(href, props.skills);
     if (skill) {
       const instructionsPath = enrichedSkillInstructionsPath(skill);
@@ -3022,6 +3107,17 @@ export const ThreadFeed = memo(function ThreadFeed({
     onImagePress: (href) => onMarkdownLinkPress(href, true),
     resolveImageSource,
     fileContextMenu: (href) => {
+      const citation = parseAssistantCitationHref(href);
+      if (citation) {
+        return {
+          title: assistantCitationLabel(citation),
+          actions: [
+            { id: "show-quote", title: "Show quote" },
+            { id: "go-to-source", title: "Go to source" },
+            { id: "copy-quote", title: "Copy quote" },
+          ],
+        };
+      }
       const skill = enrichedSkillReference(href, props.skills);
       if (skill) {
         return {
@@ -3051,6 +3147,13 @@ export const ThreadFeed = memo(function ThreadFeed({
       return target ? fileChipMenu(target) : undefined;
     },
     onFileContextMenuAction: (href, actionId) => {
+      const citation = parseAssistantCitationHref(href);
+      if (citation) {
+        if (actionId === "show-quote") setViewedCitation(citation);
+        else if (actionId === "go-to-source") openCitationSource(citation);
+        else if (actionId === "copy-quote") copyTextWithHaptic(citation.text);
+        return;
+      }
       const skill = enrichedSkillReference(href, props.skills);
       if (skill) {
         const instructionsPath = enrichedSkillInstructionsPath(skill);
@@ -3223,6 +3326,7 @@ export const ThreadFeed = memo(function ThreadFeed({
     dispatchingMessageId: props.dispatchingMessageId,
     unsettledTurnId,
     copiedRowId,
+    flashedMessageId,
     expandedWorkGroups,
     expandedWorkRows,
     workRowSizing,
@@ -3357,6 +3461,15 @@ export const ThreadFeed = memo(function ThreadFeed({
     if (index !== -1) {
       setEndFollow(false);
       void listRef.current?.scrollToIndex({ index, viewPosition: 0.2, animated: false });
+      const target = jumpToMessageId;
+      if (props.highlightJumpTarget && target) {
+        // Flash once the scroll has placed the row.
+        requestAnimationFrame(() => setFlashedMessageId(target));
+        setTimeout(
+          () => setFlashedMessageId((current) => (current === target ? null : current)),
+          CITED_MESSAGE_FLASH_MS,
+        );
+      }
     }
     props.onJumpedToMessage?.();
   });
@@ -3747,8 +3860,10 @@ export const ThreadFeed = memo(function ThreadFeed({
             dispatchingMessageId: props.dispatchingMessageId,
             onEditPendingMessage: props.onEditPendingMessage,
             onUseArtifactTemplate: props.onUseArtifactTemplate,
+            onCiteAssistantText: props.onCiteAssistantText,
             threadId: props.threadId,
             copiedRowId,
+            flashedMessageId,
             expandedWorkRows,
             workRowSizing,
             workGroupScrollPositions,
@@ -3968,6 +4083,13 @@ export const ThreadFeed = memo(function ThreadFeed({
         ) : null}
         <VideoPreviewModal source={expandedVideo} onRequestClose={closeVideoPreview} />
         <FilePreviewModal source={expandedFile} onRequestClose={closeFilePreview} />
+        {viewedCitation ? (
+          <AssistantCitationSheet
+            citation={viewedCitation}
+            onGoToSource={() => openCitationSource(viewedCitation)}
+            onClose={() => setViewedCitation(null)}
+          />
+        ) : null}
       </View>
     </PresentationSource>
   );

@@ -1,4 +1,5 @@
 import {
+  ASSISTANT_CITATION_CONTEXT_LENGTH,
   ASSISTANT_CITATION_MAX_COMMENT_LENGTH,
   ASSISTANT_CITATION_MAX_TEXT_LENGTH,
   AssistantCitation,
@@ -16,6 +17,84 @@ const CITATION_LINK = new RegExp(
   "g",
 );
 const decodeCitation = Schema.decodeUnknownOption(AssistantCitation);
+
+export type AssistantTextSelector = {
+  readonly text: string;
+  readonly start: number;
+  readonly end: number;
+  readonly prefix: string;
+  readonly suffix: string;
+};
+
+function normalizeWhitespace(text: string): string {
+  return text.replace(/\s+/g, " ");
+}
+
+function splitsSurrogatePair(text: string, offset: number): boolean {
+  const before = text.charCodeAt(offset - 1);
+  const after = text.charCodeAt(offset);
+  return before >= 0xd800 && before <= 0xdbff && after >= 0xdc00 && after <= 0xdfff;
+}
+
+export function createAssistantTextSelector(
+  text: string,
+  rawStart: number,
+  rawEnd: number,
+): AssistantTextSelector | null {
+  const quote = text.slice(rawStart, rawEnd);
+  if (quote.trim().length === 0) return null;
+
+  const normalized = normalizeWhitespace(text);
+  let start = normalizeWhitespace(text.slice(0, rawStart)).length;
+  if (rawStart > 0 && /\s/.test(text[rawStart - 1]!) && /\s/.test(text[rawStart]!)) {
+    start -= 1;
+  }
+  const end = normalizeWhitespace(text.slice(0, rawEnd)).length;
+  let prefixStart = Math.max(0, start - ASSISTANT_CITATION_CONTEXT_LENGTH);
+  let suffixEnd = Math.min(normalized.length, end + ASSISTANT_CITATION_CONTEXT_LENGTH);
+  // A split pair becomes a replacement character when the context enters a URL.
+  if (splitsSurrogatePair(normalized, prefixStart)) prefixStart += 1;
+  if (splitsSurrogatePair(normalized, suffixEnd)) suffixEnd -= 1;
+  return {
+    text: quote,
+    start,
+    end,
+    prefix: normalized.slice(prefixStart, start),
+    suffix: normalized.slice(end, suffixEnd),
+  };
+}
+
+/**
+ * For native text views, which report only the selected text and an offset into their own
+ * rendering: the occurrence nearest that offset in `text`, compared with whitespace collapsed.
+ * A quote missing from `text` keeps no context, so only its text can locate it later.
+ */
+export function assistantTextSelectorNear(
+  text: string,
+  quote: string,
+  approximateStart: number,
+): AssistantTextSelector | null {
+  const trimmed = quote.trim();
+  if (!trimmed) return null;
+  const normalized = normalizeWhitespace(text);
+  const needle = normalizeWhitespace(trimmed);
+  let best = -1;
+  for (
+    let index = normalized.indexOf(needle);
+    index !== -1;
+    index = normalized.indexOf(needle, index + 1)
+  ) {
+    if (best === -1 || Math.abs(index - approximateStart) < Math.abs(best - approximateStart)) {
+      best = index;
+    }
+  }
+  if (best === -1) {
+    const start = Math.max(0, Math.trunc(approximateStart));
+    return { text: trimmed, start, end: start + needle.length, prefix: "", suffix: "" };
+  }
+  const selector = createAssistantTextSelector(normalized, best, best + needle.length);
+  return selector && { ...selector, text: trimmed };
+}
 
 function encodePathPart(value: string): string {
   return encodeURIComponent(value).replace(

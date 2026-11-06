@@ -7,12 +7,18 @@ disappears or changes. The [shared format](../../packages/shared/src/assistantCi
 stable environment IDs without a browser origin, so moving between local, remote,
 and tunnel connections does not change a citation's identity.
 
-Source navigation is best effort. [Text selectors](../../apps/web/src/lib/assistantTextSelection.ts)
+Source navigation is best effort. [Text selectors](../../packages/shared/src/assistantCitations.ts)
 refer to rendered text after whitespace normalization, measured in UTF-16 units.
 They cannot be applied to raw Markdown. The original excerpt keeps its whitespace;
 normalization is only for locating it. Repeated text needs an unambiguous context
 match, even if one occurrence still sits at the saved offsets. Guessing could
 highlight the wrong claim.
+
+Native text views report only the selected text and an offset into their own
+rendering, which differs from web's. Mobile therefore [rebuilds the rendered text](../../apps/mobile/src/lib/assistantCitationSelection.ts)
+from the reply's Markdown with thread find's extraction and takes the occurrence
+nearest that offset. When the rebuilt text and web's DOM disagree, the context
+does not match and web falls back to a unique quote.
 
 Navigation owns the highlight's lifetime across virtual-row remounts. The source
 row must be fetched, unfolded, mounted, and measured before quote positioning

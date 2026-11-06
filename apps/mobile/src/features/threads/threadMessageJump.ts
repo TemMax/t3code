@@ -8,6 +8,8 @@ const PENDING_JUMP_MS = 30_000;
 let pending: {
   readonly threadKey: string;
   readonly messageId: MessageId;
+  /** A citation's source flashes when it lands, and says so when it cannot be found. */
+  readonly citation: boolean;
   readonly at: number;
 } | null = null;
 const listeners = new Set<() => void>();
@@ -16,8 +18,12 @@ function notify() {
   for (const listener of listeners) listener();
 }
 
-export function requestThreadMessageJump(threadKey: string, messageId: MessageId): void {
-  pending = { threadKey, messageId, at: Date.now() };
+export function requestThreadMessageJump(
+  threadKey: string,
+  messageId: MessageId,
+  options?: { readonly citation?: boolean },
+): void {
+  pending = { threadKey, messageId, citation: options?.citation ?? false, at: Date.now() };
   notify();
 }
 
@@ -26,6 +32,10 @@ export function pendingThreadMessageJump(threadKey: string): MessageId | null {
   return pending?.threadKey === threadKey && Date.now() - pending.at < PENDING_JUMP_MS
     ? pending.messageId
     : null;
+}
+
+export function pendingThreadMessageJumpIsCitation(threadKey: string): boolean {
+  return pendingThreadMessageJump(threadKey) !== null && pending?.citation === true;
 }
 
 export function finishThreadMessageJump(threadKey: string): void {

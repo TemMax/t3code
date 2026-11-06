@@ -126,7 +126,7 @@ class T3ComposerEditorView(context: Context, appContext: AppContext) : ExpoView(
             val offset = editor.getOffsetForPosition(event.x, event.y)
             val token =
               tokens.firstOrNull {
-                (it.type == "context" || it.type == "mention" || it.type == "skill") &&
+                it.type in PRESSABLE_TOKEN_TYPES &&
                   offset >= it.start &&
                   offset < it.end
               }
@@ -555,6 +555,8 @@ private class ComposerChipSpan(
     chip.draw(canvas, x, y + (metrics.ascent + metrics.descent - chip.height) / 2)
   }
 }
+
+private val PRESSABLE_TOKEN_TYPES = setOf("context", "mention", "skill", "citation")
 
 private fun parseTokens(value: String): List<ComposerToken> = try {
   val array = org.json.JSONArray(value)

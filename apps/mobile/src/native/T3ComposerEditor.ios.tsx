@@ -202,7 +202,9 @@ export function ComposerEditor({
               ? (skillLabels.get(token.value) ?? token.value)
               : token.type === "context"
                 ? `${token.label}${props.context?.records.some((record) => record.contextId === token.contextId) ? "" : " · unavailable"}`
-                : basename(token.value),
+                : token.type === "citation"
+                  ? token.value
+                  : basename(token.value),
           detail: token.type === "context" ? composerChipDetail(record) : "",
           iconUri: contextChipIconUri(icon),
           tintsIcon: icon.kind === "chip",

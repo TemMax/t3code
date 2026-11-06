@@ -47,6 +47,7 @@ const CONTEXT_CHIP_PRESENTATIONS = {
   environment: { accent: "#3f9a4f", icon: "server" },
   // A model: one glyph for every model.
   model: { accent: "#998700", icon: "bot" },
+  citation: { accent: "#4684e5", icon: "quote" },
 } as const satisfies Record<string, ContextChipPresentation>;
 
 const CHIP_CONTRAST = 5;
