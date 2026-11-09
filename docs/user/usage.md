@@ -154,6 +154,15 @@ row to see when it resets and your pace. Turn on **Context window** to also show
 context use against the model's limit. A tick on the bar marks where the provider compacts
 automatically, when it reports that point.
 
+For every provider at once, turn on **Usage bar** in **Settings → General → Sidebar**. It adds a
+gauge per provider above the sidebar buttons: the outer arc is the long window, such as weekly, and
+the inner arc the short one, such as 5 hours. The **Detailed** style labels both numbers. A separate limit, such as Claude's weekly limit for
+one model, gets its own gauge, and longer windows such as monthly spend appear only in the details.
+The tick marks where even spending would be. Hover or
+click a gauge for each window's details. Choose **Customize…** or right-click the bar to change its
+style, alignment, which gauges it shows, and, for Compact and Minimal, which window the number reports. To hide one gauge,
+such as a model you do not use, right-click it and choose **Hide**.
+
 OpenCode Go reports its session, weekly, and monthly allowance when OpenCode runs locally in
 the environment. T3 cannot report limits for external OpenCode servers because their credentials
 belong to the remote server. Limits need an OpenCode Go API key, or an OpenCode Console connected
