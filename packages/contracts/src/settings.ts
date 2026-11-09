@@ -333,6 +333,17 @@ export type ChatWidth = typeof ChatWidth.Type;
 export const EffortDisplay = Schema.Literals(["label", "bars"]);
 export type EffortDisplay = typeof EffortDisplay.Type;
 
+/** Sidebar usage bar look. `auto` picks the most detailed style that fits the sidebar width. */
+export const SidebarUsageBarStyle = Schema.Literals(["auto", "detailed", "compact", "minimal"]);
+export type SidebarUsageBarStyle = typeof SidebarUsageBarStyle.Type;
+
+export const SidebarUsageBarAlignment = Schema.Literals(["start", "center", "end", "spread"]);
+export type SidebarUsageBarAlignment = typeof SidebarUsageBarAlignment.Type;
+
+/** Which limit window the sidebar usage bar's number reports. */
+export const SidebarUsageBarFocus = Schema.Literals(["lowest", "short", "long"]);
+export type SidebarUsageBarFocus = typeof SidebarUsageBarFocus.Type;
+
 export const ModelFavorite = Schema.Struct({
   provider: ProviderInstanceId,
   model: TrimmedNonEmptyString,
@@ -468,6 +479,21 @@ export const ClientSettingsSchema = Schema.Struct({
 
   planModeEnabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   contextWindowMeterEnabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  sidebarUsageBarEnabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  sidebarUsageBarStyle: SidebarUsageBarStyle.pipe(
+    Schema.withDecodingDefault(Effect.succeed("auto" as const)),
+  ),
+  sidebarUsageBarAlignment: SidebarUsageBarAlignment.pipe(
+    Schema.withDecodingDefault(Effect.succeed("start" as const)),
+  ),
+  sidebarUsageBarFocus: SidebarUsageBarFocus.pipe(
+    Schema.withDecodingDefault(Effect.succeed("lowest" as const)),
+  ),
+  sidebarUsageBarPaceMarks: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+  /** Gauge keys hidden from the bar (a driver, or `driver:windowId` for a separate limit), so new ones show. */
+  sidebarUsageBarHidden: Schema.Array(Schema.String).pipe(
+    Schema.withDecodingDefault(Effect.succeed([])),
+  ),
   composerRichTextEnabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
   sendShortcut: Schema.Literals(["enter", "mod-enter-multiline", "mod-enter"]).pipe(
     Schema.withDecodingDefault(Effect.succeed("enter")),
@@ -1827,6 +1853,12 @@ export const ClientSettingsPatch = Schema.Struct({
   pullRequestLinksOpenInApp: Schema.optionalKey(Schema.Boolean),
   planModeEnabled: Schema.optionalKey(Schema.Boolean),
   contextWindowMeterEnabled: Schema.optionalKey(Schema.Boolean),
+  sidebarUsageBarEnabled: Schema.optionalKey(Schema.Boolean),
+  sidebarUsageBarStyle: Schema.optionalKey(SidebarUsageBarStyle),
+  sidebarUsageBarAlignment: Schema.optionalKey(SidebarUsageBarAlignment),
+  sidebarUsageBarFocus: Schema.optionalKey(SidebarUsageBarFocus),
+  sidebarUsageBarPaceMarks: Schema.optionalKey(Schema.Boolean),
+  sidebarUsageBarHidden: Schema.optionalKey(Schema.Array(Schema.String)),
   composerRichTextEnabled: Schema.optionalKey(Schema.Boolean),
   sendShortcut: Schema.optionalKey(Schema.Literals(["enter", "mod-enter-multiline", "mod-enter"])),
   followUpBehavior: Schema.optionalKey(Schema.Literals(["queue", "steer"])),

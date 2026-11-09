@@ -109,6 +109,7 @@ import { environmentSessionStatesAtom } from "~/state/session";
 import { canUpdateServer } from "../ServerUpdateAction";
 import { useUpdateEverythingRun } from "../sidebar/updateEverythingRun";
 import { awaitsTrackSwitch, channelSwitchLabel } from "../sidebar/updateEverything.logic";
+import { SidebarUsageBarDialog } from "../sidebar/SidebarUsageBar";
 import { isHostedByThisApp } from "../sidebar/useUpdateEverything";
 
 const RESPONSE_STREAMING_MODE_LABELS: Record<ResponseStreamingMode, string> = {
@@ -533,6 +534,7 @@ export function useSettingsRestore(onRestored?: () => void) {
     ...(settings.contextWindowMeterEnabled !== DEFAULT_UNIFIED_SETTINGS.contextWindowMeterEnabled
       ? ["Context window indicator"]
       : []),
+    ...(isUsageBarCustomized(settings) ? ["Usage bar"] : []),
     ...(settings.responseStreamingMode !== DEFAULT_UNIFIED_SETTINGS.responseStreamingMode
       ? ["Response streaming"]
       : []),
@@ -645,6 +647,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       sendShortcut: DEFAULT_UNIFIED_SETTINGS.sendShortcut,
       followUpBehavior: DEFAULT_UNIFIED_SETTINGS.followUpBehavior,
       contextWindowMeterEnabled: DEFAULT_UNIFIED_SETTINGS.contextWindowMeterEnabled,
+      ...USAGE_BAR_DEFAULTS,
       environmentIdentificationMode: DEFAULT_UNIFIED_SETTINGS.environmentIdentificationMode,
       glassOpacity: DEFAULT_UNIFIED_SETTINGS.glassOpacity,
       panelAnimationDurationMs: DEFAULT_UNIFIED_SETTINGS.panelAnimationDurationMs,
@@ -780,6 +783,61 @@ export function LegacyFeaturesSection() {
   );
 }
 
+const USAGE_BAR_DEFAULTS = {
+  sidebarUsageBarEnabled: DEFAULT_UNIFIED_SETTINGS.sidebarUsageBarEnabled,
+  sidebarUsageBarStyle: DEFAULT_UNIFIED_SETTINGS.sidebarUsageBarStyle,
+  sidebarUsageBarAlignment: DEFAULT_UNIFIED_SETTINGS.sidebarUsageBarAlignment,
+  sidebarUsageBarFocus: DEFAULT_UNIFIED_SETTINGS.sidebarUsageBarFocus,
+  sidebarUsageBarPaceMarks: DEFAULT_UNIFIED_SETTINGS.sidebarUsageBarPaceMarks,
+  sidebarUsageBarHidden: DEFAULT_UNIFIED_SETTINGS.sidebarUsageBarHidden,
+};
+
+function isUsageBarCustomized(settings: typeof DEFAULT_UNIFIED_SETTINGS): boolean {
+  return (
+    settings.sidebarUsageBarEnabled !== USAGE_BAR_DEFAULTS.sidebarUsageBarEnabled ||
+    settings.sidebarUsageBarStyle !== USAGE_BAR_DEFAULTS.sidebarUsageBarStyle ||
+    settings.sidebarUsageBarAlignment !== USAGE_BAR_DEFAULTS.sidebarUsageBarAlignment ||
+    settings.sidebarUsageBarFocus !== USAGE_BAR_DEFAULTS.sidebarUsageBarFocus ||
+    settings.sidebarUsageBarPaceMarks !== USAGE_BAR_DEFAULTS.sidebarUsageBarPaceMarks ||
+    settings.sidebarUsageBarHidden.length > 0
+  );
+}
+
+function UsageBarSettingsRow() {
+  const settings = useScopedSettings();
+  const updateSettings = useUpdateScopedSettings();
+  const [customizing, setCustomizing] = useState(false);
+  return (
+    <SettingsRow
+      {...searchableSetting("sidebar-usage-bar")}
+      description="Show subscription limits as small gauges above the sidebar buttons. Hover a gauge for details, or right-click the bar to customize it."
+      resetAction={
+        isUsageBarCustomized(settings) ? (
+          <SettingResetButton
+            label="usage bar"
+            onClick={() => updateSettings(USAGE_BAR_DEFAULTS)}
+          />
+        ) : null
+      }
+      control={
+        <div className="flex items-center gap-2">
+          <Button variant="outline" size="xs" onClick={() => setCustomizing(true)}>
+            Customize…
+          </Button>
+          <Switch
+            checked={settings.sidebarUsageBarEnabled}
+            onCheckedChange={(checked) =>
+              updateSettings({ sidebarUsageBarEnabled: Boolean(checked) })
+            }
+            aria-label="Usage bar"
+          />
+          <SidebarUsageBarDialog open={customizing} onOpenChange={setCustomizing} />
+        </div>
+      }
+    />
+  );
+}
+
 export function GeneralSettingsPanel() {
   const settings = useScopedSettings();
   const updateSettings = useUpdateScopedSettings();
@@ -906,6 +964,7 @@ export function GeneralSettingsPanel() {
             />
           }
         />
+        <UsageBarSettingsRow />
       </SettingsSection>
 
       <SettingsSection id="confirmations" title="Confirmations">

@@ -454,6 +454,12 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["hide fold running monitoring threads inbox sidebar shelf"],
   },
   {
+    id: "sidebar-usage-bar",
+    title: "Usage bar",
+    to: "/settings/general",
+    searchTerms: ["sidebar limits quota gauge rate limit subscription 5h weekly meter"],
+  },
+  {
     id: "boring-sidebar",
     title: "Boring sidebar (group by project)",
     to: "/settings/labs",
