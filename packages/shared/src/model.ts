@@ -196,12 +196,40 @@ function withDescriptorCurrentValue(
   };
 }
 
+// Ultracode was a Claude effort level before it became its own toggle; that level ran at xhigh.
+export function withLegacyUltracodeEffort<
+  Selections extends ReadonlyArray<ProviderOptionSelection> | null | undefined,
+>(
+  descriptors: ReadonlyArray<ProviderOptionDescriptor> | null | undefined,
+  selections: Selections,
+): Selections | Array<ProviderOptionSelection> {
+  if (
+    getRawSelectionValueById(selections, "effort") !== "ultracode" ||
+    !descriptors?.some(
+      (descriptor) => descriptor.id === "ultracode" && descriptor.type === "boolean",
+    )
+  ) {
+    return selections;
+  }
+  return [
+    ...(selections ?? []).map((selection) =>
+      selection.id === "effort" && selection.value === "ultracode"
+        ? { id: "effort", value: "xhigh" }
+        : selection,
+    ),
+    ...(getRawSelectionValueById(selections, "ultracode") === undefined
+      ? [{ id: "ultracode", value: true }]
+      : []),
+  ];
+}
+
 export function getProviderOptionDescriptors(input: {
   caps: ModelCapabilities;
   selections?: ReadonlyArray<ProviderOptionSelection> | null | undefined;
 }): ReadonlyArray<ProviderOptionDescriptor> {
-  const { caps, selections } = input;
+  const { caps } = input;
   const baseDescriptors = (caps.optionDescriptors ?? []).map(cloneDescriptor);
+  const selections = withLegacyUltracodeEffort(baseDescriptors, input.selections);
 
   return baseDescriptors.map((descriptor) =>
     withDescriptorCurrentValue(
@@ -312,34 +340,13 @@ export function buildExplicitProviderOptionSelectionsFromDescriptors(
   if (!selections || selections.length === 0) {
     return undefined;
   }
-  const explicitIds = new Set(selections.map((selection) => selection.id));
+  const explicitIds = new Set(
+    withLegacyUltracodeEffort(descriptors, selections).map(({ id }) => id),
+  );
   const normalized = buildProviderOptionSelectionsFromDescriptors(descriptors)?.filter(
     (selection) => explicitIds.has(selection.id),
   );
   return normalized && normalized.length > 0 ? normalized : undefined;
-}
-
-/** The explicit options a model mention carries, and the short label its chip shows. */
-export function modelMentionSettings(
-  capabilities: ModelCapabilities | null | undefined,
-  selections: ReadonlyArray<ProviderOptionSelection>,
-): { options: Array<ProviderOptionSelection>; optionsLabel: string | undefined } {
-  const descriptors = capabilities
-    ? getProviderOptionDescriptors({ caps: capabilities, selections })
-    : [];
-  const labels: Array<string> = [];
-  for (const descriptor of descriptors) {
-    if (descriptor.type === "select") {
-      const label = getProviderOptionCurrentLabel(descriptor);
-      if (label !== undefined) labels.push(label);
-    } else if (getProviderOptionCurrentValue(descriptor) === true) {
-      labels.push(descriptor.label);
-    }
-  }
-  return {
-    options: buildProviderOptionSelectionsFromDescriptors(descriptors) ?? [],
-    optionsLabel: labels.length > 0 ? labels.join(" · ") : undefined,
-  };
 }
 
 export function isClaudeUltrathinkPrompt(text: string | null | undefined): boolean {

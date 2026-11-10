@@ -48,6 +48,6 @@ export function projectFolderDot(
   }
   if (statuses.has("failed")) return "failed";
   if (threads.some((thread) => thread.status === "ready" && thread.unread)) return "unread";
-  if (statuses.has("working")) return "working";
+  if (statuses.has("working") || statuses.has("preparing")) return "working";
   return null;
 }

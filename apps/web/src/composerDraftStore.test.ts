@@ -100,11 +100,7 @@ import {
   environmentContextRecord,
   terminalContextReference,
 } from "./lib/composerContextRecords";
-import {
-  modelContextRecord,
-  threadContextRecord,
-  toKindScopedComposerContextId,
-} from "@t3tools/shared/composerContextReferences";
+import { threadContextRecord } from "@t3tools/shared/composerContextReferences";
 import {
   copiedComposerAttachmentFile,
   rememberCopiedComposerAttachments,
@@ -821,87 +817,6 @@ describe("composerDraftStore environment contexts", () => {
   });
 });
 
-describe("composerDraftStore model contexts", () => {
-  const threadId = ThreadId.make("thread-with-model");
-  const threadRef = scopeThreadRef(TEST_ENVIRONMENT_ID, threadId);
-  const gpt = modelContextRecord({
-    providerInstanceId: CODEX_INSTANCE,
-    model: "gpt-5",
-    label: "GPT [5]",
-    options: [{ id: "reasoningEffort", value: "high" }],
-    optionsLabel: "High",
-  });
-
-  beforeEach(resetComposerDraftStore);
-
-  it("mentions a model once, survives persistence, and sends its exact target", () => {
-    const store = useComposerDraftStore.getState();
-    store.setPrompt(threadRef, "Delegate to");
-    store.addModelContexts(threadRef, [gpt]);
-    store.addModelContexts(threadRef, [{ ...gpt, label: "renamed" }]);
-
-    const draft = draftFor(threadId, TEST_ENVIRONMENT_ID);
-    expect(draft?.modelContexts).toEqual([gpt]);
-    expect(draft?.prompt).toBe(
-      `Delegate to [${gpt.label}](t3-context://v1/model/${gpt.contextId}) `,
-    );
-
-    const merge = useComposerDraftStore.persist.getOptions().merge!;
-    const hydrated = merge(
-      JSON.parse(
-        JSON.stringify(partializeComposerDraftStoreState(useComposerDraftStore.getState())),
-      ),
-      useComposerDraftStore.getInitialState(),
-    );
-    const restored = hydrated.draftsByThreadKey[scopedThreadKey(threadRef)];
-    expect(restored?.modelContexts).toEqual([gpt]);
-    expect(restored?.prompt).toBe(draft?.prompt);
-
-    expect(
-      buildMessageContext({
-        terminalContexts: [],
-        reviewComments: [],
-        previewAnnotations: [],
-        modelContexts: restored?.modelContexts ?? [],
-      })?.records,
-    ).toEqual([gpt]);
-  });
-
-  it("changes a model chip's options without touching the prompt", () => {
-    const store = useComposerDraftStore.getState();
-    store.setPrompt(threadRef, "Delegate to");
-    store.addModelContexts(threadRef, [gpt]);
-    const before = draftFor(threadId, TEST_ENVIRONMENT_ID);
-
-    store.setModelContextOptions(
-      threadRef,
-      gpt.contextId,
-      [{ id: "fastMode", value: true }],
-      "Fast",
-    );
-    const changed = draftFor(threadId, TEST_ENVIRONMENT_ID);
-    expect(changed?.modelContexts).toEqual([
-      { ...gpt, options: [{ id: "fastMode", value: true }], optionsLabel: "Fast" },
-    ]);
-    expect(changed?.prompt).toBe(before?.prompt);
-
-    store.setModelContextOptions(threadRef, gpt.contextId, [], undefined);
-    const { optionsLabel: _dropped, ...unlabelled } = gpt;
-    expect(draftFor(threadId, TEST_ENVIRONMENT_ID)?.modelContexts).toEqual([
-      { ...unlabelled, options: [] },
-    ]);
-
-    const settled = useComposerDraftStore.getState().draftsByThreadKey;
-    store.setModelContextOptions(
-      threadRef,
-      toKindScopedComposerContextId("model", "absent"),
-      [{ id: "fastMode", value: true }],
-      "Fast",
-    );
-    expect(useComposerDraftStore.getState().draftsByThreadKey).toBe(settled);
-  });
-});
-
 describe("composerDraftStore project draft thread mapping", () => {
   const projectId = ProjectId.make("project-a");
   const otherProjectId = ProjectId.make("project-b");
@@ -1417,9 +1332,26 @@ function modelReconciliationHarness(
       ],
     ]),
   });
+  // A pick sent to the thread: shown over the durable snapshot until it settles.
+  const inFlightPickAtom = Atom.make<ModelSelection | null>(null);
+  const visibleSnapshotAtom = Atom.make((get) => {
+    const snapshot = get(snapshotAtom);
+    const pick = get(inFlightPickAtom);
+    if (!snapshot || !pick) return snapshot;
+    return {
+      ...snapshot,
+      threads: snapshot.threads.map((candidate) =>
+        candidate.id === threadId ? { ...candidate, modelSelection: pick } : candidate,
+      ),
+    };
+  });
+  const pendingThreadIdsAtom = Atom.map(
+    inFlightPickAtom,
+    (pick): ReadonlySet<ThreadId> => new Set(pick ? [threadId] : []),
+  );
   const shells = createEnvironmentThreadShellAtoms({
     catalogValueAtom,
-    snapshotAtom: () => snapshotAtom,
+    snapshotAtom: () => visibleSnapshotAtom,
     hiddenThreadTagsAtom: () => Atom.make(null),
   });
   const selectedShell = shells.threadShellAtom({ environmentId, threadId: selectedThreadId });
@@ -1430,11 +1362,16 @@ function modelReconciliationHarness(
       threadShellAtom: shells.threadShellAtom,
       threadRefsAtom: shells.threadRefsAtom,
       shellStateAtom: () => shellResultAtom,
+      pendingThreadIdsAtom: () => pendingThreadIdsAtom,
     }),
   );
   flush();
   return {
     flush,
+    showInFlightPick(pick: ModelSelection | null) {
+      registry.set(inFlightPickAtom, pick);
+      flush();
+    },
     setStatus(status: EnvironmentShellStatus) {
       registry.set(shellStateAtom, { ...registry.get(shellStateAtom), status });
       flush();
@@ -1644,6 +1581,65 @@ describe("composerDraftStore modelSelection", () => {
     h.setStatus("live");
     expect(draftFor(threadId, TEST_ENVIRONMENT_ID)).toBeUndefined();
   });
+
+  it("keeps a pick matching the old model while an earlier pick is still in flight", () => {
+    const h = modelReconciliationHarness(TEST_ENVIRONMENT_ID, threadId);
+    const store = useComposerDraftStore.getState();
+    const original = h.model();
+    const other = { ...original, model: "remote-model" };
+    store.setModelSelection(threadRef, other, { explicit: true });
+    h.showInFlightPick(other);
+    store.setModelSelection(threadRef, original, { explicit: true });
+    h.showInFlightPick(original);
+    const latest = draftFor(threadId, TEST_ENVIRONMENT_ID);
+    expect(latest?.modelSelectionByProvider[original.instanceId]).toEqual(original);
+
+    // The earlier pick lands, then the latest one is rejected.
+    h.update({ modelSelection: other });
+    h.showInFlightPick(null);
+    expect(h.model()).toEqual(other);
+    expect(draftFor(threadId, TEST_ENVIRONMENT_ID)).toBe(latest);
+  });
+
+  it.each(["consecutive model", "consecutive options", "returning model"] as const)(
+    "releases only the latest accepted pick after %s picks",
+    (kind) => {
+      const store = useComposerDraftStore.getState();
+      store.setPrompt(threadRef, "keep this follow-up");
+      const select = () => {
+        if (kind === "consecutive options") {
+          store.setProviderModelOptions(
+            threadRef,
+            CODEX_DRIVER,
+            toSelections({ reasoningEffort: "high" }),
+            { instanceId: CODEX_INSTANCE, model: "gpt-5.5" },
+          );
+        } else {
+          store.setModelSelection(threadRef, modelSelection(CODEX_DRIVER, "gpt-5.5"), {
+            explicit: true,
+          });
+        }
+      };
+      select();
+      const first = draftFor(threadId, TEST_ENVIRONMENT_ID)!.modelSelectionByProvider[
+        CODEX_INSTANCE
+      ]!;
+      if (kind === "returning model") {
+        store.setModelSelection(threadRef, modelSelection(CODEX_DRIVER, "gpt-5.4"), {
+          explicit: true,
+        });
+      }
+      select();
+      const latest = draftFor(threadId, TEST_ENVIRONMENT_ID)!;
+
+      store.releaseModelSelection(threadRef, first);
+      expect(draftFor(threadId, TEST_ENVIRONMENT_ID)).toBe(latest);
+      store.releaseModelSelection(threadRef, latest.modelSelectionByProvider[CODEX_INSTANCE]!);
+      expect(draftFor(threadId, TEST_ENVIRONMENT_ID)?.modelSelectionExplicit).toBeUndefined();
+      expect(draftFor(threadId, TEST_ENVIRONMENT_ID)?.modelSelectionByProvider).toEqual({});
+      expect(draftFor(threadId, TEST_ENVIRONMENT_ID)?.prompt).toBe("keep this follow-up");
+    },
+  );
 
   it("releases an inactive thread pick only after its queued model becomes durable", () => {
     const store = useComposerDraftStore.getState();

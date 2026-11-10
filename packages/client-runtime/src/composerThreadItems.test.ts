@@ -1,10 +1,8 @@
-import { EnvironmentId, ProviderInstanceId, ThreadId } from "@t3tools/contracts";
+import { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
   matchComposerEnvironmentItems,
-  matchComposerModelItems,
-  type ComposerModelCandidate,
   matchComposerThreadItems,
   type ComposerThreadCandidate,
 } from "./composerThreadItems.ts";
@@ -118,54 +116,5 @@ describe("matchComposerEnvironmentItems", () => {
         query: "",
       }),
     ).toEqual([]);
-  });
-});
-
-describe("matchComposerModelItems", () => {
-  const candidate = (
-    driverKind: string,
-    model: string,
-    name: string,
-    providerDisplayName: string,
-  ): ComposerModelCandidate => ({
-    providerInstanceId: ProviderInstanceId.make(driverKind),
-    model,
-    name,
-    driverKind,
-    providerDisplayName,
-    isFavorite: false,
-  });
-  const models = [
-    candidate("codex", "gpt-6.1-sol", "GPT-6.1 Sol", "Codex"),
-    candidate("codex", "gpt-6-luna", "GPT-6 Luna", "Codex"),
-    candidate("claudeAgent", "claude-opus-5-5", "Claude Opus 5.5", "Claude"),
-  ];
-
-  it("needs a query, like threads and machines", () => {
-    expect(matchComposerModelItems({ models, query: "" })).toEqual([]);
-    expect(matchComposerModelItems({ models, query: "  " })).toEqual([]);
-  });
-
-  it("ranks like the model picker and names the provider", () => {
-    const sol = matchComposerModelItems({ models, query: "sol" });
-    expect(sol[0]).toEqual({
-      id: "model:codex:gpt-6.1-sol",
-      type: "model",
-      providerInstanceId: ProviderInstanceId.make("codex"),
-      model: "gpt-6.1-sol",
-      driverKind: "codex",
-      label: "GPT-6.1 Sol",
-      description: "Codex",
-    });
-    expect(matchComposerModelItems({ models, query: "opus" }).map((item) => item.model)).toEqual([
-      "claude-opus-5-5",
-    ]);
-  });
-
-  it("offers at most six", () => {
-    const many = Array.from({ length: 10 }, (_, index) =>
-      candidate("codex", `gpt-${index}`, `GPT ${index}`, "Codex"),
-    );
-    expect(matchComposerModelItems({ models: many, query: "gpt" })).toHaveLength(6);
   });
 });

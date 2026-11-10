@@ -5,7 +5,6 @@ import {
 import type {
   EnvironmentId,
   EnvironmentMachineKind,
-  ProviderInstanceId,
   PullRequestContextMetadata,
   ScopedThreadRef,
   ServerProviderSkill,
@@ -20,6 +19,8 @@ import { AppText as Text } from "../../components/ui/AppText";
 import { ENVIRONMENT_MACHINE_SYMBOLS } from "../../components/EnvironmentMachineSymbol";
 import { GlassSurface } from "../../components/ui/GlassSurface";
 import { PierreEntryIcon } from "../../components/PierreEntryIcon";
+import { ProviderIcon } from "../../components/ProviderIcon";
+import type { ModelOption } from "../../lib/modelOptions";
 import { pullRequestStatus } from "../pull-requests/pullRequestStatus";
 export type ComposerCommandItem =
   | {
@@ -54,15 +55,6 @@ export type ComposerCommandItem =
     }
   | {
       readonly id: string;
-      readonly type: "model";
-      readonly providerInstanceId: ProviderInstanceId;
-      readonly model: string;
-      readonly driverKind: string;
-      readonly label: string;
-      readonly description: string;
-    }
-  | {
-      readonly id: string;
       readonly type: "slash-command";
       readonly command: string;
       readonly label: string;
@@ -79,6 +71,13 @@ export type ComposerCommandItem =
       readonly id: string;
       readonly type: "skill";
       readonly skill: ServerProviderSkill;
+      readonly label: string;
+      readonly description: string;
+    }
+  | {
+      readonly id: string;
+      readonly type: "model";
+      readonly option: ModelOption;
       readonly label: string;
       readonly description: string;
     };
@@ -128,17 +127,19 @@ function itemIcon(item: ComposerCommandItem): AppSymbolName | null {
     case "skill":
       return SKILL_SOURCE_SYMBOL_BY_KIND[resolveProviderSkillSourceKind(item.skill)];
     case "path":
+    case "model":
       return null;
     case "thread":
       return "text.bubble";
     case "environment":
       return ENVIRONMENT_MACHINE_SYMBOLS[item.machine];
-    case "model":
-      return "sparkles";
   }
 }
 
-function groupLabel(triggerKind: ComposerTriggerKind | null): string | null {
+function groupLabel(
+  triggerKind: ComposerTriggerKind | null,
+  items: ReadonlyArray<ComposerCommandItem>,
+): string | null {
   switch (triggerKind) {
     case "pull-request":
       return "Pull requests";
@@ -147,7 +148,7 @@ function groupLabel(triggerKind: ComposerTriggerKind | null): string | null {
     case "skill":
       return "Skills";
     case "path":
-      return "Files";
+      return items.every((item) => item.type === "path") ? "Files" : "Mentions";
     default:
       return null;
   }
@@ -188,6 +189,12 @@ const CommandRow = memo(function CommandRow(props: {
     >
       {props.item.type === "path" ? (
         <PierreEntryIcon path={props.item.path} kind={props.item.kind} size={16} />
+      ) : props.item.type === "model" ? (
+        <ProviderIcon
+          iconUrl={props.item.option.providerIconUrl}
+          provider={props.item.option.providerDriver}
+          size={16}
+        />
       ) : iconName ? (
         <SymbolView
           name={iconName}
@@ -222,7 +229,7 @@ const CommandRow = memo(function CommandRow(props: {
 export const ComposerCommandPopover = memo(function ComposerCommandPopover(
   props: ComposerCommandPopoverProps,
 ) {
-  const label = groupLabel(props.triggerKind);
+  const label = groupLabel(props.triggerKind, props.items);
 
   return (
     <PopoverSurface>

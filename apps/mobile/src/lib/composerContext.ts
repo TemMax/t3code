@@ -1,23 +1,22 @@
+import {
+  collectComposerModelMentions,
+  type ComposerModelMentionOccurrence,
+} from "@t3tools/client-runtime/composer-model-mentions";
 import { isProviderSkillUserInvocable } from "@t3tools/client-runtime/providerSkills";
-import type { ComposerModelCandidate } from "@t3tools/client-runtime/composerThreadItems";
 import { sourceControlClients } from "@t3tools/client-runtime/source-control-clients";
 import { filePreviewKind } from "@t3tools/shared/filePreview";
-import { modelMentionSettings } from "@t3tools/shared/model";
 import { videoMimeType } from "@t3tools/shared/video";
 import {
   COMPOSER_CONTEXT_MAX_RECORDS,
   COMPOSER_CONTEXT_REVIEW_TEXT_MAX_CHARS,
   ComposerContextId,
   type ComposerContextRecord,
-  type ModelCapabilities,
-  type ModelContextRecord,
   OrchestrationMessageContext,
   type PullRequestContextMetadata,
   type ReviewCommentContextRecord,
   type ServerProviderSkill,
   type EnvironmentContextRecord,
   type EnvironmentId,
-  type ProviderOptionSelection,
 } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
 import {
@@ -29,12 +28,12 @@ import {
   collectComposerContextReferences,
   formatComposerContextReference,
   isImageReferencesOnly,
-  modelContextRecord,
   replaceComposerContextReferences,
   sanitizeComposerContextLabel,
 } from "@t3tools/shared/composerContextReferences";
 import {
   collectComposerInlineTokens,
+  composerMathRanges,
   type ComposerInlineToken,
 } from "@t3tools/shared/composerInlineTokens";
 
@@ -123,23 +122,6 @@ export function environmentComposerContext(
   };
 }
 
-export type MentionableModel = ComposerModelCandidate & {
-  readonly capabilities: ModelCapabilities | null;
-};
-
-export function modelComposerContext(input: {
-  model: MentionableModel;
-  selections: ReadonlyArray<ProviderOptionSelection>;
-}): ModelContextRecord {
-  const { model } = input;
-  return modelContextRecord({
-    providerInstanceId: model.providerInstanceId,
-    model: model.model,
-    label: model.name,
-    ...modelMentionSettings(model.capabilities, input.selections),
-  });
-}
-
 export function pullRequestComposerContext(
   pullRequest: PullRequestContextMetadata,
   id: string,
@@ -190,21 +172,46 @@ export function composerSkillLabels(
   );
 }
 
+/**
+ * Like `$skill`, a typed reference waits for whitespace so `gpt-6` cannot chip on the way to
+ * `gpt-6.1`. A chip already shown stays one when backspace removes the space after it.
+ */
+export function collectComposerModelTokens(
+  text: string,
+  knownModels: { has(source: string): boolean },
+  preserveTrailingFrom: ReadonlyArray<ComposerModelMentionOccurrence> = [],
+): ReadonlyArray<ComposerModelMentionOccurrence> {
+  return collectComposerModelMentions(text).filter(
+    (mention) =>
+      knownModels.has(mention.source) &&
+      (/\s/u.test(text[mention.end] ?? "") ||
+        preserveTrailingFrom.some(
+          (token) => token.start === mention.start && token.source === mention.source,
+        )),
+  );
+}
+
 export function composerContextEditorTokens(
   text: string,
   tokens: readonly ComposerInlineToken[],
   knownSkills: { has(name: string): boolean },
+  modelTokens: ReadonlyArray<ComposerModelMentionOccurrence> = [],
 ) {
   const references = collectComposerContextReferences(text);
   const citations = collectAssistantCitations(text);
   const covered = [...references, ...citations];
+  const inlineTokens = tokens.filter(
+    (token) =>
+      // `$HOME` and other `$name` text that is not one of the provider's skills stays prose.
+      (token.type !== "skill" || knownSkills.has(token.value)) &&
+      !covered.some((range) => token.start < range.end && token.end > range.start),
+  );
+  const taken = [...inlineTokens, ...covered, ...composerMathRanges(text)];
+  const models = modelTokens.filter(
+    (mention) => !taken.some((range) => mention.start < range.end && mention.end > range.start),
+  );
   return [
-    ...tokens.filter(
-      (token) =>
-        // `$HOME` and other `$name` text that is not one of the provider's skills stays prose.
-        (token.type !== "skill" || knownSkills.has(token.value)) &&
-        !covered.some((range) => token.start < range.end && token.end > range.start),
-    ),
+    ...inlineTokens,
     ...references.map((ref) => ({
       type: "context" as const,
       value: ref.label,
@@ -216,6 +223,11 @@ export function composerContextEditorTokens(
       source,
       start,
       end,
+    })),
+    ...models.map((mention) => ({
+      type: "model" as const,
+      value: mention.model,
+      ...mention,
     })),
   ].sort((a, b) => a.start - b.start);
 }
