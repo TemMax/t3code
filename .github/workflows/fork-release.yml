@@ -79,6 +79,11 @@ jobs:
           sed -i.bak "s/^const DESKTOP_APP_ID = \"com\.t3tools\.t3code\";/const DESKTOP_APP_ID = \"$FORK_APP_ID\";/" scripts/build-desktop-artifact.ts
           rm scripts/build-desktop-artifact.ts.bak
           grep -q "^const DESKTOP_APP_ID = \"$FORK_APP_ID\";" scripts/build-desktop-artifact.ts
+          # Upstream cross-builds Windows on Linux, which skips the 13-file server compile cache.
+          # Native Windows runners generate it, so the fork needs room above upstream's limit.
+          sed -i.bak "s/^export const WINDOWS_PACKAGED_PAYLOAD_FILE_LIMIT = 80;/export const WINDOWS_PACKAGED_PAYLOAD_FILE_LIMIT = 100;/" scripts/build-desktop-artifact.ts
+          rm scripts/build-desktop-artifact.ts.bak
+          grep -q "^export const WINDOWS_PACKAGED_PAYLOAD_FILE_LIMIT = 100;" scripts/build-desktop-artifact.ts
 
       - name: Build desktop artifact
         shell: bash
