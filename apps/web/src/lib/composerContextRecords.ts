@@ -16,7 +16,6 @@ import type {
   ImageContextRecord,
   KnownComposerContextRecord,
   MessageId,
-  ModelContextRecord,
   OrchestrationMessageContext,
   PreviewAnnotationContextRecord,
   PreviewAnnotationPayload,
@@ -168,11 +167,6 @@ export function environmentContextReference(
   record: EnvironmentContextRecord,
 ): ComposerContextReference {
   return { kind: "environment", contextId: record.contextId, label: record.label };
-}
-
-/** One record per model: mentioning the same model twice reuses the chip. */
-export function modelContextReference(record: ModelContextRecord): ComposerContextReference {
-  return { kind: "model", contextId: record.contextId, label: record.label };
 }
 
 export function environmentContextRecord(
@@ -332,7 +326,6 @@ export function buildMessageContext(input: {
   previewAnnotations: ReadonlyArray<PreviewAnnotationPayload>;
   threadContexts?: ReadonlyArray<ThreadContextRecord>;
   environmentContexts?: ReadonlyArray<EnvironmentContextRecord>;
-  modelContexts?: ReadonlyArray<ModelContextRecord>;
   attachments?: ReadonlyArray<BoundComposerAttachment>;
 }): OrchestrationMessageContext | undefined {
   const screenshotAttachmentIds = new Set(
@@ -345,7 +338,6 @@ export function buildMessageContext(input: {
     ...input.reviewComments.map(reviewCommentContextRecord),
     ...(input.threadContexts ?? []),
     ...(input.environmentContexts ?? []),
-    ...(input.modelContexts ?? []),
     ...input.previewAnnotations.map((annotation) =>
       previewAnnotationContextRecord(annotation, {
         screenshotContextId: screenshotAttachmentIds.has(annotation.id) ? annotation.id : undefined,

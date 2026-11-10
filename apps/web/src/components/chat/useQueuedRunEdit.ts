@@ -10,7 +10,6 @@ import {
   type EnvironmentContextRecord,
   type EnvironmentId,
   type MessageId,
-  type ModelContextRecord,
   type OrchestrationMessageContext,
   type PreviewAnnotationPayload,
   type RunId,
@@ -82,7 +81,6 @@ interface QueuedRunEditContent {
   readonly previewAnnotations: ReadonlyArray<PreviewAnnotationPayload>;
   readonly threadContexts: ReadonlyArray<ThreadContextRecord>;
   readonly environmentContexts: ReadonlyArray<EnvironmentContextRecord>;
-  readonly modelContexts: ReadonlyArray<ModelContextRecord>;
 }
 
 function queuedEditDraftTarget(routeThreadRef: ScopedThreadRef, runId: RunId) {
@@ -141,7 +139,6 @@ async function submitQueuedRunEdit(input: {
         previewAnnotations: content.previewAnnotations,
         threadContexts: content.threadContexts,
         environmentContexts: content.environmentContexts,
-        modelContexts: content.modelContexts,
         attachments: newAttachments.map((attachment, index) => ({
           attachment,
           attachmentId: uploads[editing.existingAttachments.length + index]?.id ?? attachment.id,

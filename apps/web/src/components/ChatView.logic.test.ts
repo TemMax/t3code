@@ -1055,7 +1055,6 @@ describe("snapshotComposerSend", () => {
       reviewComments: [],
       threadContexts: [],
       environmentContexts: [],
-      modelContexts: [],
     });
 
     expect(snapshot.terminalContexts).toEqual([live]);
@@ -1162,7 +1161,6 @@ describe("restorePlanFollowUpComposer", () => {
         reviewComments: [],
         previewAnnotations: [],
         threadContexts: [],
-        modelContexts: [],
       },
       draftHasUserContent: composer.draft.trim().length > 0,
       routeIsCurrent,
@@ -1177,7 +1175,6 @@ describe("restorePlanFollowUpComposer", () => {
       writePreviewAnnotations: () => undefined,
       writeThreadContexts: () => undefined,
       writeEnvironmentContexts: () => undefined,
-      writeModelContexts: () => undefined,
       resetCursor: ({ prompt }) => {
         composer.cursor = prompt;
       },

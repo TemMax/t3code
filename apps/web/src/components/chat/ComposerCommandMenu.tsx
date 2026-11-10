@@ -9,7 +9,6 @@ import {
   type EnvironmentMachineKind,
   type ProjectEntry,
   type ProviderDriverKind,
-  type ProviderInstanceId,
   type PullRequestContextMetadata,
   type ScopedThreadRef,
   type ServerProviderSkill,
@@ -17,7 +16,6 @@ import {
 } from "@t3tools/contracts";
 import {
   BlocksIcon,
-  BotIcon,
   FolderIcon,
   MessagesSquareIcon,
   PackageIcon,
@@ -88,15 +86,6 @@ export type ComposerCommandItem =
       type: "environment";
       environmentId: EnvironmentId;
       machine: EnvironmentMachineKind;
-      label: string;
-      description: string;
-    }
-  | {
-      id: string;
-      type: "model";
-      providerInstanceId: ProviderInstanceId;
-      model: string;
-      driverKind: string;
       label: string;
       description: string;
     };
@@ -231,9 +220,6 @@ const ComposerCommandMenuItem = memo(function ComposerCommandMenuItem(props: {
           aria-hidden="true"
           className="size-4 shrink-0 text-secondary-label"
         />
-      ) : null}
-      {props.item.type === "model" ? (
-        <BotIcon aria-hidden="true" className="size-4 shrink-0 text-secondary-label" />
       ) : null}
       {pullRequestPresentation ? (
         <pullRequestPresentation.Icon

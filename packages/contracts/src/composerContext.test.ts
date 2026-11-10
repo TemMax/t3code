@@ -118,15 +118,6 @@ const knownRecords: Record<(typeof COMPOSER_CONTEXT_KINDS)[number], Record<strin
     label: "vps",
     environmentId: "environment-vps",
   },
-  model: {
-    ...base,
-    kind: "model",
-    label: "GPT-6.1 Sol",
-    providerInstanceId: "codex",
-    model: "gpt-6.1-sol",
-    options: [{ id: "reasoningEffort", value: "xhigh" }],
-    optionsLabel: "Extra High",
-  },
 };
 
 describe("ComposerContextRecord", () => {

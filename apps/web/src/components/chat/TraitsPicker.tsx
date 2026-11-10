@@ -372,7 +372,7 @@ export function useTraitsSelection({
 export const ULTRATHINK_IN_BODY_NOTE =
   'Your prompt contains "ultrathink" in the text. Remove it to change this option.';
 
-export const TraitsMenuContent = memo(function TraitsMenuContentImpl(props: TraitsSelectionInput) {
+const TraitsMenuContent = memo(function TraitsMenuContentImpl(props: TraitsSelectionInput) {
   const traits = useTraitsSelection(props);
   const {
     descriptors,

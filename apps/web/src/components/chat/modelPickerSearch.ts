@@ -117,8 +117,8 @@ export function rankModelPickerSearch<T>(
       });
     }
   });
-  return [...ranked]
-    .sort(
+  return ranked
+    .toSorted(
       (a, b) =>
         a.score - b.score || Number(b.isFavorite) - Number(a.isFavorite) || a.order - b.order,
     )

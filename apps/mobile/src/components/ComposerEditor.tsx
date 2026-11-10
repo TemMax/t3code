@@ -1,10 +1,10 @@
 import * as Dialog from "./ui/Dialog";
 import { ComposerContextId } from "@t3tools/contracts";
-import { useAtomSet, useAtomValue } from "@effect/atom-react";
+import { useAtomValue } from "@effect/atom-react";
 import { AsyncResult } from "effect/reactivity";
 import { settlePromise, squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import { useEffect, useState, useSyncExternalStore } from "react";
-import type { EnvironmentId, ProviderOptionSelection } from "@t3tools/contracts";
+import type { EnvironmentId } from "@t3tools/contracts";
 import { encodeComposerContextFragment } from "@t3tools/shared/composerContextClipboard";
 import { collectComposerContextReferences } from "@t3tools/shared/composerContextReferences";
 import {
@@ -30,7 +30,7 @@ import {
 import { importComposerContextClipboard } from "../lib/composerContextClipboard";
 import { startComposerDraftOperation } from "../state/composerDraftOperations";
 import { appAtomRegistry } from "../state/atom-registry";
-import { mobilePreferencesAtom, updateMobilePreferencesAtom } from "../state/preferences";
+import { mobilePreferencesAtom } from "../state/preferences";
 import { useOpenLinkedThread } from "../features/threads/useOpenLinkedThread";
 import { useLinkedEnvironments } from "../state/peerLinks";
 import { ComposerContextSheet } from "./ComposerContextSheet";
@@ -45,9 +45,7 @@ import { AppText as Text } from "./ui/AppText";
 import {
   composerDocumentAttachment,
   composerMentionPath,
-  modelComposerContext,
   type ComposerDocumentAttachment,
-  type MentionableModel,
 } from "../lib/composerContext";
 
 export type ComposerEditorProps = NativeComposerEditorProps & {
@@ -56,7 +54,6 @@ export type ComposerEditorProps = NativeComposerEditorProps & {
   readonly environmentId?: EnvironmentId;
   readonly onOpenMention?: (path: string) => void;
   readonly onOpenAttachment?: (attachment: ComposerDocumentAttachment) => void;
-  readonly mentionableModels?: ReadonlyArray<MentionableModel>;
   readonly chipsInert?: boolean;
   readonly onInertChipPress?: () => void;
 };
@@ -67,7 +64,6 @@ export function ComposerEditor({
   environmentId,
   onOpenMention,
   onOpenAttachment,
-  mentionableModels,
   chipsInert,
   onInertChipPress,
   ...props
@@ -77,7 +73,6 @@ export function ComposerEditor({
   const preferredEnterBehavior = AsyncResult.isSuccess(preferencesResult)
     ? preferencesResult.value.composerEnterBehavior
     : undefined;
-  const savePreferences = useAtomSet(updateMobilePreferencesAtom);
   const contextHistory = createComposerDraftContextHistory();
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- releases the attachment file leases held for native text undo when the history is replaced or unmounts
   useEffect(() => () => contextHistory.dispose(), [contextHistory]);
@@ -223,34 +218,6 @@ export function ComposerEditor({
   const record = draft.context?.records.find(
     (entry) => entry.contextId === selectedReference?.contextId,
   );
-  const selectedModel =
-    record?.kind === "model" && !("payload" in record)
-      ? mentionableModels?.find(
-          (entry) =>
-            entry.providerInstanceId === record.providerInstanceId && entry.model === record.model,
-        )
-      : undefined;
-  const changeModelOptions =
-    selectedModel && draftKey && !props.readOnly && props.editable !== false
-      ? (options: ReadonlyArray<ProviderOptionSelection>) => {
-          const next = modelComposerContext({ model: selectedModel, selections: options });
-          const context = getComposerDraftSnapshot(draftKey).context;
-          if (context) {
-            setComposerDraftContext(draftKey, {
-              ...context,
-              records: context.records.map((entry) =>
-                entry.contextId === next.contextId ? next : entry,
-              ),
-            });
-          }
-          const key = `${selectedModel.providerInstanceId}:${selectedModel.model}`;
-          savePreferences({
-            transform: (current) => ({
-              modelMentionOptions: { ...current.modelMentionOptions, [key]: next.options },
-            }),
-          });
-        }
-      : undefined;
   return (
     <>
       {/* Reset revision history with the recreated iOS view without aborting context imports. */}
@@ -343,12 +310,6 @@ export function ComposerEditor({
                 }
               : undefined)
           }
-          {...(selectedModel && changeModelOptions
-            ? {
-                modelCapabilities: selectedModel.capabilities,
-                onChangeModelOptions: changeModelOptions,
-              }
-            : {})}
           {...(selectedSkill?.description ? { skillDescription: selectedSkill.description } : {})}
           {...(selectedSkill?.path && onOpenMention
             ? {

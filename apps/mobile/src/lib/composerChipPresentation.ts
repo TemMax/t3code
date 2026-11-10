@@ -45,8 +45,6 @@ const CONTEXT_CHIP_PRESENTATIONS = {
   },
   // A machine: the record carries only its identity, so every machine wears one glyph.
   environment: { accent: "#3f9a4f", icon: "server" },
-  // A model: one glyph for every model.
-  model: { accent: "#998700", icon: "bot" },
   citation: { accent: "#4684e5", icon: "quote" },
 } as const satisfies Record<string, ContextChipPresentation>;
 
@@ -90,12 +88,10 @@ export const UNAVAILABLE_CONTEXT_CHIP_PRESENTATION: ContextChipPresentation = {
   icon: "circle-dashed",
 };
 
-export function composerChipDetail(record?: {
+export function composerChipSizeSuffix(record?: {
   readonly kind?: string;
   readonly sizeBytes?: number;
-  readonly optionsLabel?: string;
 }): string {
-  if (record?.kind === "model") return record.optionsLabel ?? "";
   if (record?.kind !== "file" && record?.kind !== "image") return "";
   return typeof record.sizeBytes === "number" ? formatAttachmentSize(record.sizeBytes) : "";
 }

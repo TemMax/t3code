@@ -23,10 +23,6 @@
       "types": "./src/composerThreadItems.ts",
       "default": "./src/composerThreadItems.ts"
     },
-    "./modelPickerSearch": {
-      "types": "./src/modelPickerSearch.ts",
-      "default": "./src/modelPickerSearch.ts"
-    },
     "./image-attachment-size": {
       "types": "./src/imageAttachmentSize.ts",
       "default": "./src/imageAttachmentSize.ts"

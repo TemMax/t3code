@@ -310,12 +310,6 @@ current title and opens it when selected. Your prompt only carries a reference: 
 history on demand, so attaching a long thread costs nothing until the agent looks. Attaching a
 thread does not change it, and the agent cannot send messages to it unless you ask.
 
-To point the agent at a model, type `@` followed by part of a model name. This offers the models
-your connected providers offer, the same list as the model picker. The chip tells the agent exactly
-which model you mean, for example to review your work or take delegated work. Select the chip to
-set its effort and other options; a new chip starts from the options you last set for that model on
-this device. Mentioning a model does not change the thread's model.
-
 A thread from a linked machine, picked, pasted or dropped, stays a reference that the agent reads
 on that machine. A pasted link to a thread on any other machine stays a link. Dropping a thread
 from any other environment attaches a saved transcript file. The source

@@ -319,29 +319,6 @@ export function buildExplicitProviderOptionSelectionsFromDescriptors(
   return normalized && normalized.length > 0 ? normalized : undefined;
 }
 
-/** The explicit options a model mention carries, and the short label its chip shows. */
-export function modelMentionSettings(
-  capabilities: ModelCapabilities | null | undefined,
-  selections: ReadonlyArray<ProviderOptionSelection>,
-): { options: Array<ProviderOptionSelection>; optionsLabel: string | undefined } {
-  const descriptors = capabilities
-    ? getProviderOptionDescriptors({ caps: capabilities, selections })
-    : [];
-  const labels: Array<string> = [];
-  for (const descriptor of descriptors) {
-    if (descriptor.type === "select") {
-      const label = getProviderOptionCurrentLabel(descriptor);
-      if (label !== undefined) labels.push(label);
-    } else if (getProviderOptionCurrentValue(descriptor) === true) {
-      labels.push(descriptor.label);
-    }
-  }
-  return {
-    options: buildProviderOptionSelectionsFromDescriptors(descriptors) ?? [],
-    optionsLabel: labels.length > 0 ? labels.join(" · ") : undefined,
-  };
-}
-
 export function isClaudeUltrathinkPrompt(text: string | null | undefined): boolean {
   return typeof text === "string" && /\bultrathink\b/i.test(text);
 }

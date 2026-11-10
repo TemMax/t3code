@@ -5,7 +5,6 @@ import {
 import type {
   EnvironmentId,
   EnvironmentMachineKind,
-  ProviderInstanceId,
   PullRequestContextMetadata,
   ScopedThreadRef,
   ServerProviderSkill,
@@ -49,15 +48,6 @@ export type ComposerCommandItem =
       readonly type: "environment";
       readonly environmentId: EnvironmentId;
       readonly machine: EnvironmentMachineKind;
-      readonly label: string;
-      readonly description: string;
-    }
-  | {
-      readonly id: string;
-      readonly type: "model";
-      readonly providerInstanceId: ProviderInstanceId;
-      readonly model: string;
-      readonly driverKind: string;
       readonly label: string;
       readonly description: string;
     }
@@ -133,8 +123,6 @@ function itemIcon(item: ComposerCommandItem): AppSymbolName | null {
       return "text.bubble";
     case "environment":
       return ENVIRONMENT_MACHINE_SYMBOLS[item.machine];
-    case "model":
-      return "sparkles";
   }
 }
 

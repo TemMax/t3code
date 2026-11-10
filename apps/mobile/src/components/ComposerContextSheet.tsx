@@ -7,14 +7,11 @@ import type {
   ComposerContextRecord,
   ElementContextSource,
   EnvironmentId,
-  ModelCapabilities,
   ProjectId,
-  ProviderOptionSelection,
   ScopedThreadRef,
 } from "@t3tools/contracts";
 import { formatAttachmentSize } from "@t3tools/client-runtime/state/attachments";
 import { sourceControlClients } from "@t3tools/client-runtime/source-control-clients";
-import { getProviderOptionDescriptors } from "@t3tools/shared/model";
 import { videoMimeType } from "@t3tools/shared/video";
 import { Platform, Pressable, ScrollView, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -31,8 +28,6 @@ import { VideoPreviewModal } from "./VideoPreviewModal";
 import { ComposerContextAttachment } from "./ComposerContextAttachment";
 import { AppText as Text } from "./ui/AppText";
 import { Sheet } from "./ui/Sheet";
-import { ThemedSwitch } from "./ui/ThemedSwitch";
-import { ChoiceRow } from "../features/threads/ThreadSettingsRows";
 import { useAppearancePreferences } from "../features/settings/appearance/AppearancePreferencesProvider";
 import { getMobileTerminalTheme } from "../features/terminal/terminalTheme";
 
@@ -80,58 +75,6 @@ function ContextSource(props: { source: ElementContextSource | null }) {
   );
 }
 
-function ModelOptionControls(props: {
-  readonly capabilities: ModelCapabilities;
-  readonly options: ReadonlyArray<ProviderOptionSelection>;
-  readonly onChange: (options: ReadonlyArray<ProviderOptionSelection>) => void;
-}) {
-  const descriptors = getProviderOptionDescriptors({
-    caps: props.capabilities,
-    selections: props.options,
-  });
-  const change = (id: string, value: string | boolean) =>
-    props.onChange(
-      props.options.some((option) => option.id === id)
-        ? props.options.map((option) => (option.id === id ? { id, value } : option))
-        : [...props.options, { id, value }],
-    );
-  return (
-    <>
-      {descriptors.map((descriptor) =>
-        descriptor.type === "select" ? (
-          <View key={descriptor.id} className="gap-1">
-            <Text className="text-xs text-foreground-muted">{descriptor.label}</Text>
-            <View className="overflow-hidden rounded-2xl bg-grouped-card">
-              {descriptor.options.map((choice, index) => (
-                <ChoiceRow
-                  key={choice.id}
-                  label={choice.label}
-                  {...(choice.description ? { description: choice.description } : {})}
-                  selected={descriptor.currentValue === choice.id}
-                  isLast={index === descriptor.options.length - 1}
-                  onPress={() => change(descriptor.id, choice.id)}
-                />
-              ))}
-            </View>
-          </View>
-        ) : (
-          <View
-            key={descriptor.id}
-            className="min-h-11 flex-row items-center justify-between rounded-2xl bg-grouped-card px-4 py-1"
-          >
-            <Text className="text-sm font-t3-medium text-foreground">{descriptor.label}</Text>
-            <ThemedSwitch
-              accessibilityLabel={descriptor.label}
-              value={descriptor.currentValue ?? false}
-              onValueChange={(value) => change(descriptor.id, value)}
-            />
-          </View>
-        ),
-      )}
-    </>
-  );
-}
-
 export function ComposerContextSheet(props: {
   readonly label: string;
   readonly record: ComposerContextRecord | undefined;
@@ -140,8 +83,6 @@ export function ComposerContextSheet(props: {
   readonly onOpenAttachment?: () => void;
   readonly onOpenPullRequest?: () => void;
   readonly skillDescription?: string;
-  readonly modelCapabilities?: ModelCapabilities | null;
-  readonly onChangeModelOptions?: (options: ReadonlyArray<ProviderOptionSelection>) => void;
   readonly onOpenSkill?: () => void;
   readonly onOpenThread?: (thread: ScopedThreadRef) => void;
   readonly environmentId?: EnvironmentId;
@@ -379,20 +320,6 @@ export function ComposerContextSheet(props: {
                       })
                     }
                     fullWidth
-                  />
-                ) : null}
-              </View>
-            ) : null}
-            {record.kind === "model" ? (
-              <View className="gap-3">
-                <ContextField label="Model" value={record.label} />
-                <ContextField label="Settings" value={record.optionsLabel} />
-                {props.modelCapabilities?.optionDescriptors?.length &&
-                props.onChangeModelOptions ? (
-                  <ModelOptionControls
-                    capabilities={props.modelCapabilities}
-                    options={record.options}
-                    onChange={props.onChangeModelOptions}
                   />
                 ) : null}
               </View>

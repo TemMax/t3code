@@ -23,13 +23,10 @@ import type {
   ChatFileAttachment,
   EnvironmentId,
   ModelSelection,
-  ComposerContextId,
-  ProviderOptionSelection,
   ProjectId,
   PreviewAnnotationPayload,
   ThreadContextRecord,
   EnvironmentContextRecord,
-  ModelContextRecord,
   ProviderInteractionMode,
   ResolvedKeybindingsConfig,
   RuntimeMode,
@@ -55,16 +52,7 @@ import { isPasteAsTextShortcut } from "@t3tools/client-runtime/text-paste";
 import { serializeComposerFileLink } from "@t3tools/shared/composerTrigger";
 import { folderDropTarget, resolveDroppedFolderPath } from "./folderDrop";
 import { splitTransferredFiles } from "./workspaceFileDrop";
-import {
-  createModelSelection,
-  modelMentionSettings,
-  normalizeModelSlug,
-} from "@t3tools/shared/model";
-import { modelContextRecord } from "@t3tools/shared/composerContextReferences";
-import type { ComposerModelCandidate } from "@t3tools/client-runtime/composerThreadItems";
-import { useEnvironmentModelPreferences } from "~/hooks/useSettings";
-import { isProviderInstancePickerReady } from "~/providerInstances";
-import { readModelMentionOptions, rememberModelMentionOptions } from "~/modelMentionOptionsStore";
+import { createModelSelection, normalizeModelSlug } from "@t3tools/shared/model";
 import { USAGE_LIMITS_COMMAND } from "@t3tools/shared/usageLimits";
 import {
   memo,
@@ -169,7 +157,6 @@ import {
 } from "../ComposerPromptEditorTiptap";
 import {
   ComposerContextActionsContext,
-  ComposerModelMentionContext,
   composerContextRecordsFromDraft,
 } from "../composerContextPresentation";
 import { useOpenPrLink } from "~/lib/openPullRequestLink";
@@ -194,7 +181,6 @@ import {
   threadContextReference,
   environmentContextRecord,
   environmentContextReference,
-  modelContextReference,
 } from "~/lib/composerContextRecords";
 import { rememberCopiedComposerAttachments } from "~/lib/copiedComposerAttachments";
 import { useThreadContextDrop, threadContextDropTargetProps } from "./threadContextDrag";
@@ -344,7 +330,6 @@ export interface ChatComposerHandle {
     reviewComments: ReviewCommentContext[];
     threadContexts: ThreadContextRecord[];
     environmentContexts: EnvironmentContextRecord[];
-    modelContexts: ModelContextRecord[];
     selectedPromptEffort: string | null;
     selectedModelSelection: ModelSelection;
     multipleModelSelections: ReadonlyArray<ModelSelection> | null;
@@ -727,7 +712,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const composerReviewComments = composerDraft.reviewComments;
   const composerThreadContexts = attachmentDraft.threadContexts;
   const composerEnvironmentContexts = composerDraft.environmentContexts;
-  const composerModelContexts = composerDraft.modelContexts;
   const {
     pendingSnapShotAnimations,
     pendingSnapShotIds,
@@ -779,7 +763,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     previewAnnotations: composerPreviewAnnotations,
     threadContexts: composerThreadContexts,
     environmentContexts: composerEnvironmentContexts,
-    modelContexts: composerModelContexts,
     images: composerImages,
     files: composerFiles,
     uploadsByImageId,
@@ -1153,30 +1136,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     composerPreviewAnnotations.length === 0 &&
     composerReviewComments.length === 0;
   const linkedEnvironments = useLinkedEnvironments(environmentId);
-  const { favorites: favoriteModels } = useEnvironmentModelPreferences(environmentId);
-  const modelCandidates = providerInstanceEntries.flatMap((entry): ComposerModelCandidate[] =>
-    isProviderInstancePickerReady(entry)
-      ? getAppModelOptionsForInstance(settings, entry, null)
-          .filter(
-            (option) =>
-              !option.isUnavailable &&
-              !(entry.driverKind === "antigravity" && option.slug === ANTIGRAVITY_DEFAULT_MODEL),
-          )
-          .map((option) => ({
-            providerInstanceId: entry.instanceId,
-            model: option.slug,
-            name: option.name,
-            ...(option.shortName ? { shortName: option.shortName } : {}),
-            ...(option.subProvider ? { subProvider: option.subProvider } : {}),
-            driverKind: entry.driverKind,
-            providerDisplayName: entry.displayName,
-            isFavorite: favoriteModels.some(
-              (favorite) =>
-                favorite.provider === entry.instanceId && favorite.model === option.slug,
-            ),
-          }))
-      : [],
-  );
   const {
     items: composerMenuItems,
     isLoading: isComposerMenuLoading,
@@ -1200,7 +1159,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     showSkillsInSlashMenu: settings.showSkillsInSlashMenu,
     workspaceSkillsScanning,
     questionAttachmentTarget,
-    modelCandidates,
   });
 
   const composerMenuOpen = Boolean(composerTrigger);
@@ -1355,11 +1313,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const setComposerDraftEnvironmentContexts = useComposerDraftStore(
     (store) => store.setEnvironmentContexts,
   );
-  const setComposerDraftModelContexts = useComposerDraftStore((store) => store.setModelContexts);
-  const addComposerDraftModelContexts = useComposerDraftStore((store) => store.addModelContexts);
-  const setComposerDraftModelContextOptions = useComposerDraftStore(
-    (store) => store.setModelContextOptions,
-  );
   const buildContextClipboardFragment = (contextIds: ReadonlyArray<string>): string | null => {
     const wanted = new Set(contextIds);
     const copiedFiles = new Map<string, File>();
@@ -1377,7 +1330,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         .map(terminalContextRecord),
       ...composerThreadContexts.filter((record) => wanted.has(record.contextId)),
       ...composerEnvironmentContexts.filter((record) => wanted.has(record.contextId)),
-      ...composerModelContexts.filter((record) => wanted.has(record.contextId)),
       ...composerReviewComments
         .filter((c) => wanted.has(reviewCommentContextId(c.id)))
         .map(reviewCommentContextRecord),
@@ -1731,23 +1683,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       setComposerDraftEnvironmentContexts(composerDraftTarget, nextEnvironments);
     }
 
-    const liveModelIds = new Set<string>(composerModelContexts.map((record) => record.contextId));
-    const restoredModels = [...referenced].flatMap((contextId) => {
-      if (liveModelIds.has(contextId)) return [];
-      const record = retained.models.get(contextId);
-      return record ? [record] : [];
-    });
-    const nextModels = [
-      ...composerModelContexts.filter((record) => referenced.has(record.contextId)),
-      ...restoredModels,
-    ];
-    for (const record of composerModelContexts) {
-      if (!referenced.has(record.contextId)) retained.models.set(record.contextId, record);
-    }
-    if (nextModels.length !== composerModelContexts.length || restoredModels.length > 0) {
-      setComposerDraftModelContexts(composerDraftTarget, nextModels);
-    }
-
     for (const comment of composerReviewComments) {
       const contextId = reviewCommentContextId(comment.id);
       if (!referenced.has(contextId)) {
@@ -2077,70 +2012,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       }
       return;
     }
-    if (item.type === "model") {
-      if (trigger.kind !== "path") return;
-      const model = providerInstanceEntries
-        .find((entry) => entry.instanceId === item.providerInstanceId)
-        ?.models.find((candidate) => candidate.slug === item.model);
-      const mentionSettings = modelMentionSettings(
-        model?.capabilities,
-        readModelMentionOptions(item.providerInstanceId, item.model) ?? [],
-      );
-      const record = modelContextRecord({
-        providerInstanceId: item.providerInstanceId,
-        model: item.model,
-        label: item.label,
-        ...mentionSettings,
-      });
-      const replacement = `${formatInlineContextReference(modelContextReference(record))} `;
-      const replacementRangeEnd = extendReplacementRangeForTrailingSpace(
-        snapshot.value,
-        trigger.rangeEnd,
-        replacement,
-      );
-      const applied = applyPromptReplacement(trigger.rangeStart, replacementRangeEnd, replacement, {
-        expectedText: snapshot.value.slice(trigger.rangeStart, replacementRangeEnd),
-      });
-      if (applied) {
-        if (composerModelContexts.some((existing) => existing.contextId === record.contextId)) {
-          setComposerDraftModelContextOptions(
-            composerDraftTarget,
-            record.contextId,
-            record.options,
-            record.optionsLabel,
-          );
-        } else {
-          addComposerDraftModelContexts(composerDraftTarget, [record], {
-            appendReference: false,
-          });
-        }
-        setComposerHighlightedItemId(null);
-      }
-      return;
-    }
   };
   const onSelectComposerItemStable = useStableCallback(onSelectComposerItem);
-  const modelMention = {
-    entries: providerInstanceEntries,
-    onChangeOptions: (
-      contextId: ComposerContextId,
-      options: ReadonlyArray<ProviderOptionSelection>,
-    ) => {
-      const record = composerModelContexts.find((candidate) => candidate.contextId === contextId);
-      if (!record) return;
-      const capabilities = providerInstanceEntries
-        .find((entry) => entry.instanceId === record.providerInstanceId)
-        ?.models.find((candidate) => candidate.slug === record.model)?.capabilities;
-      const next = modelMentionSettings(capabilities, options);
-      setComposerDraftModelContextOptions(
-        composerDraftTarget,
-        contextId,
-        next.options,
-        next.optionsLabel,
-      );
-      rememberModelMentionOptions(record.providerInstanceId, record.model, next.options);
-    },
-  };
 
   const onComposerMenuItemHighlighted = (itemId: string | null) => {
     setComposerHighlightedItemId(itemId);
@@ -3125,7 +2998,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         reviewComments: composerReviewComments,
         threadContexts: composerThreadContexts,
         environmentContexts: composerEnvironmentContexts,
-        modelContexts: composerModelContexts,
         selectedPromptEffort,
         selectedModelSelection,
         multipleModelSelections:
@@ -3182,7 +3054,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       composerReviewComments,
       composerThreadContexts,
       composerEnvironmentContexts,
-      composerModelContexts,
       focusComposer,
       environmentId,
       primaryEnvironmentId,
@@ -3509,63 +3380,61 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                   />
                 ) : null}
                 <ComposerContextActionsContext value={composerContextActions}>
-                  <ComposerModelMentionContext value={modelMention}>
-                    <ComposerPromptEditor
-                      draftKey={composerDraftTargetKey}
-                      // Switching threads lands focus here, so the label names the thread.
-                      ariaLabel={activeThread ? `Message ${activeThread.title}` : "Message"}
-                      suggestionListId={composerSuggestionListId}
-                      activeSuggestionId={
-                        composerSuggestionListVisible && activeComposerMenuItem
-                          ? composerSuggestionOptionId(
-                              composerSuggestionListId,
-                              activeComposerMenuItem.id,
-                            )
-                          : undefined
-                      }
-                      editorRef={composerEditorRef}
-                      richTextEnabled={settings.composerRichTextEnabled}
-                      literalText={isLiteralPendingAnswer}
-                      isPathQueryActive={isPathQueryActiveStable}
-                      value={activePendingProgress ? activePendingProgress.customAnswer : prompt}
-                      cursor={composerCursor}
-                      contextRecords={composerContextRecords}
-                      buildContextClipboardFragment={buildContextClipboardFragmentStable}
-                      importContextFragment={importContextFragmentStable}
-                      skills={selectedProviderSkills}
-                      className={cn(showMobilePendingAnswerActions && "max-sm:pb-12")}
-                      onChange={onPromptChangeStable}
-                      onCommandKeyDown={onComposerCommandKeyStable}
-                      onPageScrollKeyDown={onPageScrollKeyDown}
-                      onPageScrollKeyUp={onPageScrollKeyUp}
-                      onPageScrollRelease={onPageScrollRelease}
-                      onCitationSubmitAndSend={submitCitationAndSendStable}
-                      onCitationDraftSave={saveCitationDraftToPromptStable}
-                      onPaste={onComposerPasteStable}
-                      placeholder={
-                        isComposerApprovalState
-                          ? activePendingApproval?.supportsFeedback
-                            ? "Send feedback to decline this request"
-                            : "Send a message to decline and redirect the agent"
-                          : activePendingProgress
-                            ? isChoiceOnlyPendingQuestion
-                              ? "Choose an option above"
-                              : "Type your own answer, or leave this blank to use the selected option"
-                            : showPlanFollowUpPrompt && activeProposedPlan
-                              ? "Add feedback to refine the plan, or leave this blank to implement it"
-                              : projectSelectionRequired
-                                ? "Choose a project above to start a thread"
-                                : showProviderUnavailable
-                                  ? "Enable a provider in Settings to send a message"
-                                  : DEFAULT_COMPOSER_PLACEHOLDER
-                      }
-                      disabled={
-                        projectSelectionRequired ||
-                        isChoiceOnlyPendingQuestion ||
-                        activePendingIsResponding
-                      }
-                    />
-                  </ComposerModelMentionContext>
+                  <ComposerPromptEditor
+                    draftKey={composerDraftTargetKey}
+                    // Switching threads lands focus here, so the label names the thread.
+                    ariaLabel={activeThread ? `Message ${activeThread.title}` : "Message"}
+                    suggestionListId={composerSuggestionListId}
+                    activeSuggestionId={
+                      composerSuggestionListVisible && activeComposerMenuItem
+                        ? composerSuggestionOptionId(
+                            composerSuggestionListId,
+                            activeComposerMenuItem.id,
+                          )
+                        : undefined
+                    }
+                    editorRef={composerEditorRef}
+                    richTextEnabled={settings.composerRichTextEnabled}
+                    literalText={isLiteralPendingAnswer}
+                    isPathQueryActive={isPathQueryActiveStable}
+                    value={activePendingProgress ? activePendingProgress.customAnswer : prompt}
+                    cursor={composerCursor}
+                    contextRecords={composerContextRecords}
+                    buildContextClipboardFragment={buildContextClipboardFragmentStable}
+                    importContextFragment={importContextFragmentStable}
+                    skills={selectedProviderSkills}
+                    className={cn(showMobilePendingAnswerActions && "max-sm:pb-12")}
+                    onChange={onPromptChangeStable}
+                    onCommandKeyDown={onComposerCommandKeyStable}
+                    onPageScrollKeyDown={onPageScrollKeyDown}
+                    onPageScrollKeyUp={onPageScrollKeyUp}
+                    onPageScrollRelease={onPageScrollRelease}
+                    onCitationSubmitAndSend={submitCitationAndSendStable}
+                    onCitationDraftSave={saveCitationDraftToPromptStable}
+                    onPaste={onComposerPasteStable}
+                    placeholder={
+                      isComposerApprovalState
+                        ? activePendingApproval?.supportsFeedback
+                          ? "Send feedback to decline this request"
+                          : "Send a message to decline and redirect the agent"
+                        : activePendingProgress
+                          ? isChoiceOnlyPendingQuestion
+                            ? "Choose an option above"
+                            : "Type your own answer, or leave this blank to use the selected option"
+                          : showPlanFollowUpPrompt && activeProposedPlan
+                            ? "Add feedback to refine the plan, or leave this blank to implement it"
+                            : projectSelectionRequired
+                              ? "Choose a project above to start a thread"
+                              : showProviderUnavailable
+                                ? "Enable a provider in Settings to send a message"
+                                : DEFAULT_COMPOSER_PLACEHOLDER
+                    }
+                    disabled={
+                      projectSelectionRequired ||
+                      isChoiceOnlyPendingQuestion ||
+                      activePendingIsResponding
+                    }
+                  />
                 </ComposerContextActionsContext>
                 {showMobilePendingAnswerActions ? (
                   <div

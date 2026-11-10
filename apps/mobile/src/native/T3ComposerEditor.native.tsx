@@ -17,7 +17,7 @@ import type { NativeSyntheticEvent, ViewProps } from "react-native";
 import { Platform, StyleSheet } from "react-native";
 
 import {
-  composerChipDetail,
+  composerChipSizeSuffix,
   contextChipIcon,
   contextChipAccent,
   contextChipPresentation,
@@ -202,7 +202,7 @@ export function ComposerEditor({
                 : token.type === "citation"
                   ? token.value
                   : basename(token.value),
-          detail: token.type === "context" ? composerChipDetail(record) : "",
+          detail: token.type === "context" ? composerChipSizeSuffix(record) : "",
           iconUri: contextChipIconUri(icon),
           tintsIcon: icon.kind === "chip",
         };

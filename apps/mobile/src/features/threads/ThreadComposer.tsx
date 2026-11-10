@@ -14,7 +14,6 @@ import { useAtomValue } from "@effect/atom-react";
 import { clampFileAttachmentUploadBytes } from "@t3tools/client-runtime/state/attachments";
 import { pastedTextDisposition, replaceTextSelection } from "@t3tools/client-runtime/text-paste";
 import {
-  DEFAULT_SERVER_SETTINGS,
   PROVIDER_SEND_TURN_MAX_ATTACHMENTS,
   PROVIDER_SEND_TURN_MAX_INPUT_CHARS,
   type ChatAttachment,
@@ -65,10 +64,7 @@ import {
   useComposerDraft,
 } from "../../state/use-composer-drafts";
 import { appAtomRegistry } from "../../state/atom-registry";
-import type { ComposerDocumentAttachment, MentionableModel } from "../../lib/composerContext";
-import { resolveModelPreferences } from "@t3tools/shared/serverSettings";
-import type { Preferences } from "../../persistence/mobile-preferences";
-import { mobilePreferencesAtom } from "../../state/preferences";
+import type { ComposerDocumentAttachment } from "../../lib/composerContext";
 import { useProject, useVisibleThreadShells } from "../../state/entities";
 import { useMentionableEnvironments } from "../../state/environments";
 import { useLinkedEnvironments } from "../../state/peerLinks";
@@ -128,7 +124,6 @@ import {
 export const COMPOSER_COLLAPSED_CHROME = 60;
 
 const NO_MACHINES: ReadonlyArray<ComposerEnvironmentCandidate> = [];
-const NO_MODEL_FAVORITES: NonNullable<Preferences["modelFavorites"]> = [];
 const COLLAPSED_EDITOR_DEFAULT_INSET = 6;
 // iOS puts line-height slack above glyphs. DM Sans's lowercase midline is
 // descender (0.31em) + half x-height (0.504em) above the line bottom.
@@ -541,40 +536,6 @@ export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps
   };
 
   const mentionableEnvironments = useMentionableEnvironments();
-  const preferencesResult = useAtomValue(mobilePreferencesAtom);
-  const favoriteModels = resolveModelPreferences(
-    props.serverConfig?.settings ?? DEFAULT_SERVER_SETTINGS,
-    {
-      favorites: AsyncResult.isSuccess(preferencesResult)
-        ? (preferencesResult.value.modelFavorites ?? NO_MODEL_FAVORITES)
-        : NO_MODEL_FAVORITES,
-    },
-  ).favorites;
-  const mentionableModels = buildModelOptions(
-    props.serverConfig,
-    null,
-    undefined,
-    props.selectedThread.projectId,
-  ).flatMap((option): MentionableModel[] =>
-    option.isUnavailable
-      ? []
-      : [
-          {
-            providerInstanceId: option.selection.instanceId,
-            model: option.selection.model,
-            name: option.label,
-            ...(option.shortName ? { shortName: option.shortName } : {}),
-            driverKind: option.providerDriver,
-            providerDisplayName: option.providerLabel,
-            capabilities: option.capabilities,
-            isFavorite: favoriteModels.some(
-              (favorite) =>
-                favorite.provider === option.selection.instanceId &&
-                favorite.model === option.selection.model,
-            ),
-          },
-        ],
-  );
   const composerMenu = useComposerCommandMenu({
     draftMessage: draftMessage,
     ownerKey: composerDraftKey,
@@ -584,7 +545,6 @@ export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps
       ? mentionableEnvironments
       : NO_MACHINES,
     linkedEnvironments: useLinkedEnvironments(props.environmentId),
-    mentionableModels,
     currentThreadId: props.selectedThread.id,
     projectCwd: props.projectCwd,
     pullRequestProjectId: props.serverConfig ? (project?.id ?? null) : null,
@@ -970,7 +930,6 @@ export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps
                   hidden={props.hidden}
                   draftKey={composerDraftKey}
                   environmentId={props.environmentId}
-                  mentionableModels={mentionableModels}
                   onOpenMention={(path) => {
                     Keyboard.dismiss();
                     if (props.isDraft) {
