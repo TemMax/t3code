@@ -20,6 +20,9 @@ import {
   type ClientProfileSidecar,
 } from "./merge.ts";
 
+const decodeSidecar = Schema.decodeSync(ClientProfileSidecarSchema);
+const decodeUnknownSidecar = Schema.decodeUnknownSync(ClientProfileSidecarSchema);
+
 const D: ClientProfileSurface = { kind: "desktop", os: "mac" };
 const B: ClientProfileSurface = { kind: "browser", os: "mac" };
 const M: ClientProfileSurface = { kind: "mobile" };
@@ -315,7 +318,7 @@ describe("client profile merge", () => {
 
   it("decodes a stored sidecar and rejects a malformed one", () => {
     const stored = sidecarWith({ diffLayout: { changedAt: -1, by: "dev-a", hash: "ab" } }, 7);
-    expect(Schema.decodeUnknownSync(ClientProfileSidecarSchema)(stored)).toEqual(stored);
-    expect(() => Schema.decodeUnknownSync(ClientProfileSidecarSchema)({ deviceId: 5 })).toThrow();
+    expect(decodeSidecar(stored)).toEqual(stored);
+    expect(() => decodeUnknownSidecar({ deviceId: 5 })).toThrow();
   });
 });
