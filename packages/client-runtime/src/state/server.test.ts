@@ -570,6 +570,14 @@ describe("server state projection", () => {
                 ],
               },
             },
+            {
+              version: 1,
+              type: "clientProfileUpdated",
+              payload: {
+                entries: { theme: { value: "dark", changedAt: 1, by: "web" } },
+                replace: true,
+              },
+            },
             snapshotEvent({
               ...CONFIG,
               lastEventLoopStall: {
@@ -586,6 +594,8 @@ describe("server state projection", () => {
               expect(projection.config.environmentThemes).toEqual(event.payload.themes);
             if (event.type === "usageLimitSourcesUpdated")
               expect(projection.config.usageLimitSources).toEqual(event.payload.sources);
+            if (event.type === "clientProfileUpdated")
+              expect(projection.config.clientProfile).toEqual(event.payload.entries);
             yield* TestClock.adjust("10 seconds");
           }
         }),
