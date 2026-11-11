@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { defaultThemeGeneration, defaultThemeToApply } from "./useDefaultTheme";
+import {
+  defaultThemeChangedAt,
+  defaultThemeGeneration,
+  defaultThemeToApply,
+} from "./useDefaultTheme";
 
 const BASE = {
   environmentId: "env-1",
@@ -25,5 +29,11 @@ describe("default theme adoption", () => {
     });
     expect(next).not.toBe(null);
     expect(next).not.toBe(applied);
+  });
+
+  it("stamps adoption with the time the default was set", () => {
+    expect(defaultThemeChangedAt("2026-11-10T10:00:00.000Z")).toBe(1794304800000);
+    expect(defaultThemeChangedAt("")).toBe(0);
+    expect(defaultThemeChangedAt("garbage")).toBe(0);
   });
 });
