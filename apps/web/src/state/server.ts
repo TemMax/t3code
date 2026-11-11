@@ -34,6 +34,7 @@ import { reuseProvidersIgnoringCheckedAt } from "./serverProviders.logic";
 export const serverEnvironment = createServerEnvironmentAtoms(connectionAtomRuntime, {
   initialConfigValueAtom: environmentSession.initialConfigValueAtom,
   environmentThemes: true,
+  clientProfile: true,
   usageLimitSources: true,
   usageLimitsCommand: true,
 });

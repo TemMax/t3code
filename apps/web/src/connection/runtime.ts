@@ -36,6 +36,7 @@ const layerProvidedClientConnection = layerSnapshotLoader.pipe(
   Layer.provideMerge(
     Connection.layerWithOptions({
       environmentThemes: true,
+      clientProfile: true,
       usageLimitSources: true,
       usageLimitsCommand: true,
     }),
