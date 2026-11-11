@@ -85,16 +85,14 @@ function computeStatus(
   if (!sidecar.enabled) return { type: "off" };
   const participants = environments.filter(participates);
   if (participants.length > 0) {
-    if (!sidecar.choicePending) {
-      return {
-        type: "syncing",
-        environments: participants.map(({ environmentId, label }) => ({ environmentId, label })),
-      };
-    }
-    if (needsClientProfileChoice(surface, serverDocuments(participants))) {
+    // With no profile to choose from, the next pass seeds the sidecar and syncs.
+    if (sidecar.choicePending && needsClientProfileChoice(surface, serverDocuments(participants))) {
       return { type: "choice" };
     }
-    return { type: "waiting" };
+    return {
+      type: "syncing",
+      environments: participants.map(({ environmentId, label }) => ({ environmentId, label })),
+    };
   }
   const connected = environments.filter((environment) => environment.connected);
   if (
@@ -275,8 +273,18 @@ export function createClientProfileSync(options: {
     publishStatus(disabled);
   };
 
-  const setEnabled = (enabled: boolean) =>
+  // Callers are UI handlers that can only log a failure, so commands report it and never reject.
+  const command = (task: () => Promise<void>) =>
     serial(async () => {
+      try {
+        await task();
+      } catch (cause) {
+        onError(cause);
+      }
+    });
+
+  const setEnabled = (enabled: boolean) =>
+    command(async () => {
       const sidecar = await sidecarStore.load();
       if (!enabled) {
         await turnOff(sidecar);
@@ -292,7 +300,7 @@ export function createClientProfileSync(options: {
     });
 
   const choose = (choice: "synced" | "thisDevice") =>
-    serial(async () => {
+    command(async () => {
       const sidecar = await sidecarStore.load();
       if (!sidecar.enabled || !sidecar.choicePending) {
         publishStatus(sidecar);
@@ -316,7 +324,7 @@ export function createClientProfileSync(options: {
     });
 
   const cancelChoice = () =>
-    serial(async () => {
+    command(async () => {
       const sidecar = await sidecarStore.load();
       if (sidecar.enabled && sidecar.choicePending) await turnOff(sidecar);
       else publishStatus(sidecar);
@@ -324,9 +332,14 @@ export function createClientProfileSync(options: {
 
   const adoptExternalChange: ClientProfileSyncController["adoptExternalChange"] = (change) =>
     serial(async () => {
-      const sidecar = await sidecarStore.load();
+      let sidecar = await sidecarStore.load();
       if (!sidecar.enabled) return "off";
-      if (sidecar.choicePending) return "waiting";
+      if (sidecar.choicePending) {
+        // Callers retry "waiting" on a status change, and seeding a choice no profile needs makes none.
+        await runPass();
+        sidecar = await sidecarStore.load();
+        if (sidecar.choicePending) return "waiting";
+      }
       const environment = registry
         .get(environmentsAtom)
         .find((candidate) => candidate.environmentId === change.environmentId);

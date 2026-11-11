@@ -130,6 +130,7 @@ function setup(input: {
     applied,
     store,
     pushes,
+    errors,
     clock,
     status: () => registry.get(controller.statusAtom),
     setEnvironments: (next: ReadonlyArray<ClientProfileEnvironment>) =>
@@ -415,6 +416,21 @@ describe("createClientProfileSync", () => {
     expect(await change(700)).toBe("waiting");
   });
 
+  it("seeds a choice no profile needs before adopting an external change", async () => {
+    using t = setup({ local: { themeLight: "a" }, environments: [env("e1", {})] });
+    await t.settle();
+    // Another tab turned sync on; this tab has not run a pass since.
+    t.store.sidecar = { ...t.store.sidecar, enabled: true, choicePending: true };
+    expect(
+      await t.controller.adoptExternalChange({
+        environmentId: "e1",
+        values: { themeLight: "b" },
+        changedAt: 2_000,
+      }),
+    ).toBe("applied");
+    expect(t.local.themeLight).toBe("b");
+  });
+
   it("drops oversize entries from pushes", async () => {
     using t = setup({
       surface: D,
@@ -444,12 +460,46 @@ describe("createClientProfileSync", () => {
     });
     await vi.advanceTimersByTimeAsync(0);
     expect(t.pushes).toEqual([]);
+    expect(t.status()).toEqual({
+      type: "syncing",
+      environments: [{ environmentId: "e1", label: "E1" }],
+    });
 
     ready.resolve();
     await vi.advanceTimersByTimeAsync(0);
     expect(t.pushes).toEqual([
       { environmentId: "e1", entries: { themeMode: entry("dark", 1_000, DEVICE) } },
     ]);
+  });
+
+  it("shows syncing as soon as sync is turned on against servers without a profile", async () => {
+    const ready = Promise.withResolvers<void>();
+    using t = setup({ local: {}, environments: [env("e1", {})], ready: ready.promise });
+    const turningOn = t.controller.setEnabled(true);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(t.status()).toEqual({
+      type: "syncing",
+      environments: [{ environmentId: "e1", label: "E1" }],
+    });
+
+    ready.resolve();
+    await turningOn;
+    expect(t.store.sidecar.choicePending).toBe(false);
+  });
+
+  it("reports a choice that fails instead of rejecting", async () => {
+    const ready = Promise.withResolvers<void>();
+    using t = setup({
+      local: {},
+      environments: [env("e1", { themeMode: entry("light", 500, "dev-b") })],
+      sidecar: { ...emptyClientProfileSidecar(DEVICE), enabled: true, choicePending: true },
+      ready: ready.promise,
+    });
+    const failure = new Error("unreadable");
+    ready.reject(failure);
+    await t.controller.choose("synced");
+    expect(t.status()).toEqual({ type: "choice" });
+    expect(t.errors.splice(0)).toEqual([failure, failure]);
   });
 
   it("skips a pass for environment updates that change nothing it uses", async () => {

@@ -164,10 +164,7 @@ function usePreferencesSyncRow(): SettingsListRow {
   const status = useAtomValue(preferencesSync.statusAtom);
   const on = status.type === "choice" || status.type === "syncing";
   const title = "Sync preferences across devices";
-  const toggle = (enabled: boolean) =>
-    void preferencesSync
-      .setEnabled(enabled)
-      .catch((error: unknown) => console.warn("[preferences-sync] toggle failed", error));
+  const toggle = (enabled: boolean) => void preferencesSync.setEnabled(enabled);
   return {
     id: "preferences-sync",
     icon: "arrow.left.arrow.right",

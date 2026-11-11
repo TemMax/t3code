@@ -113,16 +113,16 @@ function presentChoice() {
     [
       {
         text: "Use synced settings",
-        onPress: () => void preferencesSync.choose("synced").catch(reportError),
+        onPress: () => void preferencesSync.choose("synced"),
       },
       {
         text: "Use this device's settings",
-        onPress: () => void preferencesSync.choose("thisDevice").catch(reportError),
+        onPress: () => void preferencesSync.choose("thisDevice"),
       },
       {
         text: "Cancel",
         style: "cancel",
-        onPress: () => void preferencesSync.cancelChoice().catch(reportError),
+        onPress: () => void preferencesSync.cancelChoice(),
       },
     ],
     { cancelable: false },
