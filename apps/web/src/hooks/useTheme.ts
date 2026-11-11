@@ -184,6 +184,16 @@ function writeAppearanceModePreference(appearanceMode: ThemePreferenceMode): voi
   }
 }
 
+export function readStoredThemePreference(): string | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(STORAGE_KEY);
+    return raw ? canonicalThemePreference(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
 export function readThemePreference(): Theme {
   if (typeof window === "undefined") return DEFAULT_THEME_SNAPSHOT.theme;
   let raw: string | null;
@@ -486,6 +496,8 @@ function subscribe(listener: () => void): () => void {
   };
 }
 
+export { subscribe as subscribeTheme };
+
 /** For shortcuts and other handlers outside React that read the theme at event time. */
 export function getThemeSnapshot(): ThemeSnapshot {
   return getSnapshot();
@@ -580,7 +592,7 @@ export function setAppearanceMode(nextAppearanceMode: ThemePreferenceMode): bool
   return true;
 }
 
-function setThemeHalf(appearance: ThemeAppearance, themeId: string | null): boolean {
+export function setThemeHalf(appearance: ThemeAppearance, themeId: string | null): boolean {
   if (typeof window === "undefined") return false;
   try {
     const current = readStoredThemeHalvesRaw();
