@@ -2,6 +2,10 @@ import type { ClientProfileLocalRead, ClientProfileSidecar } from "./merge.ts";
 
 export interface ClientProfileValueSource {
   readonly owns: (base: string) => boolean;
+  /**
+   * Runs before the controller reads or applies. Tabs share one sidecar, so a cache another tab
+   * can change must be refreshed here, or its stale value is pushed as a newer local change.
+   */
   readonly ready: () => Promise<void>;
   readonly read: () => ClientProfileLocalRead;
   readonly defaults: () => Readonly<Record<string, unknown>>;
@@ -18,6 +22,8 @@ export interface ClientProfileValueSource {
 export interface ClientProfileSidecarStore {
   readonly load: () => Promise<ClientProfileSidecar>;
   readonly save: (sidecar: ClientProfileSidecar) => Promise<void>;
+  /** Fires when another tab or window changes the stored sidecar. */
+  readonly subscribe?: (onChange: () => void) => () => void;
 }
 
 export function combineClientProfileSources(

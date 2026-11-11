@@ -128,6 +128,27 @@ describe("web theme profile source", () => {
     expect(source.read().values).toHaveProperty("customTheme.x");
   });
 
+  it("re-reads custom themes another tab saved before a pass and notifies only on a change", async () => {
+    using _storage = isolateThemeStorage();
+    const source = createWebThemeSource();
+    installCustomTheme(darkOnly("x"));
+    const library = localStorage.getItem(CUSTOM_THEMES_STORAGE_KEY)!;
+    localStorage.removeItem(CUSTOM_THEMES_STORAGE_KEY);
+    invalidateCustomThemes();
+    expect(source.read().values).not.toHaveProperty("customTheme.x");
+    const onChange = vi.fn();
+    using _subscription = { [Symbol.dispose]: source.subscribe(onChange) };
+
+    // Another tab's write, before its storage event reaches this tab.
+    localStorage.setItem(CUSTOM_THEMES_STORAGE_KEY, library);
+    await source.ready();
+    expect(source.read().values).toHaveProperty("customTheme.x");
+    expect(onChange).toHaveBeenCalledTimes(1);
+
+    await source.ready();
+    expect(onChange).toHaveBeenCalledTimes(1);
+  });
+
   it("maps a default theme to its halves and appearance", () => {
     using _storage = isolateThemeStorage();
     installCustomTheme(darkOnly("night-only"));

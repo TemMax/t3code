@@ -13,6 +13,7 @@ import * as Schema from "effect/Schema";
 import { TYPOGRAPHY_ADVANCED_STORAGE_KEY } from "../appearanceFonts";
 import { LAST_EDITOR_KEY } from "../editorPreferences";
 import {
+  adoptPersistedClientSettings,
   ensureClientSettingsHydrated,
   getClientSettings,
   persistClientSettingsUpdate,
@@ -70,7 +71,10 @@ export function createWebSettingsSource(surface: ClientProfileSurface): ClientPr
 
   return {
     owns,
-    ready: ensureClientSettingsHydrated,
+    ready: async () => {
+      await ensureClientSettingsHydrated();
+      await adoptPersistedClientSettings();
+    },
     read,
     defaults: () => {
       const defaults: Record<string, unknown> = {};

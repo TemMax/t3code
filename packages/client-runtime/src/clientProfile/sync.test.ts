@@ -73,11 +73,13 @@ function setup(input: {
     defaults: () => input.defaults ?? {},
     apply: async (values) => {
       applied.push(values);
+      let changed = false;
       for (const [base, value] of Object.entries(values)) {
+        if (value === null ? base in local : local[base] !== value) changed = true;
         if (value === null) delete local[base];
         else local[base] = value;
       }
-      notify();
+      if (changed) notify();
       return Object.fromEntries(
         Object.keys(values)
           .filter((base) => base in local)
@@ -89,11 +91,16 @@ function setup(input: {
       return () => listeners.delete(onChange);
     },
   };
+  const sidecarListeners = new Set<() => void>();
   const store = {
     sidecar: input.sidecar ?? emptyClientProfileSidecar(DEVICE),
     load: async () => store.sidecar,
     save: async (sidecar: ClientProfileSidecar) => {
       store.sidecar = sidecar;
+    },
+    subscribe: (onChange: () => void) => {
+      sidecarListeners.add(onChange);
+      return () => sidecarListeners.delete(onChange);
     },
   };
   const registry = AtomRegistry.make();
@@ -130,6 +137,10 @@ function setup(input: {
     setLocal: (base: string, value: unknown) => {
       local[base] = value;
       notify();
+    },
+    changeSidecarElsewhere: (sidecar: ClientProfileSidecar) => {
+      store.sidecar = sidecar;
+      for (const listener of sidecarListeners) listener();
     },
     settle: () => vi.advanceTimersByTimeAsync(DEBOUNCE),
     [Symbol.dispose]: () => {
@@ -174,7 +185,7 @@ describe("createClientProfileSync", () => {
     expect(t.pushes.filter((push) => "themeMode" in push.entries)).toEqual([]);
   });
 
-  it("shows the shared sidecar's state when another tab already turned sync on or chose", async () => {
+  it("shows the shared sidecar's state when another tab turns sync on, chooses or turns it off", async () => {
     using t = setup({
       local: { themeMode: "dark" },
       environments: [env("e1", { themeMode: entry("light", 500, "dev-b") })],
@@ -190,6 +201,10 @@ describe("createClientProfileSync", () => {
       type: "syncing",
       environments: [{ environmentId: "e1", label: "E1" }],
     });
+
+    t.changeSidecarElsewhere({ ...t.store.sidecar, enabled: false, entries: {} });
+    await t.settle();
+    expect(t.status()).toEqual({ type: "off" });
   });
 
   it("\"thisDevice\" stamps every own key past the servers' stamps and leaves other surfaces' keys alone", async () => {

@@ -197,7 +197,9 @@ maintainer would get wrong:
 - A new stamp is `max(now, highestSeen + 1)`, so a device with a slow clock still wins over what
   it has seen.
 - The device sidecar keeps hashes of what it last applied or pushed. They stop an applied entry
-  from echoing back as a new change.
+  from echoing back as a new change. Browser tabs share one sidecar, so a value source refreshes
+  every cache another tab can change before a pass reads it. A stale value read against a newer
+  sidecar looks like a local change and overwrites the newer value on every device.
 - Turning sync on has three outcomes: seed an empty server with this device's preferences,
   adopt the server's, or claim the server for this device's. The user picks between the last two.
 - Clients relay entries between servers. This is the only way two servers exchange preferences,

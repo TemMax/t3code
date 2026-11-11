@@ -17,6 +17,7 @@ import {
   installCustomTheme,
   isCustomThemeLibraryReady,
   parseStoredTheme,
+  refreshCustomThemes,
   removeCustomTheme,
   singleAppearanceOf,
   subscribeToCustomThemes,
@@ -126,7 +127,10 @@ export function createWebThemeSource(): ClientProfileValueSource {
       base === "themeLight" ||
       base === "themeDark" ||
       base.startsWith(CUSTOM_THEME_KEY_PREFIX),
-    ready: () => Promise.resolve(),
+    ready: () => {
+      refreshCustomThemes();
+      return Promise.resolve();
+    },
     read,
     defaults: () => ({
       themeMode: "system",

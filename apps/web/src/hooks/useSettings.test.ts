@@ -14,6 +14,7 @@ vi.mock("~/localApi", () => ({
 import {
   __resetClientSettingsPersistenceForTests,
   __setClientSettingsForTests,
+  adoptPersistedClientSettings,
   ensureClientSettingsHydrated,
   getClientSettings,
   mergeEnvironmentSettings,
@@ -260,6 +261,30 @@ describe("persistClientSettingsUpdate", () => {
     expect(durableSettings.browserProfiles).toContainEqual(importedProfile);
     expect(getClientSettings().wordWrap).toBe(false);
     expect(getClientSettings().browserProfiles).toContainEqual(importedProfile);
+  });
+});
+
+describe("adoptPersistedClientSettings", () => {
+  it("takes settings another tab saved but keeps a write still in flight", async () => {
+    __setClientSettingsForTests(DEFAULT_CLIENT_SETTINGS);
+    persistenceMocks.getClientSettings.mockResolvedValue({
+      ...DEFAULT_CLIENT_SETTINGS,
+      timestampFormat: "12-hour",
+    });
+
+    await adoptPersistedClientSettings();
+    expect(getClientSettings().timestampFormat).toBe("12-hour");
+
+    let finishWrite!: () => void;
+    const blocked = new Promise<void>((resolve) => {
+      finishWrite = resolve;
+    });
+    const write = persistClientSettingsPatch({ wordWrap: false }, () => blocked);
+    persistenceMocks.getClientSettings.mockResolvedValue(DEFAULT_CLIENT_SETTINGS);
+    await adoptPersistedClientSettings();
+    expect(getClientSettings()).toMatchObject({ timestampFormat: "12-hour", wordWrap: false });
+    finishWrite();
+    await write;
   });
 });
 

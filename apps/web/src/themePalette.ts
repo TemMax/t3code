@@ -238,6 +238,20 @@ export function invalidateCustomThemes() {
   notifyCustomThemeListeners();
 }
 
+function customThemeLibraryKey(snapshot: CustomThemeLibrarySnapshot): string {
+  return snapshot.status === "ready" ? JSON.stringify(snapshot.storedThemes) : snapshot.reason;
+}
+
+/** Re-reads the stored library and notifies only when another tab changed it. */
+export function refreshCustomThemes(): void {
+  const cached = customThemeLibrarySnapshot;
+  if (cached === null) return;
+  const stored = readCustomThemeLibrarySnapshot();
+  if (customThemeLibraryKey(stored) === customThemeLibraryKey(cached)) return;
+  customThemeLibrarySnapshot = stored;
+  notifyCustomThemeListeners();
+}
+
 const EMPTY_CUSTOM_THEMES: ReadonlyArray<ThemeDefinition> = [];
 
 export function isCustomThemeLibraryReady(): boolean {

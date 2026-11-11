@@ -257,10 +257,12 @@ export function createClientProfileSync(options: {
       if (changed) schedulePass();
     });
     const unsubscribeSource = source.subscribe(schedulePass);
+    const unsubscribeSidecar = sidecarStore.subscribe?.(schedulePass);
     requestPass();
     dispose = () => {
       unsubscribeEnvironments();
       unsubscribeSource();
+      unsubscribeSidecar?.();
       if (timer !== undefined) clearTimeout(timer);
       timer = undefined;
       dispose = undefined;

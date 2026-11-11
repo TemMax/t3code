@@ -4,7 +4,11 @@ import {
 } from "@t3tools/client-runtime/client-profile/merge";
 import type { ClientProfileSidecarStore } from "@t3tools/client-runtime/client-profile/source";
 
-import { getLocalStorageItem, setLocalStorageItem } from "../hooks/useLocalStorage";
+import {
+  getLocalStorageItem,
+  setLocalStorageItem,
+  subscribeLocalStorageKey,
+} from "../hooks/useLocalStorage";
 
 export const CLIENT_PROFILE_SIDECAR_STORAGE_KEY = "t3code:client-profile-sync:v1";
 
@@ -34,5 +38,6 @@ export function createWebSidecarStore(): ClientProfileSidecarStore {
     save: async (sidecar) => {
       setLocalStorageItem(CLIENT_PROFILE_SIDECAR_STORAGE_KEY, sidecar, ClientProfileSidecarSchema);
     },
+    subscribe: (onChange) => subscribeLocalStorageKey(CLIENT_PROFILE_SIDECAR_STORAGE_KEY, onChange),
   };
 }
