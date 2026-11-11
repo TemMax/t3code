@@ -566,6 +566,10 @@
     "./client-profile/source": {
       "types": "./src/clientProfile/source.ts",
       "default": "./src/clientProfile/source.ts"
+    },
+    "./client-profile/sync": {
+      "types": "./src/clientProfile/sync.ts",
+      "default": "./src/clientProfile/sync.ts"
     }
   },
   "scripts": {
