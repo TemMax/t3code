@@ -1,3 +1,5 @@
+import { preferencesSync } from "../clientProfile/preferencesSync";
+import { themeProfileValuesForDefault } from "../clientProfile/themeSource";
 import { appAtomRegistry } from "../rpc/atomRegistry";
 import { themeEnvironmentIdAtom } from "../state/primaryEnvironment";
 import { themeServerSettingsAtom } from "../state/server";
@@ -28,6 +30,11 @@ export function defaultThemeToApply(input: {
   return generation;
 }
 
+export function defaultThemeChangedAt(setAt: string): number {
+  const parsed = Date.parse(setAt);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
+}
+
 function readAppliedGeneration(storageKey: string): string | null {
   if (typeof window === "undefined") return null;
   try {
@@ -43,7 +50,7 @@ function writeAppliedGeneration(storageKey: string, generation: string): void {
   } catch {}
 }
 
-function adoptDefaultTheme(): void {
+async function adoptDefaultThemeOnce(): Promise<void> {
   if (typeof window === "undefined") return;
   const environmentId = appAtomRegistry.get(themeEnvironmentIdAtom);
   if (environmentId === null) return;
@@ -59,12 +66,45 @@ function adoptDefaultTheme(): void {
   });
   if (generation === null || definition === null) return;
 
-  // A single-appearance theme needs both preference and appearance writes to take effect.
-  if (!setTheme(defaultTheme)) return;
-  const half = singleAppearanceOf(definition);
-  // Only record adoption after both writes succeed, so an appearance failure remains retryable.
-  if (half !== null && !setAppearanceMode(half)) return;
+  const values = themeProfileValuesForDefault(defaultTheme);
+  if (values === null) return;
+  const result = await preferencesSync.adoptExternalChange({
+    environmentId,
+    values,
+    changedAt: defaultThemeChangedAt(defaultThemeSetAt),
+  });
+  if (result === "waiting") return;
+  if (result === "off") {
+    // A single-appearance theme needs both preference and appearance writes to take effect.
+    if (!setTheme(defaultTheme)) return;
+    const half = singleAppearanceOf(definition);
+    // Only record adoption after both writes succeed, so an appearance failure remains retryable.
+    if (half !== null && !setAppearanceMode(half)) return;
+  }
   writeAppliedGeneration(storageKey, generation);
+}
+
+let adopting = false;
+let rerunQueued = false;
+
+async function adoptDefaultTheme(): Promise<void> {
+  if (adopting) {
+    rerunQueued = true;
+    return;
+  }
+  adopting = true;
+  try {
+    do {
+      rerunQueued = false;
+      try {
+        await adoptDefaultThemeOnce();
+      } catch (cause) {
+        console.warn("Default theme adoption failed", cause);
+      }
+    } while (rerunQueued);
+  } finally {
+    adopting = false;
+  }
 }
 
 /**
@@ -74,12 +114,14 @@ function adoptDefaultTheme(): void {
  * that resolves late still applies.
  */
 export function startDefaultThemeAdoption(): () => void {
+  const adopt = () => void adoptDefaultTheme();
   const unsubscribes = [
-    appAtomRegistry.subscribe(themeEnvironmentIdAtom, adoptDefaultTheme),
-    appAtomRegistry.subscribe(themeServerSettingsAtom, adoptDefaultTheme),
-    subscribeToCustomThemes(adoptDefaultTheme),
+    appAtomRegistry.subscribe(themeEnvironmentIdAtom, adopt),
+    appAtomRegistry.subscribe(themeServerSettingsAtom, adopt),
+    appAtomRegistry.subscribe(preferencesSync.statusAtom, adopt),
+    subscribeToCustomThemes(adopt),
   ];
-  adoptDefaultTheme();
+  adopt();
   return () => {
     for (const unsubscribe of unsubscribes) unsubscribe();
   };
