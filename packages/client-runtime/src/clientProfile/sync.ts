@@ -1,3 +1,4 @@
+// @effect-diagnostics globalTimers:off globalConsole:off - A promise controller driven by client callbacks, outside an Effect runtime.
 import { CLIENT_PROFILE_MAX_KEY_LENGTH, CLIENT_PROFILE_MAX_VALUE_BYTES } from "@t3tools/contracts";
 import { Atom, type AtomRegistry } from "effect/reactivity";
 
