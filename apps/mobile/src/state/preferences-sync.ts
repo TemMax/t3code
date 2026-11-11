@@ -6,6 +6,7 @@ import {
 } from "@t3tools/client-runtime/client-profile/sync";
 import { safeErrorLogAttributes } from "@t3tools/client-runtime/errors";
 import { runAtomCommand, squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
+import { EnvironmentId } from "@t3tools/contracts";
 import { Atom } from "effect/reactivity";
 import { Appearance } from "react-native";
 
@@ -66,7 +67,7 @@ export const preferencesSync = createClientProfileSync({
     const result = await runAtomCommand(
       appAtomRegistry,
       serverEnvironment.updateClientProfile,
-      { environmentId, input: { entries } },
+      { environmentId: EnvironmentId.make(environmentId), input: { entries } },
       { reportFailure: false },
     );
     if (result._tag === "Failure") throw squashAtomCommandFailure(result);
