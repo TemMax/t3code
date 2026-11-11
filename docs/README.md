@@ -10,6 +10,7 @@
 - [Source control](./user/source-control.md)
 - [Project settings](./user/project-settings.md)
 - [Appearance and themes](./user/appearance.md)
+- [Preferences sync](./user/preferences-sync.md)
 - [Keyboard shortcuts](./user/keybindings.md)
 - [Voice input](./user/voice-input.md)
 - [Text generation models](./user/text-generation.md)
