@@ -1,0 +1,321 @@
+import { Schema } from "effect";
+import { describe, expect, it } from "vite-plus/test";
+
+import type { ClientProfileSurface } from "./keys.ts";
+import {
+  adoptSyncedClientProfileSidecar,
+  claimThisDeviceClientProfileSidecar,
+  ClientProfileSidecarSchema,
+  compareClientProfileEntries,
+  emptyClientProfileSidecar,
+  hashClientProfileValue as hash,
+  needsClientProfileChoice,
+  planClientProfileSync,
+  recordAppliedClientProfileEntries,
+  seedClientProfileSidecar,
+  stampClientProfileChange,
+  UNPUBLISHED_CHANGED_AT,
+  type ClientProfileEntry,
+  type ClientProfileLocalRead,
+  type ClientProfileSidecar,
+} from "./merge.ts";
+
+const D: ClientProfileSurface = { kind: "desktop", os: "mac" };
+const B: ClientProfileSurface = { kind: "browser", os: "mac" };
+const M: ClientProfileSurface = { kind: "mobile" };
+
+const entry = (value: unknown, changedAt: number, by: string): ClientProfileEntry => ({
+  value,
+  changedAt,
+  by,
+});
+const read = (
+  values: Record<string, unknown>,
+  completePrefixes: string[] = [],
+): ClientProfileLocalRead => ({ values, completePrefixes });
+const sidecarWith = (
+  entries: ClientProfileSidecar["entries"],
+  highestSeen = 0,
+): ClientProfileSidecar => ({ ...emptyClientProfileSidecar("dev-a"), highestSeen, entries });
+const tracked = (value: unknown, changedAt: number, by = "dev-a") => ({
+  changedAt,
+  by,
+  hash: hash(value),
+});
+
+describe("client profile merge", () => {
+  it("newest change wins and equal stamps are ordered by device", () => {
+    expect(
+      compareClientProfileEntries({ changedAt: 10, by: "x" }, { changedAt: 9, by: "z" }),
+    ).toBeGreaterThan(0);
+    expect(
+      compareClientProfileEntries({ changedAt: 10, by: "y" }, { changedAt: 10, by: "x" }),
+    ).toBeGreaterThan(0);
+    expect(
+      compareClientProfileEntries({ changedAt: 10, by: "x" }, { changedAt: 10, by: "x" }),
+    ).toBe(0);
+    expect(
+      compareClientProfileEntries({ changedAt: 10, by: "a" }, { changedAt: 10, by: "B" }),
+    ).toBeGreaterThan(0);
+  });
+
+  it("stamps after the highest seen stamp even when the clock is behind", () => {
+    expect(stampClientProfileChange(1000, 5000)).toBe(5001);
+    expect(stampClientProfileChange(9000, 5000)).toBe(9000);
+  });
+
+  it("hash ignores key order", () => {
+    expect(hash({ a: 1, b: { c: [1, { y: 1, x: 2 }], d: null } })).toBe(
+      hash({ b: { d: null, c: [1, { x: 2, y: 1 }] }, a: 1 }),
+    );
+    expect(hash(null)).not.toBe(hash("null"));
+    expect(hash({ a: undefined, b: 1 })).toBe(hash({ b: 1 }));
+    expect(hash([1, 2])).not.toBe(hash([2, 1]));
+    expect(hash("x")).toMatch(/^[0-9a-f]+$/);
+  });
+
+  it("applies a newer remote value and records it only once the store holds it", () => {
+    const sidecar = sidecarWith({ chatWidth: tracked("comfortable", 100) });
+    const remote = entry("wide", 200, "dev-b");
+    const plan = planClientProfileSync({
+      surface: B,
+      now: 150,
+      sidecar,
+      local: read({ chatWidth: "comfortable" }),
+      servers: [{ environmentId: "s1", document: { chatWidth: remote } }],
+    });
+    expect(plan.apply).toEqual({ chatWidth: remote });
+    expect(plan.sidecar.entries.chatWidth?.changedAt).toBe(100);
+    expect(plan.push).toEqual([]);
+
+    const stale = recordAppliedClientProfileEntries({
+      surface: B,
+      sidecar: plan.sidecar,
+      applied: plan.apply,
+      stored: { chatWidth: "comfortable" },
+    });
+    expect(stale.entries.chatWidth?.changedAt).toBe(100);
+    const stored = recordAppliedClientProfileEntries({
+      surface: B,
+      sidecar: plan.sidecar,
+      applied: plan.apply,
+      stored: { chatWidth: "wide" },
+    });
+    expect(stored.entries.chatWidth).toEqual({ changedAt: 200, by: "dev-b", hash: hash("wide") });
+  });
+
+  it("stamps a local change and pushes it to every server", () => {
+    const old = entry("comfortable", 100, "dev-a");
+    const plan = planClientProfileSync({
+      surface: B,
+      now: 120,
+      sidecar: sidecarWith({ chatWidth: tracked("comfortable", 100) }, 150),
+      local: read({ chatWidth: "wide" }),
+      servers: [
+        { environmentId: "s1", document: { chatWidth: old } },
+        { environmentId: "s2", document: {} },
+      ],
+    });
+    const stamped = entry("wide", 151, "dev-a");
+    expect(plan.push).toEqual([
+      { environmentId: "s1", entries: { chatWidth: stamped } },
+      { environmentId: "s2", entries: { chatWidth: stamped } },
+    ]);
+    expect(plan.sidecar.highestSeen).toBe(151);
+    expect(plan.sidecar.entries.chatWidth).toEqual({
+      changedAt: 151,
+      by: "dev-a",
+      hash: hash("wide"),
+    });
+  });
+
+  it("baselines an untracked key without publishing it", () => {
+    const local = read({ diffLayout: "split" });
+    const plan = planClientProfileSync({
+      surface: B,
+      now: 10,
+      sidecar: sidecarWith({}),
+      local,
+      servers: [{ environmentId: "s1", document: {} }],
+    });
+    expect(plan.sidecar.entries.diffLayout).toEqual({
+      changedAt: UNPUBLISHED_CHANGED_AT,
+      by: "dev-a",
+      hash: hash("split"),
+    });
+    expect(plan.push).toEqual([]);
+
+    const remote = entry("unified", 5, "dev-b");
+    const later = planClientProfileSync({
+      surface: B,
+      now: 10,
+      sidecar: plan.sidecar,
+      local,
+      servers: [{ environmentId: "s1", document: { diffLayout: remote } }],
+    });
+    expect(later.apply).toEqual({ diffLayout: remote });
+  });
+
+  it("pushes to a server what another connected server has newer, including keys this surface never applies", () => {
+    const newer = entry("wide", 300, "dev-b");
+    const plan = planClientProfileSync({
+      surface: M,
+      now: 10,
+      sidecar: sidecarWith({}),
+      local: read({}),
+      servers: [
+        { environmentId: "s1", document: { chatWidth: newer } },
+        { environmentId: "s2", document: { chatWidth: entry("compact", 100, "dev-b") } },
+      ],
+    });
+    expect(plan.push).toEqual([{ environmentId: "s2", entries: { chatWidth: newer } }]);
+    expect(plan.apply).toEqual({});
+    expect(plan.sidecar.entries.chatWidth).toBeUndefined();
+  });
+
+  it("turns custom themes from two devices into a union and lets a deletion beat an older edit", () => {
+    const sidecar = sidecarWith({ "customTheme.a": tracked("A", 100) });
+    const local = read({ "customTheme.a": "A" }, ["customTheme."]);
+    const theirs = entry("B", 200, "dev-b");
+    const union = planClientProfileSync({
+      surface: D,
+      now: 10,
+      sidecar,
+      local,
+      servers: [{ environmentId: "s1", document: { "customTheme.b": theirs } }],
+    });
+    expect(union.apply).toEqual({ "customTheme.b": theirs });
+    expect(union.push).toEqual([
+      { environmentId: "s1", entries: { "customTheme.a": entry("A", 100, "dev-a") } },
+    ]);
+
+    const deletion = entry(null, 300, "dev-b");
+    const deleted = planClientProfileSync({
+      surface: D,
+      now: 10,
+      sidecar,
+      local,
+      servers: [{ environmentId: "s1", document: { "customTheme.a": deletion } }],
+    });
+    expect(deleted.apply).toEqual({ "customTheme.a": deletion });
+  });
+
+  it("infers a deleted custom theme only when the library was fully read", () => {
+    const sidecar = sidecarWith({ "customTheme.a": tracked("A", 100) });
+    const servers = [{ environmentId: "s1", document: {} }];
+    const partial = planClientProfileSync({
+      surface: D,
+      now: 500,
+      sidecar,
+      local: read({}, []),
+      servers,
+    });
+    expect(partial.push).toEqual([]);
+    expect(partial.sidecar.entries).toEqual(sidecar.entries);
+
+    const full = planClientProfileSync({
+      surface: D,
+      now: 500,
+      sidecar,
+      local: read({}, ["customTheme."]),
+      servers,
+    });
+    expect(full.push).toEqual([
+      { environmentId: "s1", entries: { "customTheme.a": entry(null, 500, "dev-a") } },
+    ]);
+    expect(full.sidecar.entries["customTheme.a"]?.hash).toBe(hash(null));
+  });
+
+  it("no echo after applying", () => {
+    const sidecar = sidecarWith({ chatWidth: tracked("comfortable", 100) });
+    const servers = [{ environmentId: "s1", document: { chatWidth: entry("wide", 200, "dev-b") } }];
+    const first = planClientProfileSync({
+      surface: B,
+      now: 10,
+      sidecar,
+      local: read({ chatWidth: "comfortable" }),
+      servers,
+    });
+    const recorded = recordAppliedClientProfileEntries({
+      surface: B,
+      sidecar: first.sidecar,
+      applied: first.apply,
+      stored: { chatWidth: "wide" },
+    });
+    const second = planClientProfileSync({
+      surface: B,
+      now: 20,
+      sidecar: recorded,
+      local: read({ chatWidth: "wide" }),
+      servers,
+    });
+    expect(second.push).toEqual([]);
+    expect(second.apply).toEqual({});
+    expect(second.sidecar).toEqual(recorded);
+  });
+
+  it("seeds own non-default values at zero", () => {
+    const sidecar = seedClientProfileSidecar({
+      surface: B,
+      sidecar: { ...sidecarWith({}), choicePending: true },
+      local: read({ chatWidth: "wide", diffLayout: "unified", "customTheme.a": "A" }),
+      defaults: { chatWidth: "comfortable", diffLayout: "unified" },
+    });
+    expect(sidecar.entries.chatWidth?.changedAt).toBe(0);
+    expect(sidecar.entries["customTheme.a"]?.changedAt).toBe(0);
+    expect(sidecar.entries.diffLayout?.changedAt).toBe(UNPUBLISHED_CHANGED_AT);
+    expect(sidecar.choicePending).toBe(false);
+  });
+
+  it("adopting synced settings fills only the gaps at zero", () => {
+    const sidecar = adoptSyncedClientProfileSidecar({
+      surface: B,
+      sidecar: { ...sidecarWith({}), choicePending: true },
+      local: read({ chatWidth: "wide", diffLayout: "split" }),
+      defaults: { chatWidth: "comfortable", diffLayout: "unified" },
+      servers: [{ environmentId: "s1", document: { chatWidth: entry("compact", 50, "dev-b") } }],
+    });
+    expect(sidecar.entries.chatWidth?.changedAt).toBe(UNPUBLISHED_CHANGED_AT);
+    expect(sidecar.entries.diffLayout?.changedAt).toBe(0);
+    expect(sidecar.choicePending).toBe(false);
+  });
+
+  it("using this device's settings stamps every own key past every server stamp and leaves other surfaces' keys alone", () => {
+    const sidecar = claimThisDeviceClientProfileSidecar({
+      surface: M,
+      now: 50,
+      sidecar: { ...sidecarWith({}, 100), choicePending: true },
+      local: read({ themeMode: "dark", themeLight: "a", chatWidth: "wide" }),
+      servers: [
+        {
+          environmentId: "s1",
+          document: {
+            themeMode: entry("light", 500, "dev-b"),
+            chatWidth: entry("compact", 900, "dev-b"),
+          },
+        },
+      ],
+    });
+    expect(sidecar.entries.themeMode?.changedAt).toBe(901);
+    expect(sidecar.entries.themeLight?.changedAt).toBe(901);
+    expect(sidecar.entries.chatWidth).toBeUndefined();
+    expect(sidecar.highestSeen).toBe(901);
+    expect(sidecar.choicePending).toBe(false);
+  });
+
+  it("needs a choice only when a document holds a key of this surface", () => {
+    const docs = (key: string) => [
+      { environmentId: "s1", document: { [key]: entry("x", 1, "dev-b") } },
+    ];
+    expect(needsClientProfileChoice(M, docs("chatWidth"))).toBe(false);
+    expect(needsClientProfileChoice(M, docs("themeMode"))).toBe(true);
+    expect(needsClientProfileChoice(D, docs("fontFamilyCode@windows"))).toBe(false);
+    expect(needsClientProfileChoice(D, docs("fontFamilyCode@mac"))).toBe(true);
+  });
+
+  it("decodes a stored sidecar and rejects a malformed one", () => {
+    const stored = sidecarWith({ diffLayout: { changedAt: -1, by: "dev-a", hash: "ab" } }, 7);
+    expect(Schema.decodeUnknownSync(ClientProfileSidecarSchema)(stored)).toEqual(stored);
+    expect(() => Schema.decodeUnknownSync(ClientProfileSidecarSchema)({ deviceId: 5 })).toThrow();
+  });
+});
