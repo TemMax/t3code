@@ -4,6 +4,8 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import {
   AuthSessionId,
+  AuthSettingsWriteScope,
+  type AuthEnvironmentScope,
   AuthSourceControlWriteScope,
   EnvironmentId,
   EventId,
@@ -61,6 +63,7 @@ import * as DeviceService from "./device/DeviceService.ts";
 import * as DocumentText from "./provider/DocumentText.ts";
 import * as DirectEndpoints from "./environment/DirectEndpoints.ts";
 import * as EnvironmentAuth from "./auth/EnvironmentAuth.ts";
+import * as ClientProfile from "./clientProfile.ts";
 import * as EnvironmentTheme from "./environmentTheme.ts";
 import * as GitWorkflowService from "./git/GitWorkflowService.ts";
 import * as HostResources from "./resourceTelemetry/HostResources.ts";
@@ -785,6 +788,7 @@ const layerUnusedConfigRpcServices = Layer.mergeAll(
   Layer.mock(CommandOutputHub.CommandOutputHub)({}),
   Layer.mock(CodexInstallation.CodexInstallation)({ managedDirectory: "/unused" }),
   Layer.mock(DeviceService.DeviceService)({}),
+  Layer.mock(ClientProfile.ClientProfile)({}),
   Layer.mock(EnvironmentTheme.EnvironmentThemeService)({}),
   Layer.mock(GitWorkflowService.GitWorkflowService)({}),
   Layer.mock(HostResources.HostResources)({}),
@@ -1114,6 +1118,149 @@ it.effect.each([
       ),
       Effect.scoped,
     ),
+);
+
+it.effect("streams the client profile only to sessions that may write settings", () =>
+  Effect.gen(function* () {
+    const settings = yield* ServerSettings.ServerSettingsService;
+    const entries = { theme: { value: "dark", changedAt: 5, by: "device-a" } };
+    const subscribe = Effect.fnUntraced(function* (
+      scopes: ReadonlyArray<AuthEnvironmentScope>,
+      payload: { readonly clientProfile?: boolean },
+      streamChanges: ClientProfile.ClientProfile["Service"]["streamChanges"],
+    ) {
+      const responses = yield* Queue.unbounded<ServerConfigStreamEvent>();
+      const rpcServices = Layer.mergeAll(
+        layerUnusedConfigRpcServices,
+        Layer.mock(ClientProfile.ClientProfile)({ streamChanges }),
+        Layer.mock(ExternalLauncher.ExternalLauncher)({
+          resolveAvailableEditors: () => Effect.succeed([]),
+          resolveFileManagerRevealKind: () => Effect.undefined,
+        }),
+        Layer.mock(ProviderRegistry.ProviderRegistry)({
+          getProviders: Effect.succeed([]),
+          streamChanges: Stream.never,
+        }),
+        Layer.mock(ProviderInstanceRegistry.ProviderInstanceRegistry)({
+          listInstances: Effect.succeed([]),
+        }),
+        Layer.mock(UsageLimitSources.UsageLimitSources)({
+          current: Effect.succeed([]),
+          streamChanges: Stream.never,
+        }),
+        Layer.mock(RemoteOpenTargets.RemoteOpenTargets)({
+          resolveTargets: () => Effect.succeed([]),
+        }),
+        Layer.mock(DirectEndpoints.DirectEndpoints)({
+          resolve: () => Effect.succeed([]),
+          resolveAvailable: () => Effect.succeed([]),
+        }),
+        Layer.mock(ManagedProjectFolders.ManagedProjectFolders)({
+          scratchRoot: Effect.succeedNone,
+          namedProjectsRoot: process.cwd(),
+        }),
+        Layer.mock(ScratchThreadPromotion.ScratchThreadPromotion)({}),
+        Layer.mock(ServerEnvironment.ServerEnvironment)({
+          getDescriptor: Effect.succeed({
+            environmentId: EnvironmentId.make("config-test"),
+            label: "Config test",
+            platform: { os: "linux", arch: "x64" },
+            serverVersion: "0.0.0",
+            capabilities: { repositoryIdentity: false },
+          }),
+        }),
+        Layer.mock(EnvironmentAuth.EnvironmentAuth)({
+          getDescriptor: () =>
+            Effect.succeed({
+              policy: "loopback-browser",
+              bootstrapMethods: [],
+              sessionMethods: ["browser-session-cookie"],
+              sessionCookieName: "config-test-session",
+            }),
+        }),
+      );
+      const server = yield* RpcServer.makeNoSerialization(
+        RpcGroup.make(WsSubscribeServerConfigRpc),
+        {
+          ...WS_RPC_SERVER_OPTIONS,
+          onFromServer: (response) =>
+            response._tag === "Chunk"
+              ? Effect.forEach(
+                  response.values,
+                  (value) => Queue.offer(responses, value as ServerConfigStreamEvent),
+                  { discard: true },
+                )
+              : Effect.void,
+        },
+      ).pipe(
+        Effect.provide(
+          layerWsRpc(
+            {
+              sessionId: AuthSessionId.make("config-test"),
+              subject: "config-test",
+              method: "browser-session-cookie",
+              scopes: [...scopes],
+            },
+            {},
+            yield* ServerBrowser.ServerBrowser,
+            () => Effect.void,
+            { secretReferences: true },
+          ).pipe(Layer.provide(rpcServices)),
+        ),
+      );
+      const requestId = RpcMessage.RequestId("config");
+      yield* server.write(0, {
+        _tag: "Request",
+        id: requestId,
+        tag: WS_METHODS.subscribeServerConfig,
+        payload,
+        headers: Headers.empty,
+      });
+      const next = Effect.gen(function* () {
+        const event = yield* Queue.take(responses);
+        yield* server.write(0, { _tag: "Ack", requestId });
+        return event;
+      });
+      return { next };
+    });
+
+    const writer = yield* subscribe(
+      [AuthSettingsWriteScope],
+      { clientProfile: true },
+      Stream.make({ entries, replace: true }),
+    );
+    const writerSnapshot = yield* writer.next;
+    if (writerSnapshot.type !== "snapshot") return yield* Effect.die("Missing initial snapshot");
+    assert.isUndefined(writerSnapshot.config.clientProfile);
+    const profile = yield* writer.next;
+    if (profile.type !== "clientProfileUpdated") return yield* Effect.die("Expected profile event");
+    assert.deepEqual(profile.payload, { entries, replace: true });
+
+    let subscribed = false;
+    const spy = Stream.unwrap(
+      Effect.sync(() => {
+        subscribed = true;
+        return Stream.never;
+      }),
+    );
+    const withoutScope = yield* subscribe([], { clientProfile: true }, spy);
+    const withoutFlag = yield* subscribe([AuthSettingsWriteScope], {}, spy);
+    assert.equal((yield* withoutScope.next).type, "snapshot");
+    assert.equal((yield* withoutFlag.next).type, "snapshot");
+    yield* settings.updateSettings({ defaultAutoPull: true });
+    assert.equal((yield* withoutScope.next).type, "settingsUpdated");
+    assert.equal((yield* withoutFlag.next).type, "settingsUpdated");
+    assert.isFalse(subscribed);
+  }).pipe(
+    Effect.provide(
+      Layer.mergeAll(
+        Layer.fresh(layerConfigSources),
+        Layer.mock(PreviewAutomationBroker.PreviewAutomationBroker)({}),
+        Layer.mock(ServerBrowser.ServerBrowser)({}),
+      ),
+    ),
+    Effect.scoped,
+  ),
 );
 
 it.effect("on-demand clients get provider config without workspace snapshots", () =>
