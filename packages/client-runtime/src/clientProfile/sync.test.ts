@@ -174,6 +174,24 @@ describe("createClientProfileSync", () => {
     expect(t.pushes.filter((push) => "themeMode" in push.entries)).toEqual([]);
   });
 
+  it("shows the shared sidecar's state when another tab already turned sync on or chose", async () => {
+    using t = setup({
+      local: { themeMode: "dark" },
+      environments: [env("e1", { themeMode: entry("light", 500, "dev-b") })],
+    });
+    await t.settle();
+    t.store.sidecar = { ...t.store.sidecar, enabled: true, choicePending: true };
+    await t.controller.setEnabled(true);
+    expect(t.status()).toEqual({ type: "choice" });
+
+    t.store.sidecar = { ...t.store.sidecar, choicePending: false };
+    await t.controller.choose("synced");
+    expect(t.status()).toEqual({
+      type: "syncing",
+      environments: [{ environmentId: "e1", label: "E1" }],
+    });
+  });
+
   it("\"thisDevice\" stamps every own key past the servers' stamps and leaves other surfaces' keys alone", async () => {
     using t = setup({
       local: { themeMode: "dark", toolCallVisibility: "showAll" },

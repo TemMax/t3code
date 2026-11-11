@@ -277,7 +277,11 @@ export function createClientProfileSync(options: {
         publishStatus(disabled);
         return;
       }
-      if (sidecar.enabled) return;
+      if (sidecar.enabled) {
+        // Another tab sharing this sidecar got here first; show its state, not the stale one.
+        publishStatus(sidecar);
+        return;
+      }
       await sidecarStore.save({ ...sidecar, enabled: true, choicePending: true, entries: {} });
       await runPass();
     });
@@ -285,7 +289,10 @@ export function createClientProfileSync(options: {
   const choose = (choice: "synced" | "thisDevice") =>
     serial(async () => {
       const sidecar = await sidecarStore.load();
-      if (!sidecar.enabled || !sidecar.choicePending) return;
+      if (!sidecar.enabled || !sidecar.choicePending) {
+        publishStatus(sidecar);
+        return;
+      }
       await source.ready();
       const servers = serverDocuments(participants());
       const local = source.read();
