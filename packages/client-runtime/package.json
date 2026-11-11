@@ -554,6 +554,18 @@
     "./provider-instance-ids": {
       "types": "./src/providerInstanceIds.ts",
       "default": "./src/providerInstanceIds.ts"
+    },
+    "./client-profile/keys": {
+      "types": "./src/clientProfile/keys.ts",
+      "default": "./src/clientProfile/keys.ts"
+    },
+    "./client-profile/merge": {
+      "types": "./src/clientProfile/merge.ts",
+      "default": "./src/clientProfile/merge.ts"
+    },
+    "./client-profile/source": {
+      "types": "./src/clientProfile/source.ts",
+      "default": "./src/clientProfile/source.ts"
     }
   },
   "scripts": {
