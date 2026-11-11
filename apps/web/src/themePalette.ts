@@ -166,7 +166,7 @@ function parseStoredThemeVariants(
   return Object.keys(variants).length > 0 ? variants : undefined;
 }
 
-function parseStoredTheme(value: unknown): ThemeDefinition | null {
+export function parseStoredTheme(value: unknown): ThemeDefinition | null {
   if (!isRecord(value)) return null;
   if (!isThemeId(value.id) || RESERVED_THEME_IDS.has(value.id)) return null;
   if (!isThemeLabel(value.label) || !isThemeAppearance(value.appearance)) return null;
@@ -238,7 +238,25 @@ export function invalidateCustomThemes() {
   notifyCustomThemeListeners();
 }
 
+function customThemeLibraryKey(snapshot: CustomThemeLibrarySnapshot): string {
+  return snapshot.status === "ready" ? JSON.stringify(snapshot.storedThemes) : snapshot.reason;
+}
+
+/** Re-reads the stored library and notifies only when another tab changed it. */
+export function refreshCustomThemes(): void {
+  const cached = customThemeLibrarySnapshot;
+  if (cached === null) return;
+  const stored = readCustomThemeLibrarySnapshot();
+  if (customThemeLibraryKey(stored) === customThemeLibraryKey(cached)) return;
+  customThemeLibrarySnapshot = stored;
+  notifyCustomThemeListeners();
+}
+
 const EMPTY_CUSTOM_THEMES: ReadonlyArray<ThemeDefinition> = [];
+
+export function isCustomThemeLibraryReady(): boolean {
+  return getCustomThemeLibrarySnapshot().status === "ready";
+}
 
 export function getCustomThemes(): ReadonlyArray<ThemeDefinition> {
   const snapshot = getCustomThemeLibrarySnapshot();

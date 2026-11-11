@@ -44,6 +44,7 @@ import {
 } from "../../components/desktopUpdate.logic";
 import { ProviderModelPicker } from "../chat/ProviderModelPicker";
 import { TraitsPicker } from "../chat/TraitsPicker";
+import { preferencesSync } from "../../clientProfile/preferencesSync";
 import { isElectron } from "../../env";
 import { buildHostedChannelSelectionUrl, type HostedAppChannel } from "../../hostedPairing";
 import {
@@ -811,6 +812,33 @@ function UsageBarSettingsRow() {
   );
 }
 
+function PreferencesSyncRow() {
+  const status = useAtomValue(preferencesSync.statusAtom);
+  return (
+    <SettingsRow
+      {...searchableSetting("preferences-sync")}
+      description={
+        status.type === "waiting"
+          ? "Waiting for a server"
+          : status.type === "unsupported"
+            ? "No connected server supports sync yet"
+            : status.type === "choice"
+              ? "Choose which settings to keep"
+              : status.type === "syncing"
+                ? `Syncing through: ${status.environments.map(({ label }) => label).join(", ")}`
+                : "Theme, fonts, sidebar, composer and other preferences follow you to every device connected to your servers."
+      }
+      control={
+        <Switch
+          checked={status.type !== "off"}
+          onCheckedChange={(checked) => void preferencesSync.setEnabled(checked)}
+          aria-label="Sync preferences across devices"
+        />
+      }
+    />
+  );
+}
+
 export function GeneralSettingsPanel() {
   const settings = useScopedSettings();
   const updateSettings = useUpdateScopedSettings();
@@ -820,6 +848,10 @@ export function GeneralSettingsPanel() {
 
   return (
     <SettingsPageContainer>
+      <SettingsSection id="sync" title="Sync">
+        <PreferencesSyncRow />
+      </SettingsSection>
+
       <SettingsSection id="notifications" title="Notifications">
         <NotificationSettings />
         <SettingsRow

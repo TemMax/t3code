@@ -45,6 +45,12 @@ describe("RPC authorization scopes", () => {
     }
   });
 
+  it("keeps the synced client profile behind settings write permission", () => {
+    expect(requiredScopeForRpcMethod(WS_METHODS.serverUpdateClientProfile)).toBe(
+      AuthSettingsWriteScope,
+    );
+  });
+
   it("keeps triage, which seeds an agent that reads logs and the database, behind operate scope", () => {
     expect(requiredScopeForRpcMethod(WS_METHODS.serverPrepareTriage)).toBe(
       AuthOrchestrationOperateScope,

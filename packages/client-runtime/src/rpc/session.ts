@@ -64,6 +64,7 @@ export interface RpcSession {
 
 export interface RpcSessionOptions {
   readonly environmentThemes?: boolean;
+  readonly clientProfile?: boolean;
   readonly usageLimitSources?: boolean;
   readonly usageLimitsCommand?: boolean;
   readonly providerCatalogsOnDemand?: boolean;
@@ -126,6 +127,15 @@ function serverConfigReplayEvents(
     snapshot,
     ...(state.themesEvent === undefined ? [] : [state.themesEvent]),
     ...(state.sourcesEvent === undefined ? [] : [state.sourcesEvent]),
+    ...(state.projection.config.clientProfile === undefined
+      ? []
+      : [
+          {
+            version: 1 as const,
+            type: "clientProfileUpdated" as const,
+            payload: { entries: state.projection.config.clientProfile, replace: true },
+          },
+        ]),
   ];
 }
 
@@ -174,6 +184,7 @@ export const make = Effect.fn("RpcSessionFactory.make")(function* (
   const webSocketConstructor = yield* Socket.WebSocketConstructor;
   const serverConfigInput: ServerConfigSubscriptionInput = {
     ...(options.environmentThemes === true ? { environmentThemes: true } : {}),
+    ...(options.clientProfile === true ? { clientProfile: true } : {}),
     ...(options.usageLimitSources === true ? { usageLimitSources: true } : {}),
     ...(options.usageLimitsCommand === true ? { usageLimitsCommand: true } : {}),
     ...(options.providerCatalogsOnDemand === true ? { providerCatalogsOnDemand: true } : {}),

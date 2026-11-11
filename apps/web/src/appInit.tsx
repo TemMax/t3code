@@ -23,6 +23,7 @@ import { startThreadNotifications } from "./components/ThreadNotificationCoordin
 import { startGuideRunNotifications } from "./components/pullRequest/guide/PullRequestGuideRunCoordinator";
 import { APP_BASE_NAME, APP_DISPLAY_NAME, APP_STAGE_LABEL } from "./branding";
 import { resolveServerBackedAppDisplayName } from "./branding.logic";
+import { preferencesSync } from "./clientProfile/preferencesSync";
 import { isElectron } from "./env";
 import {
   subscribeComposerDraftModelReconciliation,
@@ -184,6 +185,7 @@ export function startAppServices(): AppRouter {
   startHostEnvironmentLookup();
   startEnvironmentThemeRepaint();
   startBrowserChromeThemeSync(router);
+  preferencesSync.start();
   startDefaultThemeAdoption();
   startModelPreferencesMigration();
   startAgentOpenedPreviews();

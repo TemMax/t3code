@@ -31,6 +31,7 @@ import {
   supportsSharedSettingsSync,
 } from "@t3tools/client-runtime/state/shared-settings";
 import { ensureLocalApi } from "~/localApi";
+import { subscribeBrowserClientSettings } from "~/clientPersistenceStorage";
 import {
   getThemeDefinition,
   getThemePreviewSidebarArtwork,
@@ -76,6 +77,8 @@ let clientSettingsHydrationPromise: Promise<void> | null = null;
 let clientSettingsHydrationGeneration = 0;
 let clientSettingsPersistenceQueue: Promise<void> = Promise.resolve();
 let deferredClientSettingsPatchCount = 0;
+let clientSettingsWritesInFlight = 0;
+let stopFollowingOtherTabsClientSettings: (() => void) | null = null;
 
 function emitClientSettingsChange() {
   for (const listener of clientSettingsListeners) {
@@ -154,6 +157,7 @@ async function hydrateClientSettings(): Promise<void> {
         replaceClientSettingsSnapshot({ ...DEFAULT_CLIENT_SETTINGS, ...persistedSettings });
       }
       setClientSettingsHydrationStatus("ready");
+      followOtherTabsClientSettings();
     } catch (error) {
       if (hydrationGeneration === clientSettingsHydrationGeneration) {
         setClientSettingsHydrationStatus("failed");
@@ -180,7 +184,10 @@ const defaultClientSettingsPersistence = (settings: ClientSettings): Promise<voi
   ensureLocalApi().persistence.setClientSettings(settings);
 
 function enqueueClientSettingsPersistence<A>(work: () => Promise<A>): Promise<A> {
-  const result = clientSettingsPersistenceQueue.then(work);
+  clientSettingsWritesInFlight += 1;
+  const result = clientSettingsPersistenceQueue.then(work).finally(() => {
+    clientSettingsWritesInFlight -= 1;
+  });
   clientSettingsPersistenceQueue = result.then(
     () => undefined,
     () => undefined,
@@ -238,6 +245,30 @@ export async function persistClientSettingsUpdate(
         return next;
       }
     }
+  });
+}
+
+/** Takes settings another tab saved; a write still in flight here keeps this tab's snapshot. */
+export async function adoptPersistedClientSettings(): Promise<void> {
+  if (clientSettingsHydrationStatus !== "ready" || clientSettingsWritesInFlight > 0) return;
+  const current = getClientSettingsSnapshot();
+  const persisted = await ensureLocalApi().persistence.getClientSettings();
+  if (!persisted || clientSettingsWritesInFlight > 0 || getClientSettingsSnapshot() !== current) {
+    return;
+  }
+  const next = { ...DEFAULT_CLIENT_SETTINGS, ...persisted };
+  if (!Equal.equals(next, current)) replaceClientSettingsSnapshot(next);
+}
+
+function followOtherTabsClientSettings(): void {
+  if (stopFollowingOtherTabsClientSettings !== null) return;
+  stopFollowingOtherTabsClientSettings = subscribeBrowserClientSettings(() => {
+    adoptPersistedClientSettings().catch((error) => {
+      console.error(`${CLIENT_SETTINGS_PERSISTENCE_ERROR_SCOPE} adopt failed`, {
+        operation: "adopt",
+        ...safeErrorLogAttributes(error),
+      });
+    });
   });
 }
 
@@ -773,6 +804,9 @@ export function __resetClientSettingsPersistenceForTests(): void {
   clientSettingsHydrationPromise = null;
   clientSettingsPersistenceQueue = Promise.resolve();
   deferredClientSettingsPatchCount = 0;
+  clientSettingsWritesInFlight = 0;
+  stopFollowingOtherTabsClientSettings?.();
+  stopFollowingOtherTabsClientSettings = null;
   clientSettingsListeners.clear();
   clientSettingsHydrationListeners.clear();
 }

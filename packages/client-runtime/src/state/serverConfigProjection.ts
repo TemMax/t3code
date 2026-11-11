@@ -9,14 +9,23 @@ export interface ServerConfigProjection {
 }
 
 /**
- * Published themes and usage-limit sources are current machine state, so a
- * cache could restore a set the machine no longer reports.
+ * Published themes, usage-limit sources and the client profile are current
+ * machine state, so a cache could restore a set the machine no longer reports.
  */
 export function withoutEnvironmentThemes(config: ServerConfig): ServerConfig {
-  if (config.environmentThemes === undefined && config.usageLimitSources === undefined) {
+  if (
+    config.environmentThemes === undefined &&
+    config.usageLimitSources === undefined &&
+    config.clientProfile === undefined
+  ) {
     return config;
   }
-  const { environmentThemes: _themes, usageLimitSources: _sources, ...rest } = config;
+  const {
+    environmentThemes: _themes,
+    usageLimitSources: _sources,
+    clientProfile: _profile,
+    ...rest
+  } = config;
   return rest;
 }
 
@@ -75,10 +84,14 @@ export function applyServerConfigProjection(
       const carriedSources = Option.isSome(current)
         ? current.value.config.usageLimitSources
         : undefined;
+      const carriedProfile = Option.isSome(current)
+        ? current.value.config.clientProfile
+        : undefined;
       const config: ServerConfig = {
         ...event.config,
         ...(carriedThemes === undefined ? {} : { environmentThemes: carriedThemes }),
         ...(carriedSources === undefined ? {} : { usageLimitSources: carriedSources }),
+        ...(carriedProfile === undefined ? {} : { clientProfile: carriedProfile }),
       };
       return Option.some({
         // Every reconnect re-sends the whole config, usually unchanged apart from timestamps.
@@ -132,6 +145,17 @@ export function applyServerConfigProjection(
         config: {
           ...projection.config,
           usageLimitSources: event.payload.sources.length > 0 ? event.payload.sources : undefined,
+        },
+        latestEvent: event,
+        source: "live",
+      }));
+    case "clientProfileUpdated":
+      return Option.map(current, (projection) => ({
+        config: {
+          ...projection.config,
+          clientProfile: event.payload.replace
+            ? event.payload.entries
+            : { ...projection.config.clientProfile, ...event.payload.entries },
         },
         latestEvent: event,
         source: "live",

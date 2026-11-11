@@ -568,6 +568,47 @@ describe("RpcSessionFactory", () => {
     ),
   );
 
+  it.effect("replays the accumulated client profile to a late subscriber as one full event", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const options = { clientProfile: true };
+        const { factory, sockets } = yield* makeFactory(options);
+        const session = yield* factory.connect(PREPARED);
+        const ready = yield* Effect.forkChild(session.ready);
+        const socket = yield* awaitSocket(sockets);
+        socket.open();
+        yield* completeInitialConfig(socket, ENCODED_SERVER_CONFIG, options);
+        yield* Fiber.join(ready);
+        const observed = yield* Queue.unbounded<ServerConfigStreamEventType>();
+        yield* session.subscribeServerConfig(options).pipe(
+          Stream.runForEach((event) => Queue.offer(observed, event)),
+          Effect.forkChild,
+        );
+        expect((yield* Queue.take(observed)).type).toBe("snapshot");
+        const a = { value: "light", changedAt: 1, by: "web" };
+        const b = { value: 14, changedAt: 2, by: "mobile" };
+        for (const event of [
+          { version: 1, type: "clientProfileUpdated", payload: { entries: { a }, replace: true } },
+          { version: 1, type: "clientProfileUpdated", payload: { entries: { b }, replace: false } },
+        ] satisfies ReadonlyArray<ServerConfigStreamEventType>) {
+          yield* publishConfigEvents(socket, [event]);
+          expect(yield* Queue.take(observed)).toEqual(event);
+        }
+
+        const replayed = Array.from(
+          yield* session.subscribeServerConfig(options).pipe(Stream.take(2), Stream.runCollect),
+        );
+        expect(replayed[0]).toMatchObject({ type: "snapshot" });
+        expect(replayed[0]).not.toHaveProperty("config.clientProfile");
+        expect(replayed[1]).toEqual({
+          version: 1,
+          type: "clientProfileUpdated",
+          payload: { entries: { a, b }, replace: true },
+        });
+      }),
+    ),
+  );
+
   it.effect("replays theme updates and deletion as authoritative events", () =>
     Effect.scoped(
       Effect.gen(function* () {
