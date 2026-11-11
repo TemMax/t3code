@@ -671,6 +671,12 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["notification sound alert completion input approval desktop"],
   },
   {
+    id: "preferences-sync",
+    title: "Sync preferences across devices",
+    to: "/settings/general",
+    searchTerms: ["sync settings devices phone desktop profile"],
+  },
+  {
     id: "in-app-notifications",
     title: "In-app notifications",
     to: "/settings/general",
