@@ -184,3 +184,25 @@ auth and platform-managed discovery are skipped and only saved environments (pai
 connect. This is possible because the desktop renderer is not served by the backend: the `t3code://`
 scheme serves the bundled client from disk (Vite in development) and API traffic always goes to the
 environment's own URL.
+
+## Preferences sync
+
+Preferences sync keeps a device's own preferences in step across servers. Each server holds one
+[profile document](../../apps/server/src/clientProfile.ts), and clients merge and relay it with
+the [shared merge rules](../../packages/client-runtime/src/clientProfile/merge.ts). What a
+maintainer would get wrong:
+
+- The profile is a per-key last-writer-wins document, ordered by `(changedAt, by)` with plain
+  string comparison. Do not parse the stamp or compare it numerically.
+- A new stamp is `max(now, highestSeen + 1)`, so a device with a slow clock still wins over what
+  it has seen.
+- The device sidecar keeps hashes of what it last applied or pushed. They stop an applied entry
+  from echoing back as a new change.
+- Turning sync on has three outcomes: seed an empty server with this device's preferences,
+  adopt the server's, or claim the server for this device's. The user picks between the last two.
+- Clients relay entries between servers. This is the only way two servers exchange preferences,
+  so it works only while one device is connected to both. A client never applies a key that
+  belongs to another surface or operating system.
+- Delivery is opt-in on the config stream and gated by settings write access. Profile entries are
+  never in the snapshot or the cached config.
+- Limits are 128-character keys, 256 KiB values and a 1 MiB document.
