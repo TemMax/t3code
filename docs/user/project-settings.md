@@ -7,9 +7,10 @@ and stay selected as you move between categories or search for a setting.
 
 Preferences saved on this device, such as appearance, confirmations and browser profiles, always
 show and ignore the selection. Many of them can be shared between devices with
-[preferences sync](./preferences-sync.md). Everything else is stored on a server. Choose one environment to
-edit its settings, or leave **All environments** to edit every connected environment at once.
-Offline environments keep their current values; this is a bulk edit, not a synced global default.
+[preferences sync](./preferences-sync.md). Everything else is stored on a server. Choose one
+environment to edit its settings, or leave **All environments** to edit every connected
+environment at once. Offline environments keep their current values; this is a bulk edit, not a
+synced global default.
 
 Choose a project to override settings for it on the selected environments. A layers icon beside
 each server row's title shows where the value comes from: the built-in default, the environment,

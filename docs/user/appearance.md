@@ -12,9 +12,10 @@ the theme. **Cmd+Option+Shift+A** on macOS or **Ctrl+Alt+Shift+A** on Windows/Li
 those modes. Customize these shortcuts under **Settings → Keybindings**.
 
 On mobile, open **Settings → Appearance**. Mobile has its own themes and text,
-code, and terminal preferences. With [preferences sync](./preferences-sync.md) on, mobile follows the theme choices synced from
-your other devices, including a server's default theme once a computer has adopted it, when those
-are built-in themes. Themes an environment publishes stay on computers.
+code, and terminal preferences. With [preferences sync](./preferences-sync.md) on, mobile
+follows the theme choices synced from your other devices, including a server's default theme
+once a computer has adopted it, when those are built-in themes. Themes an environment publishes
+stay on computers.
 
 On Android 12 or newer, choose the **Material You** theme in Appearance to use colors from
 your wallpaper. Selecting another theme replaces those colors. Like other themes, Material You

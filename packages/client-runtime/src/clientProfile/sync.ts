@@ -263,6 +263,7 @@ export function createClientProfileSync(options: {
       unsubscribeSource();
       if (timer !== undefined) clearTimeout(timer);
       timer = undefined;
+      dispose = undefined;
     };
     return dispose;
   };

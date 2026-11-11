@@ -248,6 +248,26 @@ describe("createClientProfileSync", () => {
     ]);
   });
 
+  it("starts again after it was stopped", async () => {
+    using t = setup({
+      local: { themeLight: "a" },
+      environments: [env("e1", { themeLight: entry("a", 10, DEVICE) })],
+      sidecar: syncingSidecar({ themeLight: { changedAt: 10, by: DEVICE, hash: hash("a") } }, 10),
+      now: 5_000,
+    });
+    await t.settle();
+    t.controller.start()();
+    const stopAgain = t.controller.start();
+    await t.settle();
+
+    t.setLocal("themeLight", "b");
+    await t.settle();
+    stopAgain();
+    expect(t.pushes).toEqual([
+      { environmentId: "e1", entries: { themeLight: entry("b", 5_000, DEVICE) } },
+    ]);
+  });
+
   it("ignores environments that cannot write, lack the capability or have no profile yet", async () => {
     using t = setup({
       local: { themeMode: "dark" },
