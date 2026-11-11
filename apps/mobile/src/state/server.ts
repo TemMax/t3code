@@ -11,6 +11,7 @@ import { environmentSession } from "./session";
 
 export const serverEnvironment = createServerEnvironmentAtoms(connectionAtomRuntime, {
   initialConfigValueAtom: environmentSession.initialConfigValueAtom,
+  clientProfile: true,
   usageLimitSources: true,
   usageLimitsCommand: true,
   providerCatalogsOnDemand: true,
