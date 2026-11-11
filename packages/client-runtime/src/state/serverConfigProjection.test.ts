@@ -8,7 +8,11 @@ import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import { describe, expect, it } from "vite-plus/test";
 
-import { applyServerConfigProjection, reuseUnchanged } from "./serverConfigProjection.ts";
+import {
+  applyServerConfigProjection,
+  reuseUnchanged,
+  withoutEnvironmentThemes,
+} from "./serverConfigProjection.ts";
 
 const encodeSettings = Schema.encodeSync(ServerSettings);
 const decodeSettings = Schema.decodeSync(ServerSettings);
@@ -77,5 +81,44 @@ describe("applyServerConfigProjection settingsUpdated", () => {
       payload: { settings: decode() },
     } as ServerConfigStreamEvent);
     expect(Option.getOrThrow(next).config).toBe(Option.getOrThrow(current).config);
+  });
+});
+
+describe("applyServerConfigProjection clientProfile", () => {
+  it("keeps the client profile out of snapshots and the cache and accumulates its updates", () => {
+    const entry = (value: unknown) => ({ value, changedAt: 1, by: "device" });
+    const update = (entries: Record<string, ReturnType<typeof entry>>, replace: boolean) =>
+      ({
+        version: 1,
+        type: "clientProfileUpdated",
+        payload: { entries, replace },
+      }) as ServerConfigStreamEvent;
+    const configOf = (projection: ReturnType<typeof applyServerConfigProjection>) =>
+      Option.getOrThrow(projection).config;
+
+    let current = Option.some({
+      config: {} as ServerConfig,
+      latestEvent: {} as ServerConfigStreamEvent,
+      source: "live" as const,
+    });
+    current = applyServerConfigProjection(current, update({ a: entry(1) }, true)) as typeof current;
+    expect(configOf(current).clientProfile).toEqual({ a: entry(1) });
+
+    current = applyServerConfigProjection(
+      current,
+      update({ b: entry(2) }, false),
+    ) as typeof current;
+    expect(configOf(current).clientProfile).toEqual({ a: entry(1), b: entry(2) });
+
+    const snapshot = applyServerConfigProjection(current, {
+      version: 1,
+      type: "snapshot",
+      config: {},
+    } as unknown as ServerConfigStreamEvent);
+    expect(configOf(snapshot).clientProfile).toEqual({ a: entry(1), b: entry(2) });
+    expect(withoutEnvironmentThemes(configOf(snapshot)).clientProfile).toBeUndefined();
+
+    const cleared = applyServerConfigProjection(current, update({}, true));
+    expect(configOf(cleared).clientProfile).toEqual({});
   });
 });
