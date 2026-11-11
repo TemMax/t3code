@@ -18,7 +18,7 @@ export function PreferencesSyncChoiceDialog() {
     <AlertDialog
       open={status.type === "choice"}
       onOpenChange={(open) => {
-        if (!open) void preferencesSync.setEnabled(false);
+        if (!open) void preferencesSync.cancelChoice();
       }}
     >
       <AlertDialogPopup>

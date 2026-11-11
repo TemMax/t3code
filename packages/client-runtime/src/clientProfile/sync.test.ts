@@ -207,6 +207,22 @@ describe("createClientProfileSync", () => {
     expect(t.status()).toEqual({ type: "off" });
   });
 
+  it("cancel turns sync off only while the choice is still open", async () => {
+    using t = setup({
+      local: { themeMode: "dark" },
+      environments: [env("e1", { themeMode: entry("light", 500, "dev-b") })],
+    });
+    await t.controller.setEnabled(true);
+    await t.controller.cancelChoice();
+    expect(t.status()).toEqual({ type: "off" });
+
+    await t.controller.setEnabled(true);
+    t.store.sidecar = { ...t.store.sidecar, choicePending: false };
+    await t.controller.cancelChoice();
+    expect(t.store.sidecar.enabled).toBe(true);
+    expect(t.status()).toMatchObject({ type: "syncing" });
+  });
+
   it("\"thisDevice\" stamps every own key past the servers' stamps and leaves other surfaces' keys alone", async () => {
     using t = setup({
       local: { themeMode: "dark", toolCallVisibility: "showAll" },

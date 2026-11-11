@@ -122,7 +122,7 @@ function presentChoice() {
       {
         text: "Cancel",
         style: "cancel",
-        onPress: () => void preferencesSync.setEnabled(false).catch(reportError),
+        onPress: () => void preferencesSync.cancelChoice().catch(reportError),
       },
     ],
     { cancelable: false },

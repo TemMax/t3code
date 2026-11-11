@@ -47,6 +47,8 @@ export interface ClientProfileSyncController {
   readonly start: () => () => void;
   readonly setEnabled: (enabled: boolean) => Promise<void>;
   readonly choose: (choice: "synced" | "thisDevice") => Promise<void>;
+  /** Leaves sync off, unless another tab already answered the choice. */
+  readonly cancelChoice: () => Promise<void>;
   readonly adoptExternalChange: (change: {
     readonly environmentId: string;
     readonly values: Readonly<Record<string, unknown>>;
@@ -182,12 +184,9 @@ export function createClientProfileSync(options: {
   const runPass = async () => {
     try {
       let sidecar = await sidecarStore.load();
-      if (!sidecar.enabled) {
-        publishStatus(sidecar);
-        return;
-      }
-      await source.ready();
       publishStatus(sidecar);
+      if (!sidecar.enabled) return;
+      await source.ready();
       const servers = serverDocuments(participants());
       if (servers.length === 0) return;
       if (sidecar.choicePending) {
@@ -270,13 +269,17 @@ export function createClientProfileSync(options: {
     return dispose;
   };
 
+  const turnOff = async (sidecar: ClientProfileSidecar) => {
+    const disabled = { ...sidecar, enabled: false, choicePending: false, entries: {} };
+    await sidecarStore.save(disabled);
+    publishStatus(disabled);
+  };
+
   const setEnabled = (enabled: boolean) =>
     serial(async () => {
       const sidecar = await sidecarStore.load();
       if (!enabled) {
-        const disabled = { ...sidecar, enabled: false, choicePending: false, entries: {} };
-        await sidecarStore.save(disabled);
-        publishStatus(disabled);
+        await turnOff(sidecar);
         return;
       }
       if (sidecar.enabled) {
@@ -310,6 +313,13 @@ export function createClientProfileSync(options: {
           : claimThisDeviceClientProfileSidecar({ surface, now: now(), sidecar, local, servers }),
       );
       await runPass();
+    });
+
+  const cancelChoice = () =>
+    serial(async () => {
+      const sidecar = await sidecarStore.load();
+      if (sidecar.enabled && sidecar.choicePending) await turnOff(sidecar);
+      else publishStatus(sidecar);
     });
 
   const adoptExternalChange: ClientProfileSyncController["adoptExternalChange"] = (change) =>
@@ -360,5 +370,5 @@ export function createClientProfileSync(options: {
       return "applied";
     });
 
-  return { statusAtom, start, setEnabled, choose, adoptExternalChange };
+  return { statusAtom, start, setEnabled, choose, cancelChoice, adoptExternalChange };
 }
