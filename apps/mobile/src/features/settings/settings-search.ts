@@ -13,6 +13,7 @@ const SETTINGS_SEARCH_TERMS = {
     "remote",
     "tailscale",
   ],
+  "preferences-sync": ["sync", "devices", "preferences", "profile", "theme"],
   SettingsNotifications: ["push", "alerts", "live activity", "agent activity"],
   SettingsAppearance: [
     "theme",
@@ -130,7 +131,7 @@ const SETTINGS_SEARCH_TERMS = {
     "terms",
     "open source licenses",
   ],
-} satisfies Partial<Record<SettingsPageTarget | "account", readonly string[]>>;
+} satisfies Partial<Record<SettingsPageTarget | "account" | "preferences-sync", readonly string[]>>;
 const termsById: ReadonlyMap<string, readonly string[]> = new Map(
   Object.entries(SETTINGS_SEARCH_TERMS),
 );

@@ -16,6 +16,7 @@ import { ScreenScrollView as ScrollView } from "../../components/ui/ScreenScroll
 import { EmptyState } from "../../components/ui/EmptyState";
 import { useAuth, useUser } from "@clerk/expo";
 import { useNavigation, useNavigationState } from "@react-navigation/native";
+import { useAtomValue } from "@effect/atom-react";
 import { use, type ComponentProps } from "react";
 import { Platform, View } from "react-native";
 import { useNativeColumnLayoutMetrics } from "../../native/native-layout-metrics";
@@ -25,6 +26,8 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { hasCloudPublicConfig } from "../cloud/publicConfig";
 import { useAdaptiveWorkspaceLayout } from "../layout/adaptive-workspace-context";
 import { useSavedRemoteConnections } from "../../state/use-remote-environment-registry";
+import * as Dialog from "../../components/ui/Dialog";
+import { preferencesSync } from "../../state/preferences-sync";
 import { SettingsRow } from "./components/SettingsRow";
 import { SettingsSection, SettingsSidebarContext } from "./components/SettingsSection";
 import { SettingsScreen } from "./components/SettingsScreen";
@@ -157,7 +160,49 @@ function environmentsRow(count: number): SettingsListRow {
   };
 }
 
+function usePreferencesSyncRow(): SettingsListRow {
+  const status = useAtomValue(preferencesSync.statusAtom);
+  const on = status.type === "choice" || status.type === "syncing";
+  const title = "Sync preferences across devices";
+  const toggle = (enabled: boolean) =>
+    void preferencesSync
+      .setEnabled(enabled)
+      .catch((error: unknown) => console.warn("[preferences-sync] toggle failed", error));
+  return {
+    id: "preferences-sync",
+    icon: "arrow.left.arrow.right",
+    label: "Sync preferences",
+    value: on
+      ? "On"
+      : status.type === "waiting"
+        ? "Waiting for a server"
+        : status.type === "unsupported"
+          ? "No server supports sync"
+          : "Off",
+    valuePosition: "trailing",
+    onPress: () =>
+      status.type === "off"
+        ? Dialog.alert(
+            title,
+            "Theme, tool call visibility, follow-up behavior, math rendering and sidebar grouping follow your other devices through your servers.",
+            [
+              { text: "Turn On", onPress: () => toggle(true) },
+              { text: "Cancel", style: "cancel" },
+            ],
+          )
+        : Dialog.alert(
+            title,
+            "This device stops applying and publishing preferences. Your servers keep the synced preferences.",
+            [
+              { text: "Turn Off", style: "destructive", onPress: () => toggle(false) },
+              { text: "Cancel", style: "cancel" },
+            ],
+          ),
+  };
+}
+
 function SettingsList(props: { readonly connections: readonly SettingsListRow[] }) {
+  const preferencesSyncRow = usePreferencesSyncRow();
   // UIKit's scroll-edge material takes the scroll view's own color; like the chat list, match
   // the sidebar's surface so the bar doesn't darken over content at rest.
   // Grouped cards only lift off the screen surface; the drawer is as dark as they are.
@@ -170,7 +215,11 @@ function SettingsList(props: { readonly connections: readonly SettingsListRow[] 
   const overflowRows = useOverflowRows();
   const indexSections = useSettingsIndexSections();
   const sections = filterSettingsSections(
-    [{ rows: overflowRows }, { title: "Connections", rows: props.connections }, ...indexSections],
+    [
+      { rows: overflowRows },
+      { title: "Connections", rows: [...props.connections, preferencesSyncRow] },
+      ...indexSections,
+    ],
     query,
   );
 
