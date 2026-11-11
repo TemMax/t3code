@@ -93,3 +93,16 @@ export function mobileProfilePatch(
   }
   return patch;
 }
+
+export function applyMobileProfileValues(input: {
+  readonly preferences: Preferences;
+  readonly values: Readonly<Record<string, unknown>>;
+  readonly systemAppearance: "light" | "dark";
+  readonly write: (patch: Partial<Preferences>) => Preferences;
+}): Record<string, unknown> {
+  const patch = mobileProfilePatch(input.preferences, input.values, input.systemAppearance);
+  const stored = Object.keys(patch).length === 0 ? input.preferences : input.write(patch);
+  return Object.fromEntries(
+    Object.entries(readMobileProfileValues(stored)).filter(([base]) => base in input.values),
+  );
+}

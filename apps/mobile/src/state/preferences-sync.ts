@@ -14,7 +14,7 @@ import * as Dialog from "../components/ui/Dialog";
 import { uuidv4 } from "../lib/uuid";
 import type { Preferences } from "../persistence/mobile-preferences";
 import { appAtomRegistry } from "./atom-registry";
-import { mobileProfilePatch, readMobileProfileValues } from "./client-profile.logic";
+import { applyMobileProfileValues, readMobileProfileValues } from "./client-profile.logic";
 import { mobilePreferencesAtom, updateMobilePreferencesAtom } from "./preferences";
 import { environmentPresentations } from "./presentation";
 import { serverEnvironment } from "./server";
@@ -82,19 +82,13 @@ export const preferencesSync = createClientProfileSync({
       completePrefixes: [],
     }),
     defaults: () => readMobileProfileValues({}),
-    apply: async (values) => {
-      const current = loadedPreferences() ?? {};
-      const updated = writePreferences(
-        mobileProfilePatch(
-          current,
-          values,
-          Appearance.getColorScheme() === "dark" ? "dark" : "light",
-        ),
-      );
-      return Object.fromEntries(
-        Object.entries(readMobileProfileValues(updated)).filter(([base]) => base in values),
-      );
-    },
+    apply: async (values) =>
+      applyMobileProfileValues({
+        preferences: loadedPreferences() ?? {},
+        values,
+        systemAppearance: Appearance.getColorScheme() === "dark" ? "dark" : "light",
+        write: writePreferences,
+      }),
     subscribe: (onChange) => appAtomRegistry.subscribe(mobilePreferencesAtom, onChange),
   },
   sidecarStore: {

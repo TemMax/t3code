@@ -5,7 +5,10 @@ export interface ClientProfileValueSource {
   readonly ready: () => Promise<void>;
   readonly read: () => ClientProfileLocalRead;
   readonly defaults: () => Readonly<Record<string, unknown>>;
-  /** Resolves to what the store now holds for those bases; a removed key is absent. */
+  /**
+   * Resolves to what the store now holds for those bases; a removed key is absent.
+   * A value it cannot store is offered again on every pass, so storing nothing must not notify.
+   */
   readonly apply: (
     values: Readonly<Record<string, unknown>>,
   ) => Promise<Readonly<Record<string, unknown>>>;
