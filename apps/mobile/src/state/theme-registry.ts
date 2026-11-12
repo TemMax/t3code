@@ -5,13 +5,11 @@ import {
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
 import type { EnvironmentId } from "@t3tools/contracts";
-import { publishedThemeDefinitions } from "@t3tools/shared/themeConversion";
 import * as Effect from "effect/Effect";
 import { AsyncResult, Atom } from "effect/reactivity";
 
 import { environmentCatalog } from "../connection/catalog";
 import {
-  planRememberedThemes,
   setRegisteredMobileThemes,
   type MobileRememberedThemeKey,
   type MobileThemeRegistry,
@@ -23,9 +21,7 @@ import { mobilePreferencesAtom } from "./preferences";
 import { environmentPresentations } from "./presentation";
 import {
   createMobileThemeRegistryMemo,
-  decodeRememberedThemePayload,
-  encodeRememberedThemePayload,
-  sameServerInputs,
+  createRememberedThemeReconciler,
   type MobileThemeRegistryServerInput,
   type RememberedThemeCopy,
 } from "./theme-registry.logic";
@@ -108,96 +104,36 @@ export const mobileThemeRegistryAtom: Atom.Atom<MobileThemeRegistry> = Atom.make
   });
 }).pipe(Atom.withLabel("mobile:theme-registry"));
 
-interface StoredCopy extends RememberedThemeCopy {
-  readonly payload: string;
-}
-
-const copyKey = ({ environmentId, themeId }: MobileRememberedThemeKey) =>
-  `${environmentId}\u0000${themeId}`;
-
 function reportError(cause: unknown) {
   console.warn("[theme-registry] failed", safeErrorLogAttributes(cause));
 }
 
 export function installMobileThemeRegistry(): () => void {
   let disposed = false;
-  let loaded = false;
-  let stored = new Map<string, StoredCopy>();
-  let lastServers: ReadonlyArray<MobileThemeRegistryServerInput> | undefined;
-  let lastCatalog: unknown;
   let reconcileQueued = false;
   let chain: Promise<void> = Promise.resolve();
-
-  const enqueue = (task: () => Promise<void>) => {
-    chain = chain.then(task).catch(reportError);
-  };
-
-  const publishStored = () => {
-    appAtomRegistry.set(
-      rememberedThemesAtom,
-      [...stored.values()].map(({ environmentId, theme }) => ({ environmentId, theme })),
-    );
-  };
-
-  const reconcile = async () => {
-    if (disposed || !loaded) return;
-    const catalog = appAtomRegistry.get(environmentCatalog.catalogValueAtom);
-    if (!catalog.isReady) return;
-    const servers = appAtomRegistry.get(serverInputsAtom);
-    if (
-      lastServers !== undefined &&
-      lastCatalog === catalog &&
-      sameServerInputs(lastServers, servers)
-    ) {
-      return;
-    }
-    lastServers = servers;
-    lastCatalog = catalog;
-
-    const sources = servers.map((server) => ({
-      environmentId: server.environmentId,
-      connected: server.connected,
-      published:
-        server.environmentThemes === undefined
-          ? undefined
-          : publishedThemeDefinitions(server.environmentThemes),
-    }));
-    const plan = planRememberedThemes({
-      servers: sources,
-      remembered: [...stored.values()].map(({ environmentId, theme }) => ({
-        environmentId,
-        themeId: theme.id,
-      })),
-      knownEnvironmentIds: new Set(catalog.entries.keys()),
-    });
-
-    let changed = false;
-    for (const key of plan.remove) {
-      await runDatabaseCommand(removeThemeCopy, key);
-      stored.delete(copyKey(key));
-      changed = true;
-    }
-    for (const key of plan.refresh) {
-      const theme = servers
-        .find((server) => server.environmentId === key.environmentId)
-        ?.environmentThemes?.find(({ id }) => id === key.themeId);
-      if (theme === undefined) continue;
-      const payload = encodeRememberedThemePayload(key.environmentId, theme);
-      if (stored.get(copyKey(key))?.payload === payload) continue;
-      await runDatabaseCommand(saveThemeCopy, { ...key, payload });
-      stored.set(copyKey(key), { environmentId: key.environmentId, theme, payload });
-      changed = true;
-    }
-    if (changed) publishStored();
-  };
+  const reconcile = createRememberedThemeReconciler({
+    store: {
+      list: () => runDatabaseCommand(listThemeCopies, undefined),
+      save: (copy) => runDatabaseCommand(saveThemeCopy, copy),
+      remove: (key) => runDatabaseCommand(removeThemeCopy, key),
+    },
+    publish: (copies) => appAtomRegistry.set(rememberedThemesAtom, copies),
+  });
 
   const scheduleReconcile = () => {
     if (reconcileQueued || disposed) return;
     reconcileQueued = true;
-    enqueue(async () => {
-      reconcileQueued = false;
-      await reconcile();
-    });
+    chain = chain
+      .then(async () => {
+        reconcileQueued = false;
+        if (disposed) return;
+        await reconcile({
+          catalog: appAtomRegistry.get(environmentCatalog.catalogValueAtom),
+          servers: appAtomRegistry.get(serverInputsAtom),
+        });
+      })
+      .catch(reportError);
   };
 
   const unsubscribeRegistry = appAtomRegistry.subscribe(
@@ -213,21 +149,7 @@ export function installMobileThemeRegistry(): () => void {
     environmentCatalog.catalogValueAtom,
     scheduleReconcile,
   );
-
-  enqueue(async () => {
-    const payloads = await runDatabaseCommand(listThemeCopies, undefined);
-    for (const payload of payloads) {
-      const copy = decodeRememberedThemePayload(payload);
-      if (copy === null) continue;
-      stored.set(copyKey({ environmentId: copy.environmentId, themeId: copy.theme.id }), {
-        ...copy,
-        payload,
-      });
-    }
-    loaded = true;
-    publishStored();
-    await reconcile();
-  });
+  scheduleReconcile();
 
   return () => {
     disposed = true;

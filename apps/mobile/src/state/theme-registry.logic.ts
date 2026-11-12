@@ -5,7 +5,9 @@ import * as Schema from "effect/Schema";
 
 import {
   buildMobileThemeRegistry,
+  planRememberedThemes,
   type MobileRememberedTheme,
+  type MobileRememberedThemeKey,
   type MobileServerThemeSource,
   type MobileThemeRegistry,
 } from "../lib/mobileThemeRegistry";
@@ -51,7 +53,7 @@ export function decodeRememberedThemePayload(payload: string): RememberedThemeCo
   return decoded._tag === "Some" ? decoded.value : null;
 }
 
-export function sameServerInputs(
+function sameServerInputs(
   a: ReadonlyArray<MobileThemeRegistryServerInput>,
   b: ReadonlyArray<MobileThemeRegistryServerInput>,
 ): boolean {
@@ -66,6 +68,102 @@ export function sameServerInputs(
       );
     })
   );
+}
+
+export interface RememberedThemeStore {
+  readonly list: () => Promise<ReadonlyArray<string>>;
+  readonly save: (copy: MobileRememberedThemeKey & { readonly payload: string }) => Promise<void>;
+  readonly remove: (key: MobileRememberedThemeKey) => Promise<void>;
+}
+
+export interface RememberedThemeReconcileState {
+  readonly catalog: {
+    readonly isReady: boolean;
+    readonly entries: ReadonlyMap<EnvironmentId, unknown>;
+  };
+  readonly servers: ReadonlyArray<MobileThemeRegistryServerInput>;
+}
+
+/**
+ * Keeps the phone's copies of server themes in line with what connected servers publish.
+ * A pass that fails part way counts as not done, so the next call with the same state retries it.
+ */
+export function createRememberedThemeReconciler(input: {
+  readonly store: RememberedThemeStore;
+  readonly publish: (copies: ReadonlyArray<RememberedThemeCopy>) => void;
+}): (state: RememberedThemeReconcileState) => Promise<void> {
+  const stored = new Map<string, RememberedThemeCopy & { readonly payload: string }>();
+  let loaded = false;
+  let reconciled: RememberedThemeReconcileState | undefined;
+  const keyOf = ({ environmentId, themeId }: MobileRememberedThemeKey) =>
+    `${environmentId}\u0000${themeId}`;
+  const publish = () =>
+    input.publish(
+      [...stored.values()].map(({ environmentId, theme }) => ({ environmentId, theme })),
+    );
+
+  return async (state) => {
+    if (!loaded) {
+      for (const payload of await input.store.list()) {
+        const copy = decodeRememberedThemePayload(payload);
+        if (copy !== null) {
+          stored.set(keyOf({ environmentId: copy.environmentId, themeId: copy.theme.id }), {
+            ...copy,
+            payload,
+          });
+        }
+      }
+      loaded = true;
+      publish();
+    }
+    if (!state.catalog.isReady) return;
+    if (
+      reconciled !== undefined &&
+      reconciled.catalog === state.catalog &&
+      sameServerInputs(reconciled.servers, state.servers)
+    ) {
+      return;
+    }
+
+    const plan = planRememberedThemes({
+      servers: state.servers.map((server) => ({
+        environmentId: server.environmentId,
+        connected: server.connected,
+        published:
+          server.environmentThemes === undefined
+            ? undefined
+            : publishedThemeDefinitions(server.environmentThemes),
+      })),
+      remembered: [...stored.values()].map(({ environmentId, theme }) => ({
+        environmentId,
+        themeId: theme.id,
+      })),
+      knownEnvironmentIds: new Set(state.catalog.entries.keys()),
+    });
+
+    let changed = false;
+    try {
+      for (const key of plan.remove) {
+        await input.store.remove(key);
+        stored.delete(keyOf(key));
+        changed = true;
+      }
+      for (const key of plan.refresh) {
+        const theme = state.servers
+          .find((server) => server.environmentId === key.environmentId)
+          ?.environmentThemes?.find(({ id }) => id === key.themeId);
+        if (theme === undefined) continue;
+        const payload = encodeRememberedThemePayload(key.environmentId, theme);
+        if (stored.get(keyOf(key))?.payload === payload) continue;
+        await input.store.save({ ...key, payload });
+        stored.set(keyOf(key), { environmentId: key.environmentId, theme, payload });
+        changed = true;
+      }
+      reconciled = state;
+    } finally {
+      if (changed) publish();
+    }
+  };
 }
 
 export function createMobileThemeRegistryMemo(): (
