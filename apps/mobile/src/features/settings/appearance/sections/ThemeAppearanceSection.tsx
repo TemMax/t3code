@@ -1,4 +1,4 @@
-import { memo, useId, useSyncExternalStore } from "react";
+import { memo, useId } from "react";
 import { Pressable, View } from "react-native";
 import Svg, { Circle, Defs, RadialGradient, Stop } from "react-native-svg";
 import { ScopedTheme, ScopedVariables } from "uniwind";
@@ -16,11 +16,7 @@ import {
   type MobileThemeIds,
   type MobileThemeMode,
 } from "../../../../lib/mobileTheme";
-import {
-  getRegisteredMobileThemes,
-  subscribeRegisteredMobileThemes,
-  type MobileThemeRegistry,
-} from "../../../../lib/mobileThemeRegistry";
+import type { MobileThemeRegistry } from "../../../../lib/mobileThemeRegistry";
 import { getMobileUniwindThemeName } from "../../../../lib/mobileThemeRuntime";
 import { cn } from "../../../../lib/cn";
 import { useAppearancePreferences } from "../AppearancePreferencesProvider";
@@ -36,14 +32,6 @@ const APPEARANCE_MODES: ReadonlyArray<{
 
 const previewPercentage = (value: number) => `${value * 100}%`;
 
-// getMobileThemePreviewColors reads the registry directly; the snapshot argument makes it an input
-// of the call, so the React Compiler recomputes the colors when the registry changes.
-const resolvePreviewColors = (
-  themeId: MobileThemeId,
-  appearance: MobileThemeAppearance,
-  _registry: MobileThemeRegistry,
-) => getMobileThemePreviewColors(themeId, appearance);
-
 const PreviewOrb = memo(function PreviewOrb(props: {
   readonly appearance: MobileThemeAppearance;
   readonly compact?: boolean;
@@ -58,7 +46,7 @@ const PreviewOrb = memo(function PreviewOrb(props: {
   const colors =
     props.themeId === "material-you" && palette
       ? { canvas: palette.surface, accent: palette.primary, messageAction: palette.tertiary }
-      : resolvePreviewColors(props.themeId, props.appearance, props.registry);
+      : getMobileThemePreviewColors(props.themeId, props.appearance, props.registry);
   const spec = THEME_PREVIEW_RENDER_SPECS[props.appearance];
   const accentRadius = Math.hypot(
     Math.max(spec.accent.center[0], 1 - spec.accent.center[0]),
@@ -324,8 +312,8 @@ export function ThemeAppearanceSection() {
     themeIds,
     themeMode,
     systemColorsAvailable,
+    registeredThemes: registry,
   } = useAppearancePreferences();
-  const registry = useSyncExternalStore(subscribeRegisteredMobileThemes, getRegisteredMobileThemes);
 
   return (
     <View className="gap-6">

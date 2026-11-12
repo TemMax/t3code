@@ -14,7 +14,7 @@ import {
   STANDARD_THEME_PREVIEW_COLORS,
   type ThemePreviewColors,
 } from "@t3tools/shared/themePreview";
-import { getRegisteredMobileTheme } from "./mobileThemeRegistry.ts";
+import { getRegisteredMobileThemes, type MobileThemeRegistry } from "./mobileThemeRegistry.ts";
 
 export const DEFAULT_MOBILE_THEME_ID = MOBILE_DEFAULT_THEME_ID;
 export const MOBILE_THEME_IDS = [...SHARED_MOBILE_THEME_IDS, "material-you"] as const;
@@ -456,25 +456,41 @@ export function createMobileThemeVariables(
   };
 }
 
+// Render code passes the registry snapshot it subscribed to: the React Compiler memoizes on
+// arguments, so a theme read from the module snapshot inside a component would go stale.
 export function getRegisteredThemeColors(
   themeId: MobileThemeId,
   appearance: MobileThemeAppearance,
+  registry: MobileThemeRegistry = getRegisteredMobileThemes(),
 ): ThemeColors | null {
   if (isBuiltInMobileThemeId(themeId)) return null;
-  const definition = getRegisteredMobileTheme(themeId);
+  const definition = registry.byId.get(themeId)?.definition;
   return definition ? getThemeColorsForAppearance(definition, appearance) : null;
+}
+
+/** The theme drawn for an appearance: a stored id whose theme is gone draws the standard one. */
+export function drawnMobileThemeId(
+  themeId: MobileThemeId,
+  appearance: MobileThemeAppearance,
+  registry: MobileThemeRegistry = getRegisteredMobileThemes(),
+): MobileThemeId {
+  return isBuiltInMobileThemeId(themeId) ||
+    getRegisteredThemeColors(themeId, appearance, registry) !== null
+    ? themeId
+    : DEFAULT_MOBILE_THEME_ID;
 }
 
 export function getMobileThemeColors(
   themeId: MobileThemeId,
   appearance: MobileThemeAppearance,
+  registry: MobileThemeRegistry = getRegisteredMobileThemes(),
 ): ThemeColors {
   if (themeId === DEFAULT_MOBILE_THEME_ID) {
     return appearance === "dark" ? T3_CODE_DARK_THEME_COLORS : T3_CODE_LIGHT_THEME_COLORS;
   }
   if (!isBuiltInMobileThemeId(themeId)) {
     return (
-      getRegisteredThemeColors(themeId, appearance) ??
+      getRegisteredThemeColors(themeId, appearance, registry) ??
       (appearance === "dark" ? T3_CODE_DARK_THEME_COLORS : T3_CODE_LIGHT_THEME_COLORS)
     );
   }
@@ -486,12 +502,10 @@ export function getMobileThemeVariables(
   rawThemeId: MobileThemeId,
   appearance: MobileThemeAppearance,
   overrides: Partial<MobileThemeVariables> | null = null,
+  registry: MobileThemeRegistry = getRegisteredMobileThemes(),
 ): MobileThemeVariables {
-  const themeId =
-    isBuiltInMobileThemeId(rawThemeId) || getRegisteredThemeColors(rawThemeId, appearance)
-      ? rawThemeId
-      : DEFAULT_MOBILE_THEME_ID;
-  const colors = getMobileThemeColors(themeId, appearance);
+  const themeId = drawnMobileThemeId(rawThemeId, appearance, registry);
+  const colors = getMobileThemeColors(themeId, appearance, registry);
   const groupedCard =
     themeId === DEFAULT_MOBILE_THEME_ID
       ? appearance === "light"
@@ -532,10 +546,11 @@ export function getMobileThemeVariables(
 export function getMobileThemePreviewColors(
   themeId: MobileThemeId,
   appearance: MobileThemeAppearance,
+  registry: MobileThemeRegistry = getRegisteredMobileThemes(),
 ): ThemePreviewColors {
   if (themeId === DEFAULT_MOBILE_THEME_ID || themeId === "material-you")
     return STANDARD_THEME_PREVIEW_COLORS[appearance];
-  const registeredColors = getRegisteredThemeColors(themeId, appearance);
+  const registeredColors = getRegisteredThemeColors(themeId, appearance, registry);
   if (!registeredColors && !isBuiltInMobileThemeId(themeId)) {
     return STANDARD_THEME_PREVIEW_COLORS[appearance];
   }

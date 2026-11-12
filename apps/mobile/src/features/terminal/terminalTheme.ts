@@ -4,6 +4,7 @@ import {
   themeColorToNativeColor,
   type MobileThemeId,
 } from "../../lib/mobileTheme";
+import type { MobileThemeRegistry } from "../../lib/mobileThemeRegistry";
 
 export type TerminalAppearanceScheme = "light" | "dark";
 
@@ -94,14 +95,16 @@ function getPierreTerminalTheme(scheme: TerminalAppearanceScheme): TerminalTheme
   return scheme === "light" ? PIERRE_LIGHT_THEME : PIERRE_DARK_THEME;
 }
 
+// Required so every caller in a component passes the snapshot it subscribed to.
 export function getMobileTerminalTheme(
   themeId: MobileThemeId,
   scheme: TerminalAppearanceScheme,
+  registry: MobileThemeRegistry,
 ): TerminalTheme {
   const base = getPierreTerminalTheme(scheme);
   const paletteId = themeId === "material-you" ? "t3-code" : themeId;
-  const palette = getMobileThemeColors(paletteId, scheme);
-  const colors = getMobileThemeVariables(paletteId, scheme);
+  const palette = getMobileThemeColors(paletteId, scheme, registry);
+  const colors = getMobileThemeVariables(paletteId, scheme, null, registry);
   const background = themeColorToNativeColor(palette.terminalBackground);
   return {
     ...base,

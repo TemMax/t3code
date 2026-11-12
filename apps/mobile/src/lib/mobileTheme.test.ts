@@ -16,6 +16,7 @@ import {
   EMPTY_MOBILE_THEME_REGISTRY,
   setRegisteredMobileThemes,
   type MobileRegisteredTheme,
+  type MobileThemeRegistry,
 } from "./mobileThemeRegistry";
 import { getMobileThemeRuntimeVariables } from "./mobileThemeVariables";
 
@@ -276,11 +277,13 @@ describe("mobile themes", () => {
       environmentId: null,
     };
 
+    const registry: MobileThemeRegistry = {
+      themes: [registered],
+      byId: new Map([[registered.id, registered]]),
+    };
+
     function withRegisteredTheme(run: () => void) {
-      setRegisteredMobileThemes({
-        themes: [registered],
-        byId: new Map([[registered.id, registered]]),
-      });
+      setRegisteredMobileThemes(registry);
       try {
         run();
       } finally {
@@ -305,6 +308,7 @@ describe("mobile themes", () => {
         expect(getMobileThemeColors("islands-dark", "dark")).toEqual(colors);
         expect(getMobileThemeColors("islands-dark", "light")).toEqual(T3_CODE_LIGHT_THEME_COLORS);
       });
+      expect(getMobileThemeColors("islands-dark", "dark", registry)).toEqual(colors);
     });
   });
 

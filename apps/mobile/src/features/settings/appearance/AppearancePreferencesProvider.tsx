@@ -70,6 +70,8 @@ interface AppearancePreferencesContextValue {
   readonly themeVariablesByAppearance: Readonly<
     Record<MobileThemeAppearance, MobileThemeVariables>
   >;
+  /** Pass to theme color functions called during render, so they follow registry changes. */
+  readonly registeredThemes: MobileThemeRegistry;
   readonly systemColorPalettes: ReturnType<typeof readSystemColorPalettes>;
   readonly isReady: boolean;
   readonly setThemeIdForAppearance: (
@@ -117,15 +119,18 @@ const systemColorPalettesAtom = Atom.make((get): MaterialYouPalettes | null => {
   return initial;
 }).pipe(Atom.withLabel("mobile:system-color-palettes"));
 
-// The theme functions read the registry directly; the snapshot argument makes it an input of
-// the call, so the React Compiler recomputes when the registry changes.
 function resolveThemeVariablesByAppearance(
   themeIds: MobileThemeIds,
   palettes: MaterialYouPalettes | null,
-  _registry: MobileThemeRegistry,
+  registry: MobileThemeRegistry,
 ): Readonly<Record<MobileThemeAppearance, MobileThemeVariables>> {
   const resolve = (appearance: MobileThemeAppearance) => {
-    const base = getMobileThemeRuntimeVariables(themeIds[appearance], appearance, Platform.OS);
+    const base = getMobileThemeRuntimeVariables(
+      themeIds[appearance],
+      appearance,
+      Platform.OS,
+      registry,
+    );
     return themeIds[appearance] === "material-you" && palettes
       ? materialYouPaletteToMobileThemeVariables(palettes[appearance], appearance, base)
       : base;
@@ -326,6 +331,7 @@ export function AppearancePreferencesProvider(props: { readonly children: ReactN
       systemColorsActive,
       themeVariables,
       themeVariablesByAppearance,
+      registeredThemes,
       systemColorPalettes,
       isReady,
       setThemeIdForAppearance,
@@ -349,6 +355,7 @@ export function AppearancePreferencesProvider(props: { readonly children: ReactN
       systemColorsActive,
       themeVariables,
       themeVariablesByAppearance,
+      registeredThemes,
       systemColorPalettes,
       isReady,
       setThemeIdForAppearance,
