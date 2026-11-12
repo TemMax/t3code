@@ -136,7 +136,7 @@ function isCustomThemeBase(base: string): boolean {
 }
 
 export function isClientProfileBaseKey(base: string, surface: ClientProfileSurface): boolean {
-  return KEY_SETS[surface.kind].has(base) || (surface.kind !== "mobile" && isCustomThemeBase(base));
+  return KEY_SETS[surface.kind].has(base) || isCustomThemeBase(base);
 }
 
 export function clientProfileKeyName(base: string, surface: ClientProfileSurface): string {

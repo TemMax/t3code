@@ -22,7 +22,7 @@ describe("client profile keys", () => {
     expect(clientProfileBaseName("fontFamilyCode", D)).toBeNull();
     expect(clientProfileBaseName("chatWidth", B)).toBe("chatWidth");
     expect(clientProfileBaseName("customTheme.nightfall", B)).toBe("customTheme.nightfall");
-    expect(clientProfileBaseName("customTheme.nightfall", M)).toBeNull();
+    expect(clientProfileBaseName("customTheme.nightfall", M)).toBe("customTheme.nightfall");
     expect(clientProfileBaseName("themeLight", M)).toBe("themeLight");
     expect(clientProfileBaseName("snapShotShortcut@mac", B)).toBeNull();
     expect(clientProfileBaseName("unknownKey", D)).toBeNull();
@@ -51,7 +51,13 @@ describe("client profile keys", () => {
     }
     expect(isClientProfileBaseKey("customTheme.x", B)).toBe(true);
     expect(isClientProfileBaseKey("customTheme.", B)).toBe(false);
-    expect(isClientProfileBaseKey("customTheme.x", M)).toBe(false);
+    expect(isClientProfileBaseKey("customTheme.x", M)).toBe(true);
+    expect(isClientProfileBaseKey("customTheme.", M)).toBe(false);
+  });
+
+  it("accepts editor theme keys on the phone", () => {
+    expect(isClientProfileBaseKey("customTheme.nord", M)).toBe(true);
+    expect(clientProfileBaseName("customTheme.nord", M)).toBe("customTheme.nord");
   });
 
   it("every synced settings key is a ClientSettings field", () => {

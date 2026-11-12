@@ -316,6 +316,106 @@ describe("client profile merge", () => {
     expect(needsClientProfileChoice(D, docs("fontFamilyCode@mac"))).toBe(true);
   });
 
+  it("keeps publishing editor themes from computers", () => {
+    const plan = planClientProfileSync({
+      surface: B,
+      now: 40,
+      sidecar: sidecarWith({}),
+      local: read({ "customTheme.nord": "N" }),
+      servers: [{ environmentId: "s1", document: {} }],
+    });
+    expect(plan.sidecar.entries["customTheme.nord"]).toEqual(tracked("N", 40));
+    expect(plan.push).toEqual([
+      { environmentId: "s1", entries: { "customTheme.nord": entry("N", 40, "dev-a") } },
+    ]);
+  });
+
+  it("never publishes an editor theme the phone holds without a tracked entry", () => {
+    const plan = planClientProfileSync({
+      surface: M,
+      now: 40,
+      sidecar: sidecarWith({}),
+      local: read({ "customTheme.nord": "N" }),
+      servers: [{ environmentId: "s1", document: {} }],
+    });
+    expect(plan.push).toEqual([]);
+    expect(plan.sidecar.entries["customTheme.nord"]?.changedAt ?? -1).toBeLessThan(0);
+  });
+
+  it("applies a computer's editor theme over a different local copy on the phone", () => {
+    const remote = entry("C", 200, "desk");
+    const plan = planClientProfileSync({
+      surface: M,
+      now: 40,
+      sidecar: sidecarWith({ "customTheme.nord": tracked("A", 100, "desk") }),
+      local: read({ "customTheme.nord": "B" }),
+      servers: [{ environmentId: "s1", document: { "customTheme.nord": remote } }],
+    });
+    expect(plan.apply["customTheme.nord"]).toEqual(remote);
+    expect(plan.push).toEqual([]);
+  });
+
+  it("never pushes a deletion of an editor theme missing on the phone", () => {
+    const plan = planClientProfileSync({
+      surface: M,
+      now: 500,
+      sidecar: sidecarWith({ "customTheme.nord": tracked("N", 100, "desk") }),
+      local: read({}, ["customTheme."]),
+      servers: [{ environmentId: "s1", document: {} }],
+    });
+    expect(plan.push).toEqual([]);
+  });
+
+  it("relays an unchanged editor theme from the phone with its original stamp", () => {
+    const stamp = entry("N", 500, "desk");
+    const plan = planClientProfileSync({
+      surface: M,
+      now: 40,
+      sidecar: sidecarWith({ "customTheme.nord": tracked("N", 500, "desk") }),
+      local: read({ "customTheme.nord": "N" }),
+      servers: [
+        { environmentId: "a", document: { "customTheme.nord": stamp } },
+        { environmentId: "b", document: {} },
+      ],
+    });
+    expect(plan.push).toEqual([{ environmentId: "b", entries: { "customTheme.nord": stamp } }]);
+  });
+
+  it("claiming this device's settings on the phone skips editor themes", () => {
+    const sidecar = claimThisDeviceClientProfileSidecar({
+      surface: M,
+      now: 50,
+      sidecar: { ...sidecarWith({}), choicePending: true },
+      local: read({ "customTheme.nord": "N", themeDark: "dusk" }),
+      servers: [],
+    });
+    expect(sidecar.entries["customTheme.nord"]).toBeUndefined();
+    expect(sidecar.entries.themeDark).toEqual(tracked("dusk", 50));
+  });
+
+  it("seeding on the phone skips editor themes", () => {
+    const input = {
+      surface: M,
+      sidecar: { ...sidecarWith({}), choicePending: true },
+      local: read({ "customTheme.nord": "N" }),
+      defaults: {},
+    };
+    expect(seedClientProfileSidecar(input).entries["customTheme.nord"]).toBeUndefined();
+    const adopted = adoptSyncedClientProfileSidecar({
+      ...input,
+      servers: [{ environmentId: "s1", document: { "customTheme.nord": entry("N", 5, "desk") } }],
+    });
+    expect(adopted.entries["customTheme.nord"]).toBeUndefined();
+  });
+
+  it("a server holding only editor themes needs no choice on the phone", () => {
+    const servers = [
+      { environmentId: "s1", document: { "customTheme.nord": entry("N", 1, "desk") } },
+    ];
+    expect(needsClientProfileChoice(M, servers)).toBe(false);
+    expect(needsClientProfileChoice(D, servers)).toBe(true);
+  });
+
   it("decodes a stored sidecar and rejects a malformed one", () => {
     const stored = sidecarWith({ diffLayout: { changedAt: -1, by: "dev-a", hash: "ab" } }, 7);
     expect(decodeSidecar(stored)).toEqual(stored);
