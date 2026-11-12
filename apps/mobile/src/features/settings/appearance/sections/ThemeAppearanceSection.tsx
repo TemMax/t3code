@@ -9,6 +9,7 @@ import { singleAppearanceOf } from "@t3tools/shared/themeConversion";
 import { SymbolView } from "../../../../components/ui/AppSymbol";
 import { AppText as Text } from "../../../../components/ui/AppText";
 import {
+  drawnMobileThemeId,
   getMobileThemePreviewColors,
   MOBILE_THEME_OPTIONS,
   type MobileThemeAppearance,
@@ -314,6 +315,10 @@ export function ThemeAppearanceSection() {
     systemColorsAvailable,
     registeredThemes: registry,
   } = useAppearancePreferences();
+  const drawnThemeIds = {
+    light: drawnMobileThemeId(themeIds.light, "light", registry),
+    dark: drawnMobileThemeId(themeIds.dark, "dark", registry),
+  };
 
   return (
     <View className="gap-6">
@@ -344,8 +349,8 @@ export function ThemeAppearanceSection() {
               disabled={!isReady}
               key={theme.id}
               label={theme.label}
-              darkSelected={theme.id === themeIds.dark}
-              lightSelected={theme.id === themeIds.light}
+              darkSelected={theme.id === drawnThemeIds.dark}
+              lightSelected={theme.id === drawnThemeIds.light}
               onSelect={(appearance) => setThemeIdForAppearance(appearance, theme.id)}
               onSelectBoth={() => setThemeIdForBothAppearances(theme.id)}
               registry={registry}
@@ -357,8 +362,8 @@ export function ThemeAppearanceSection() {
               disabled={!isReady}
               key={id}
               label={definition.label}
-              darkSelected={id === themeIds.dark}
-              lightSelected={id === themeIds.light}
+              darkSelected={id === drawnThemeIds.dark}
+              lightSelected={id === drawnThemeIds.light}
               onSelect={(appearance) => setThemeIdForAppearance(appearance, id)}
               onSelectBoth={() => setThemeIdForBothAppearances(id)}
               onlyAppearance={singleAppearanceOf(definition)}

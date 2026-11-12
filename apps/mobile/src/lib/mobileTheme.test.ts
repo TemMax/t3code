@@ -24,6 +24,7 @@ import {
   createMobileThemeSelectionPatch,
   createMobileThemeVariables,
   DEFAULT_MOBILE_THEME_ID,
+  drawnMobileThemeId,
   flattenThemeColor,
   getMobileThemeColors,
   getMobileThemeVariables,
@@ -309,6 +310,15 @@ describe("mobile themes", () => {
         expect(getMobileThemeColors("islands-dark", "light")).toEqual(T3_CODE_LIGHT_THEME_COLORS);
       });
       expect(getMobileThemeColors("islands-dark", "dark", registry)).toEqual(colors);
+    });
+
+    it("draws a stored theme only while the given registry holds it for that appearance", () => {
+      expect(drawnMobileThemeId("grove", "dark", EMPTY_MOBILE_THEME_REGISTRY)).toBe("grove");
+      expect(drawnMobileThemeId("islands-dark", "dark", registry)).toBe("islands-dark");
+      expect(drawnMobileThemeId("islands-dark", "light", registry)).toBe(DEFAULT_MOBILE_THEME_ID);
+      expect(drawnMobileThemeId("islands-dark", "dark", EMPTY_MOBILE_THEME_REGISTRY)).toBe(
+        DEFAULT_MOBILE_THEME_ID,
+      );
     });
   });
 
