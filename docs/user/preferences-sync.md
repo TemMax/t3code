@@ -24,6 +24,9 @@ follow-up behavior, math rendering, project grouping and the working shelf.
 On computers also: appearance, font sizes, composer and chat, sidebar, diffs, notifications,
 confirmations, voice, pull request and load-balancing preferences, and custom themes.
 
+Phones also receive your custom themes and list them in **Settings → Appearance**. A
+phone never changes or deletes them on your other devices.
+
 Per operating system: font families, font smoothing and the last editor.
 
 On desktop also: the built-in browser, SnapShot, quit and update preferences.
