@@ -1,5 +1,14 @@
 import { describe, expect, it, vi } from "vite-plus/test";
 import { converter } from "culori/fn";
+import type { EnvironmentTheme } from "@t3tools/contracts";
+import {
+  createVividThemeColors as sharedCreateVividThemeColors,
+  getDefaultThemeColors as sharedGetDefaultThemeColors,
+  parseStoredTheme as sharedParseStoredTheme,
+  publishedThemeDefinitions as sharedPublishedThemeDefinitions,
+  singleAppearanceOf as sharedSingleAppearanceOf,
+  toCanonicalThemeColor as sharedToCanonicalThemeColor,
+} from "@t3tools/shared/themeConversion";
 import { BUILT_IN_THEMES } from "@t3tools/shared/themePalettes";
 
 import { CONTEXT_CHIP_ACCENTS, contextChipColorVariable } from "./lib/contextChipAccents";
@@ -14,12 +23,15 @@ import {
   getStoredCustomThemeCollection,
   invalidateCustomThemes,
   installCustomTheme,
+  parseStoredTheme,
   parseThemeFile,
+  publishedThemeDefinitions,
   removeCustomTheme,
   replaceCustomThemeCollection,
   resolveDesktopTheme,
   resolveThemeAppearance,
   serializeThemeFile,
+  singleAppearanceOf,
   T3_CHAT_THEME,
   GROVE_THEME,
   updateCustomTheme,
@@ -767,5 +779,125 @@ describe("stored theme preferences", () => {
 
     vi.unstubAllGlobals();
     invalidateCustomThemes();
+  });
+});
+
+describe("shared theme conversion parity", () => {
+  it.each(["#191A1C", "#abc", "rgb(56, 113, 225)", "rgba(0, 0, 0, 0.5)", "hsl(220 60% 50%)"])(
+    "converts %s like the web original",
+    (input) => {
+      expect(sharedToCanonicalThemeColor(input)).toEqual(toCanonicalThemeColor(input));
+    },
+  );
+
+  it.each(["oklch(0.6 0.15 250)", "rebeccapurple", "not-a-color", "", 42, null])(
+    "converts %j like the web original",
+    (input) => {
+      expect(sharedToCanonicalThemeColor(input)).toEqual(toCanonicalThemeColor(input));
+    },
+  );
+
+  it.each([
+    ["dark", "#191A1C", "#3871E1"],
+    ["light", "#191A1C", "#3871E1"],
+    ["dark", "#fafafa", "#e11d48"],
+    ["light", "#fafafa", "#e11d48"],
+    ["dark", "#0b1021", "#22c55e"],
+    ["light", "#0b1021", "#22c55e"],
+  ] as const)("generates %s colors from %s and %s like the web original", (appearance, bg, fg) => {
+    expect(sharedCreateVividThemeColors(appearance, bg, fg)).toEqual(
+      createVividThemeColors(appearance, bg, fg),
+    );
+  });
+
+  it.each(["light", "dark"] as const)("returns the %s defaults like the web original", (mode) => {
+    expect(sharedGetDefaultThemeColors(mode)).toEqual(getDefaultThemeColors(mode));
+  });
+
+  it("publishes environment themes like the web original", () => {
+    const themes: ReadonlyArray<EnvironmentTheme> = [
+      {
+        id: "islands-dark",
+        name: "Islands Dark",
+        appearance: "dark",
+        colors: {
+          canvas: "#191A1C",
+          surface: "#26282C",
+          text: "#F7F8F9",
+          accent: "#3871E1",
+          messageAction: "#3871E1",
+        },
+      },
+      {
+        id: "nightfall",
+        name: "Nightfall",
+        appearance: "dark",
+        canvas: "#0b1021",
+        accent: "#22c55e",
+      },
+      {
+        id: "dawn",
+        name: "Dawn",
+        appearance: "light",
+        canvas: "#fafafa",
+        accent: "#e11d48",
+        colors: { text: "#111111" },
+      },
+      {
+        id: "pair",
+        name: "Pair",
+        appearance: "light",
+        colors: { canvas: "#ffffff" },
+        variants: { dark: { canvas: "#000000" } },
+      },
+      { id: "grove", name: "Grove copy", appearance: "dark", colors: { canvas: "#000000" } },
+      { id: "empty", name: "Empty", appearance: "dark" },
+    ];
+    const published = publishedThemeDefinitions(themes);
+
+    expect(published.map((theme) => theme.id)).toEqual([
+      "islands-dark",
+      "nightfall",
+      "dawn",
+      "pair",
+    ]);
+    expect(sharedPublishedThemeDefinitions(themes)).toEqual(published);
+    for (const theme of published) {
+      expect(sharedSingleAppearanceOf(theme)).toEqual(singleAppearanceOf(theme));
+    }
+  });
+
+  it.each([
+    [
+      "a valid theme",
+      {
+        id: "nord",
+        label: "Nord",
+        appearance: "dark",
+        colors: { canvas: "#2e3440", text: "#eceff4" },
+        variants: { light: { canvas: "#eceff4" } },
+      },
+    ],
+    [
+      "a collection theme",
+      {
+        id: "nord",
+        label: "Nord",
+        appearance: "dark",
+        colors: { canvas: "#2e3440", text: "#eceff4" },
+        variants: { light: { canvas: "#eceff4" } },
+        collection: { id: "nord-pack", label: "Nord" },
+      },
+    ],
+    ["a missing label", { id: "nord", appearance: "dark", colors: { canvas: "#2e3440" } }],
+    [
+      "a reserved id",
+      { id: "grove", label: "Grove", appearance: "dark", colors: { canvas: "#2e3440" } },
+    ],
+    ["string colors", { id: "nord", label: "Nord", appearance: "dark", colors: "#2e3440" }],
+    ["null", null],
+    ["a string", "x"],
+  ])("parses %s like the web original", (_name, input) => {
+    expect(sharedParseStoredTheme(input)).toEqual(parseStoredTheme(input));
   });
 });
