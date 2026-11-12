@@ -1,6 +1,7 @@
 import { installPermissionUpdateNotice } from "./features/connection/permissionUpdateNotice";
 import { installComposerAttachmentUploads } from "./state/composer-attachment-uploads";
 import { installPreferencesSync } from "./state/preferences-sync";
+import { installMobileThemeRegistry } from "./state/theme-registry";
 import { installThreadOutboxDelivery } from "./state/threadOutboxDelivery";
 import * as Linking from "expo-linking";
 import * as SplashScreen from "expo-splash-screen";
@@ -192,6 +193,7 @@ const appServiceDisposers = [
   }),
   installAppearanceRuntime(),
   installPreferencesSync(),
+  installMobileThemeRegistry(),
   installSubscriptionUsageRefresh(),
   installPermissionUpdateNotice(),
   installThreadOutboxDelivery(),
