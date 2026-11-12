@@ -1,13 +1,32 @@
 import { describe, expect, it } from "@effect/vitest";
+import { T3_CODE_DARK_THEME_COLORS } from "@t3tools/shared/themePalettes";
 import { vi } from "vite-plus/test";
 
 import { DEFAULT_FOLLOW_UP_BEHAVIOR } from "../lib/followUpBehavior";
+import {
+  buildMobileThemeRegistry,
+  EMPTY_MOBILE_THEME_REGISTRY,
+  setRegisteredMobileThemes,
+} from "../lib/mobileThemeRegistry";
 import type { Preferences } from "../persistence/mobile-preferences";
 import {
   applyMobileProfileValues,
   mobileProfilePatch,
   readMobileProfileValues,
 } from "./client-profile.logic";
+
+const islandsDarkRegistry = buildMobileThemeRegistry({
+  editorThemes: [
+    {
+      id: "islands-dark",
+      label: "Islands Dark",
+      appearance: "dark",
+      colors: T3_CODE_DARK_THEME_COLORS,
+    },
+  ],
+  servers: [],
+  remembered: [],
+});
 
 describe("client profile mapping", () => {
   it("maps theme halves and never publishes material-you", () => {
@@ -44,6 +63,42 @@ describe("client profile mapping", () => {
         "light",
       ),
     ).toMatchObject({ lightThemeId: "grove", darkThemeId: "ocean", themeId: "grove" });
+  });
+
+  it("applies a registered theme for the appearance it has", () => {
+    setRegisteredMobileThemes(islandsDarkRegistry);
+    try {
+      expect(mobileProfilePatch({}, { themeDark: "islands-dark" }, "dark")).toMatchObject({
+        darkThemeId: "islands-dark",
+      });
+    } finally {
+      setRegisteredMobileThemes(EMPTY_MOBILE_THEME_REGISTRY);
+    }
+  });
+
+  it("skips a registered theme for an appearance it lacks", () => {
+    setRegisteredMobileThemes(islandsDarkRegistry);
+    try {
+      expect(mobileProfilePatch({}, { themeLight: "islands-dark" }, "dark")).not.toHaveProperty(
+        "lightThemeId",
+      );
+    } finally {
+      setRegisteredMobileThemes(EMPTY_MOBILE_THEME_REGISTRY);
+    }
+  });
+
+  it("applies a theme id once its theme is registered", () => {
+    try {
+      expect(mobileProfilePatch({}, { themeDark: "islands-dark" }, "dark")).not.toHaveProperty(
+        "darkThemeId",
+      );
+      setRegisteredMobileThemes(islandsDarkRegistry);
+      expect(mobileProfilePatch({}, { themeDark: "islands-dark" }, "dark")).toMatchObject({
+        darkThemeId: "islands-dark",
+      });
+    } finally {
+      setRegisteredMobileThemes(EMPTY_MOBILE_THEME_REGISTRY);
+    }
   });
 
   it("dual-writes the legacy grouping flag", () => {
