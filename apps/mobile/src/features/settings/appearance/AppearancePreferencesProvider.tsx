@@ -48,6 +48,7 @@ import {
 import {
   getRegisteredMobileThemes,
   subscribeRegisteredMobileThemes,
+  type MobileThemeRegistry,
 } from "../../../lib/mobileThemeRegistry";
 import {
   createMobileThemeRuntimeOperations,
@@ -116,9 +117,12 @@ const systemColorPalettesAtom = Atom.make((get): MaterialYouPalettes | null => {
   return initial;
 }).pipe(Atom.withLabel("mobile:system-color-palettes"));
 
+// The theme functions read the registry directly; the snapshot argument makes it an input of
+// the call, so the React Compiler recomputes when the registry changes.
 function resolveThemeVariablesByAppearance(
   themeIds: MobileThemeIds,
   palettes: MaterialYouPalettes | null,
+  _registry: MobileThemeRegistry,
 ): Readonly<Record<MobileThemeAppearance, MobileThemeVariables>> {
   const resolve = (appearance: MobileThemeAppearance) => {
     const base = getMobileThemeRuntimeVariables(themeIds[appearance], appearance, Platform.OS);
@@ -222,11 +226,14 @@ export function AppearancePreferencesProvider(props: { readonly children: ReactN
   const themeId = themeIds[themeAppearance];
   const systemColorsActive = themeId === "material-you" && isSystemColorsAvailable;
   const systemColorPalettes = useAtomValue(systemColorPalettesAtom);
-  // Theme functions read the registry directly; subscribing re-renders so they run again.
-  useSyncExternalStore(subscribeRegisteredMobileThemes, getRegisteredMobileThemes);
+  const registeredThemes = useSyncExternalStore(
+    subscribeRegisteredMobileThemes,
+    getRegisteredMobileThemes,
+  );
   const themeVariablesByAppearance = resolveThemeVariablesByAppearance(
     themeIds,
     systemColorPalettes,
+    registeredThemes,
   );
   const themeVariables = themeVariablesByAppearance[themeAppearance];
   const activeThemeName = getMobileUniwindThemeName(themeId, themeAppearance);
