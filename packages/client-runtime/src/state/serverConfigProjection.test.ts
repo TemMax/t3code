@@ -122,3 +122,34 @@ describe("applyServerConfigProjection clientProfile", () => {
     expect(configOf(cleared).clientProfile).toEqual({});
   });
 });
+
+describe("applyServerConfigProjection environmentThemes", () => {
+  it("keeps an empty theme list as the server's answer", () => {
+    const themesUpdated = (themes: unknown[]) =>
+      ({
+        version: 1,
+        type: "environmentThemesUpdated",
+        payload: { themes },
+      }) as unknown as ServerConfigStreamEvent;
+    const snapshotEvent = {
+      version: 1,
+      type: "snapshot",
+      config: {},
+    } as unknown as ServerConfigStreamEvent;
+    const configOf = (projection: ReturnType<typeof applyServerConfigProjection>) =>
+      Option.getOrThrow(projection).config;
+
+    let current = applyServerConfigProjection(Option.none(), snapshotEvent);
+    expect(configOf(current).environmentThemes).toBeUndefined();
+
+    const theme = { id: "night" };
+    current = applyServerConfigProjection(current, themesUpdated([theme]));
+    expect(configOf(current).environmentThemes).toEqual([theme]);
+
+    current = applyServerConfigProjection(current, themesUpdated([]));
+    expect(configOf(current).environmentThemes).toEqual([]);
+
+    current = applyServerConfigProjection(current, snapshotEvent);
+    expect(configOf(current).environmentThemes).toEqual([]);
+  });
+});
