@@ -138,7 +138,7 @@ const listeners = new Set<() => void>();
 
 export function setRegisteredMobileThemes(registry: MobileThemeRegistry): void {
   registeredThemes = registry;
-  for (const listener of [...listeners]) listener();
+  for (const listener of listeners) listener();
 }
 
 export function getRegisteredMobileThemes(): MobileThemeRegistry {

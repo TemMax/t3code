@@ -1,6 +1,6 @@
 import { EnvironmentId } from "@t3tools/contracts";
 import { T3_CODE_DARK_THEME_COLORS, type ThemeDefinition } from "@t3tools/shared/themePalettes";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vite-plus/test";
 
 import {
   buildMobileThemeRegistry,
