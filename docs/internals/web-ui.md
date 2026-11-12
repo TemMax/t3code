@@ -20,6 +20,9 @@ Style with Tailwind classes in the component that renders the element.
 - No `style={{ ... }}` or inline `<style>` for static values a class covers. Values computed at
   runtime are fine.
 - Theme-only rules use `@variant dark` and `@variant light`, not `.dark` selectors.
+- `packages/shared/src/themeConversion.ts` copies the palette conversion in
+  `apps/web/src/themePalette.ts` for the mobile app. Change both together: the parity test in
+  `themePalette.test.ts` fails when they drift.
 
 ## Composition
 

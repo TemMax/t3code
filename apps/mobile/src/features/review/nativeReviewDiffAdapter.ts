@@ -5,6 +5,7 @@ import { pipe } from "effect/Function";
 import type { ResolvedMobileCodeSurface } from "../../lib/appearancePreferences";
 import { resolveHighlightLanguage } from "../../lib/highlightLanguage";
 import { type MobileThemeId, type MobileThemeVariables } from "../../lib/mobileTheme";
+import { getRegisteredMobileThemes } from "../../lib/mobileThemeRegistry";
 import { getMobileTerminalTheme, type TerminalAppearanceScheme } from "../terminal/terminalTheme";
 import { computeWordAltDiffRanges } from "./reviewWordDiffs";
 import {
@@ -175,7 +176,8 @@ export function createNativeReviewDiffTheme(
   themeId: MobileThemeId,
   appTheme: MobileThemeVariables,
 ): NativeReviewDiffTheme {
-  const terminalTheme = getMobileTerminalTheme(themeId, scheme);
+  // Only the ANSI palette is read here, and it does not depend on the theme.
+  const terminalTheme = getMobileTerminalTheme(themeId, scheme, getRegisteredMobileThemes());
   const [, terminalRed] = terminalTheme.palette;
   // Swift and Android disagree on alpha-byte order; flatten to shared opaque #RRGGBB.
   const screen = opaqueNativeHexColor(

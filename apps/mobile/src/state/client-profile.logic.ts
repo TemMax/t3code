@@ -3,6 +3,10 @@ import * as Schema from "effect/Schema";
 
 import { DEFAULT_FOLLOW_UP_BEHAVIOR } from "../lib/followUpBehavior";
 import {
+  getRegisteredMobileTheme,
+  isUsableMobileThemeForAppearance,
+} from "../lib/mobileThemeRegistry";
+import {
   createMobileThemeSelectionPatch,
   MOBILE_THEME_IDS,
   normalizeMobileThemeMode,
@@ -20,11 +24,15 @@ import {
 const isToolCallVisibility = Schema.is(ToolCallVisibility);
 const isGroupingMode = Schema.is(SidebarProjectGroupingMode);
 
-function syncableThemeId(value: unknown): MobileThemeId | undefined {
-  return typeof value === "string" &&
-    value !== "material-you" &&
-    (MOBILE_THEME_IDS as readonly string[]).includes(value)
-    ? (value as MobileThemeId)
+function syncableThemeId(
+  value: unknown,
+  appearance: MobileThemeAppearance,
+): MobileThemeId | undefined {
+  if (typeof value !== "string" || value === "material-you") return undefined;
+  if ((MOBILE_THEME_IDS as readonly string[]).includes(value)) return value;
+  const registered = getRegisteredMobileTheme(value);
+  return registered !== null && isUsableMobileThemeForAppearance(registered, appearance)
+    ? value
     : undefined;
 }
 
@@ -56,8 +64,8 @@ export function mobileProfilePatch(
       : undefined;
   if (mode !== undefined) patch.themeMode = mode;
 
-  const light = syncableThemeId(values.themeLight);
-  const dark = syncableThemeId(values.themeDark);
+  const light = syncableThemeId(values.themeLight, "light");
+  const dark = syncableThemeId(values.themeDark, "dark");
   if (light !== undefined || dark !== undefined) {
     const effectiveMode = mode ?? normalizeMobileThemeMode(preferences.themeMode);
     const active: MobileThemeAppearance =

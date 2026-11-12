@@ -1,4 +1,11 @@
-import { createContext, startTransition, use, useMemo, type ReactNode } from "react";
+import {
+  createContext,
+  startTransition,
+  use,
+  useMemo,
+  useSyncExternalStore,
+  type ReactNode,
+} from "react";
 import { AppState, Appearance, Platform, useColorScheme } from "react-native";
 
 import { manufacturer } from "expo-device";
@@ -39,6 +46,11 @@ import {
   type MobileThemeMode,
 } from "../../../lib/mobileTheme";
 import {
+  getRegisteredMobileThemes,
+  subscribeRegisteredMobileThemes,
+  type MobileThemeRegistry,
+} from "../../../lib/mobileThemeRegistry";
+import {
   createMobileThemeRuntimeOperations,
   getMobileUniwindThemeName,
   type MobileThemeRuntimeState,
@@ -58,6 +70,8 @@ interface AppearancePreferencesContextValue {
   readonly themeVariablesByAppearance: Readonly<
     Record<MobileThemeAppearance, MobileThemeVariables>
   >;
+  /** Pass to theme color functions called during render, so they follow registry changes. */
+  readonly registeredThemes: MobileThemeRegistry;
   readonly systemColorPalettes: ReturnType<typeof readSystemColorPalettes>;
   readonly isReady: boolean;
   readonly setThemeIdForAppearance: (
@@ -108,9 +122,15 @@ const systemColorPalettesAtom = Atom.make((get): MaterialYouPalettes | null => {
 function resolveThemeVariablesByAppearance(
   themeIds: MobileThemeIds,
   palettes: MaterialYouPalettes | null,
+  registry: MobileThemeRegistry,
 ): Readonly<Record<MobileThemeAppearance, MobileThemeVariables>> {
   const resolve = (appearance: MobileThemeAppearance) => {
-    const base = getMobileThemeRuntimeVariables(themeIds[appearance], appearance, Platform.OS);
+    const base = getMobileThemeRuntimeVariables(
+      themeIds[appearance],
+      appearance,
+      Platform.OS,
+      registry,
+    );
     return themeIds[appearance] === "material-you" && palettes
       ? materialYouPaletteToMobileThemeVariables(palettes[appearance], appearance, base)
       : base;
@@ -211,9 +231,14 @@ export function AppearancePreferencesProvider(props: { readonly children: ReactN
   const themeId = themeIds[themeAppearance];
   const systemColorsActive = themeId === "material-you" && isSystemColorsAvailable;
   const systemColorPalettes = useAtomValue(systemColorPalettesAtom);
+  const registeredThemes = useSyncExternalStore(
+    subscribeRegisteredMobileThemes,
+    getRegisteredMobileThemes,
+  );
   const themeVariablesByAppearance = resolveThemeVariablesByAppearance(
     themeIds,
     systemColorPalettes,
+    registeredThemes,
   );
   const themeVariables = themeVariablesByAppearance[themeAppearance];
   const activeThemeName = getMobileUniwindThemeName(themeId, themeAppearance);
@@ -306,6 +331,7 @@ export function AppearancePreferencesProvider(props: { readonly children: ReactN
       systemColorsActive,
       themeVariables,
       themeVariablesByAppearance,
+      registeredThemes,
       systemColorPalettes,
       isReady,
       setThemeIdForAppearance,
@@ -329,6 +355,7 @@ export function AppearancePreferencesProvider(props: { readonly children: ReactN
       systemColorsActive,
       themeVariables,
       themeVariablesByAppearance,
+      registeredThemes,
       systemColorPalettes,
       isReady,
       setThemeIdForAppearance,

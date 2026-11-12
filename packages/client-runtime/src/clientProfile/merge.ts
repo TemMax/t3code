@@ -114,8 +114,20 @@ function isCustomThemeKey(base: string): boolean {
   return base.startsWith(CUSTOM_THEME_KEY_PREFIX);
 }
 
+// The phone cannot edit editor themes, so its copy may be stale: it only receives and relays them.
+function isReceiveOnlyKey(base: string, surface: ClientProfileSurface): boolean {
+  return surface.kind === "mobile" && isCustomThemeKey(base);
+}
+
 function ownLocalBases(surface: ClientProfileSurface, local: ClientProfileLocalRead): string[] {
   return Object.keys(local.values).filter((base) => isClientProfileBaseKey(base, surface));
+}
+
+function publishableLocalBases(
+  surface: ClientProfileSurface,
+  local: ClientProfileLocalRead,
+): string[] {
+  return ownLocalBases(surface, local).filter((base) => !isReceiveOnlyKey(base, surface));
 }
 
 function highestServerStamp(servers: ReadonlyArray<ClientProfileServerDocument>, floor: number) {
@@ -159,6 +171,8 @@ export function planClientProfileSync(input: {
     ownBase[key] = base;
     if (tracked !== undefined && tracked.hash === hash) {
       own[key] = { value, changedAt: tracked.changedAt, by: tracked.by };
+    } else if (isReceiveOnlyKey(base, surface)) {
+      own[key] = { value, changedAt: UNPUBLISHED_CHANGED_AT, by: deviceId };
     } else if (tracked !== undefined || isCustomThemeKey(base)) {
       recordChange(key, value, hash);
     } else {
@@ -169,7 +183,7 @@ export function planClientProfileSync(input: {
 
   for (const [key, tracked] of Object.entries(sidecar.entries)) {
     const base = clientProfileBaseName(key, surface);
-    if (base === null || base in local.values) continue;
+    if (base === null || base in local.values || isReceiveOnlyKey(base, surface)) continue;
     if (!local.completePrefixes.some((prefix) => base.startsWith(prefix))) continue;
     ownBase[key] = base;
     if (tracked.hash === NULL_HASH) {
@@ -267,7 +281,10 @@ export function needsClientProfileChoice(
   servers: ReadonlyArray<ClientProfileServerDocument>,
 ): boolean {
   return servers.some((server) =>
-    Object.keys(server.document).some((key) => clientProfileBaseName(key, surface) !== null),
+    Object.keys(server.document).some((key) => {
+      const base = clientProfileBaseName(key, surface);
+      return base !== null && !isReceiveOnlyKey(base, surface);
+    }),
   );
 }
 
@@ -302,7 +319,7 @@ function seedEntries(
 ): ClientProfileSidecar {
   const { surface, sidecar } = input;
   const entries: Record<string, ClientProfileSidecarEntry> = { ...sidecar.entries };
-  for (const base of ownLocalBases(surface, input.local)) {
+  for (const base of publishableLocalBases(surface, input.local)) {
     const key = clientProfileKeyName(base, surface);
     const hash = hashClientProfileValue(input.local.values[base]);
     const atDefault =
@@ -328,7 +345,7 @@ export function claimThisDeviceClientProfileSidecar(input: {
     highestServerStamp(input.servers, sidecar.highestSeen),
   );
   const entries: Record<string, ClientProfileSidecarEntry> = { ...sidecar.entries };
-  for (const base of ownLocalBases(surface, input.local)) {
+  for (const base of publishableLocalBases(surface, input.local)) {
     entries[clientProfileKeyName(base, surface)] = {
       changedAt: stamp,
       by: sidecar.deviceId,

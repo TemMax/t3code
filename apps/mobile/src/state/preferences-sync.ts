@@ -1,5 +1,9 @@
-import { isClientProfileBaseKey } from "@t3tools/client-runtime/client-profile/keys";
+import {
+  CUSTOM_THEME_KEY_PREFIX,
+  isClientProfileBaseKey,
+} from "@t3tools/client-runtime/client-profile/keys";
 import { emptyClientProfileSidecar } from "@t3tools/client-runtime/client-profile/merge";
+import { combineClientProfileSources } from "@t3tools/client-runtime/client-profile/source";
 import {
   createClientProfileSync,
   type ClientProfileEnvironment,
@@ -11,10 +15,12 @@ import { Atom } from "effect/reactivity";
 import { Appearance } from "react-native";
 
 import * as Dialog from "../components/ui/Dialog";
+import { subscribeRegisteredMobileThemes } from "../lib/mobileThemeRegistry";
 import { uuidv4 } from "../lib/uuid";
 import type { Preferences } from "../persistence/mobile-preferences";
 import { appAtomRegistry } from "./atom-registry";
 import { applyMobileProfileValues, readMobileProfileValues } from "./client-profile.logic";
+import { createMobileEditorThemeSource } from "./editor-theme-source";
 import { mobilePreferencesAtom, updateMobilePreferencesAtom } from "./preferences";
 import { environmentPresentations } from "./presentation";
 import { serverEnvironment } from "./server";
@@ -72,25 +78,43 @@ export const preferencesSync = createClientProfileSync({
     );
     if (result._tag === "Failure") throw squashAtomCommandFailure(result);
   },
-  source: {
-    owns: (base) => isClientProfileBaseKey(base, { kind: "mobile" }),
-    ready: async () => {
-      await preferencesReady();
-    },
-    read: () => ({
-      values: readMobileProfileValues(loadedPreferences() ?? {}),
-      completePrefixes: [],
-    }),
-    defaults: () => readMobileProfileValues({}),
-    apply: async (values) =>
-      applyMobileProfileValues({
-        preferences: loadedPreferences() ?? {},
-        values,
-        systemAppearance: Appearance.getColorScheme() === "dark" ? "dark" : "light",
-        write: writePreferences,
+  source: combineClientProfileSources([
+    {
+      owns: (base) =>
+        isClientProfileBaseKey(base, { kind: "mobile" }) &&
+        !base.startsWith(CUSTOM_THEME_KEY_PREFIX),
+      ready: async () => {
+        await preferencesReady();
+      },
+      read: () => ({
+        values: readMobileProfileValues(loadedPreferences() ?? {}),
+        completePrefixes: [],
       }),
-    subscribe: (onChange) => appAtomRegistry.subscribe(mobilePreferencesAtom, onChange),
-  },
+      defaults: () => readMobileProfileValues({}),
+      apply: async (values) =>
+        applyMobileProfileValues({
+          preferences: loadedPreferences() ?? {},
+          values,
+          systemAppearance: Appearance.getColorScheme() === "dark" ? "dark" : "light",
+          write: writePreferences,
+        }),
+      subscribe: (onChange) => {
+        const unsubscribePreferences = appAtomRegistry.subscribe(mobilePreferencesAtom, onChange);
+        const unsubscribeThemes = subscribeRegisteredMobileThemes(onChange);
+        return () => {
+          unsubscribePreferences();
+          unsubscribeThemes();
+        };
+      },
+    },
+    createMobileEditorThemeSource({
+      load: () => loadedPreferences() ?? null,
+      write: (editorThemes) => {
+        writePreferences({ editorThemes });
+      },
+      subscribe: (onChange) => appAtomRegistry.subscribe(mobilePreferencesAtom, onChange),
+    }),
+  ]),
   sidecarStore: {
     load: async () => {
       const stored = (await preferencesReady()).clientProfileSync;

@@ -11,11 +11,12 @@ Use **Change appearance** in the command palette to choose System, Light, or Dar
 the theme. **Cmd+Option+Shift+A** on macOS or **Ctrl+Alt+Shift+A** on Windows/Linux cycles through
 those modes. Customize these shortcuts under **Settings → Keybindings**.
 
-On mobile, open **Settings → Appearance**. Mobile has its own themes and text,
-code, and terminal preferences. With [preferences sync](./preferences-sync.md) on, mobile
+On mobile, open **Settings → Appearance**. Mobile has its own text, code, and terminal
+preferences. Its theme list also shows the themes each connected environment publishes, and
+keeps them so they still work while that environment is offline. With
+[preferences sync](./preferences-sync.md) on, it also lists your custom themes, and mobile
 follows the theme choices synced from your other devices, including a server's default theme
-once a computer has adopted it, when those are built-in themes. Themes an environment publishes
-stay on computers.
+once a computer has adopted it.
 
 On Android 12 or newer, choose the **Material You** theme in Appearance to use colors from
 your wallpaper. Selecting another theme replaces those colors. Like other themes, Material You
@@ -62,7 +63,8 @@ change. Export your theme as JSON to share it.
 Environment themes and defaults come from the server serving your web app or the desktop app's
 main local environment. With the desktop app's local environment off, they come from the
 [background service](./background-service.md) on the same machine while the app is connected to
-it. app.t3.codes and other connections do not use them.
+it. app.t3.codes and other connections do not use them. Mobile is different: it shows the published themes of
+every environment it connects to.
 
 Select a published theme in **Settings → Appearance** to follow its palette as the server updates
 it. **Duplicate** makes an independent copy you can edit. A saved custom theme with the same ID

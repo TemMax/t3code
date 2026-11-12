@@ -23,7 +23,8 @@ import type { AndroidNavigationStyle } from "../lib/androidNavigationStyle";
 import type { ComposerEnterBehavior } from "../lib/composerEnterBehavior";
 import type { FollowUpBehavior } from "../lib/followUpBehavior";
 import { isMicrophoneKind, type MicrophoneEntry } from "../lib/microphonePriority";
-import { MOBILE_THEME_IDS, type MobileThemeId, type MobileThemeMode } from "../lib/mobileTheme";
+import { parseStoredTheme } from "@t3tools/shared/themeConversion";
+import type { MobileThemeId, MobileThemeMode } from "../lib/mobileTheme";
 import * as MobileDatabase from "./mobile-database";
 import * as MobileSecureStorage from "./mobile-secure-storage";
 import { MobileStorageDecodeError, MobileStorageEncodeError } from "./mobile-storage";
@@ -101,6 +102,8 @@ export interface Preferences {
   readonly themeId?: MobileThemeId;
   readonly lightThemeId?: MobileThemeId;
   readonly darkThemeId?: MobileThemeId;
+  /** Synced editor themes by id, each stored as received. */
+  readonly editorThemes?: Readonly<Record<string, unknown>>;
   readonly themeMode?: MobileThemeMode;
   readonly androidNavigationStyle?: AndroidNavigationStyle;
   readonly baseFontSize?: number;
@@ -179,6 +182,9 @@ export class MobilePreferencesStore extends Context.Service<
 const isToolCallVisibility = Schema.is(ToolCallVisibility);
 const isClientProfileSidecar = Schema.is(ClientProfileSidecarSchema);
 
+const isStoredThemeId = (value: unknown): value is string =>
+  typeof value === "string" && value.length > 0 && value.length <= 128;
+
 export function sanitizePreferences(parsed: Preferences): Preferences {
   const preferences: {
     navigationTabOrder?: readonly string[];
@@ -189,6 +195,7 @@ export function sanitizePreferences(parsed: Preferences): Preferences {
     themeId?: MobileThemeId;
     lightThemeId?: MobileThemeId;
     darkThemeId?: MobileThemeId;
+    editorThemes?: Readonly<Record<string, unknown>>;
     themeMode?: MobileThemeMode;
     androidNavigationStyle?: AndroidNavigationStyle;
     baseFontSize?: number;
@@ -247,23 +254,24 @@ export function sanitizePreferences(parsed: Preferences): Preferences {
   if (typeof parsed.liveActivitiesEnabled === "boolean") {
     preferences.liveActivitiesEnabled = parsed.liveActivitiesEnabled;
   }
-  if (
-    typeof parsed.themeId === "string" &&
-    (MOBILE_THEME_IDS as readonly string[]).includes(parsed.themeId)
-  ) {
-    preferences.themeId = parsed.themeId as MobileThemeId;
-  }
-  if (
-    typeof parsed.lightThemeId === "string" &&
-    (MOBILE_THEME_IDS as readonly string[]).includes(parsed.lightThemeId)
-  ) {
+  if (isStoredThemeId(parsed.themeId)) preferences.themeId = parsed.themeId as MobileThemeId;
+  if (isStoredThemeId(parsed.lightThemeId)) {
     preferences.lightThemeId = parsed.lightThemeId as MobileThemeId;
   }
-  if (
-    typeof parsed.darkThemeId === "string" &&
-    (MOBILE_THEME_IDS as readonly string[]).includes(parsed.darkThemeId)
-  ) {
+  if (isStoredThemeId(parsed.darkThemeId)) {
     preferences.darkThemeId = parsed.darkThemeId as MobileThemeId;
+  }
+  if (
+    typeof parsed.editorThemes === "object" &&
+    parsed.editorThemes !== null &&
+    !Array.isArray(parsed.editorThemes)
+  ) {
+    const editorThemes = Object.fromEntries(
+      Object.entries(parsed.editorThemes).filter(
+        ([id, theme]) => parseStoredTheme(theme)?.id === id,
+      ),
+    );
+    if (Object.keys(editorThemes).length > 0) preferences.editorThemes = editorThemes;
   }
   if (
     parsed.themeMode === "system" ||

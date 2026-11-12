@@ -12,13 +12,21 @@ import {
   readDefaultMobileThemeVariables,
   readGeneratedMobileThemeVariables,
 } from "./mobileTheme.test-support";
+import {
+  EMPTY_MOBILE_THEME_REGISTRY,
+  setRegisteredMobileThemes,
+  type MobileRegisteredTheme,
+  type MobileThemeRegistry,
+} from "./mobileThemeRegistry";
 import { getMobileThemeRuntimeVariables } from "./mobileThemeVariables";
 
 import {
   createMobileThemeSelectionPatch,
   createMobileThemeVariables,
   DEFAULT_MOBILE_THEME_ID,
+  drawnMobileThemeId,
   flattenThemeColor,
+  getMobileThemeColors,
   getMobileThemeVariables,
   resolveMobileThemeIds,
   themeColorWithAlpha,
@@ -233,8 +241,84 @@ describe("mobile themes", () => {
       resolveMobileThemeIds({ themeId: "grove", lightThemeId: "iris", darkThemeId: "ocean" }),
     ).toEqual({ light: "iris", dark: "ocean" });
     expect(resolveMobileThemeIds({ themeId: "grove", lightThemeId: "missing" })).toEqual({
+      light: "missing",
+      dark: "grove",
+    });
+    expect(resolveMobileThemeIds({ themeId: "grove", lightThemeId: "" })).toEqual({
       light: DEFAULT_MOBILE_THEME_ID,
       dark: "grove",
+    });
+  });
+
+  it("keeps a stored theme id that is not built in", () => {
+    expect(resolveMobileThemeIds({ darkThemeId: "islands-dark" }).dark).toBe("islands-dark");
+    expect(resolveMobileThemeIds({ darkThemeId: "" }).dark).toBe(DEFAULT_MOBILE_THEME_ID);
+  });
+
+  describe("registered themes", () => {
+    const colors = {
+      ...T3_CODE_DARK_THEME_COLORS,
+      canvas: "#101820",
+      surface: "#182430",
+      text: "#f2f5f7",
+      muted: "#223344",
+      accent: "#ff7a00",
+      messageAction: "#ff7a00",
+      messageActionForeground: "#101820",
+    };
+    const registered: MobileRegisteredTheme = {
+      id: "islands-dark",
+      definition: {
+        id: "islands-dark",
+        label: "Islands Dark",
+        appearance: "dark",
+        colors,
+      },
+      origin: "editor",
+      environmentId: null,
+    };
+
+    const registry: MobileThemeRegistry = {
+      themes: [registered],
+      byId: new Map([[registered.id, registered]]),
+    };
+
+    function withRegisteredTheme(run: () => void) {
+      setRegisteredMobileThemes(registry);
+      try {
+        run();
+      } finally {
+        setRegisteredMobileThemes(EMPTY_MOBILE_THEME_REGISTRY);
+      }
+    }
+
+    it("draws a registered theme with the named built-in color mapping", () => {
+      withRegisteredTheme(() => {
+        expect(getMobileThemeVariables("islands-dark", "dark")).toEqual(
+          createMobileThemeVariables(colors, "dark", colors.muted, [
+            colors.messageAction,
+            colors.messageActionForeground,
+          ]),
+        );
+      });
+    });
+
+    it("falls back to the standard palette for an unknown id", () => {
+      expect(getMobileThemeColors("missing", "dark")).toEqual(T3_CODE_DARK_THEME_COLORS);
+      withRegisteredTheme(() => {
+        expect(getMobileThemeColors("islands-dark", "dark")).toEqual(colors);
+        expect(getMobileThemeColors("islands-dark", "light")).toEqual(T3_CODE_LIGHT_THEME_COLORS);
+      });
+      expect(getMobileThemeColors("islands-dark", "dark", registry)).toEqual(colors);
+    });
+
+    it("draws a stored theme only while the given registry holds it for that appearance", () => {
+      expect(drawnMobileThemeId("grove", "dark", EMPTY_MOBILE_THEME_REGISTRY)).toBe("grove");
+      expect(drawnMobileThemeId("islands-dark", "dark", registry)).toBe("islands-dark");
+      expect(drawnMobileThemeId("islands-dark", "light", registry)).toBe(DEFAULT_MOBILE_THEME_ID);
+      expect(drawnMobileThemeId("islands-dark", "dark", EMPTY_MOBILE_THEME_REGISTRY)).toBe(
+        DEFAULT_MOBILE_THEME_ID,
+      );
     });
   });
 

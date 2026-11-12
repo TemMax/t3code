@@ -14,29 +14,37 @@ import {
   STANDARD_THEME_PREVIEW_COLORS,
   type ThemePreviewColors,
 } from "@t3tools/shared/themePreview";
+import { getRegisteredMobileThemes, type MobileThemeRegistry } from "./mobileThemeRegistry.ts";
 
 export const DEFAULT_MOBILE_THEME_ID = MOBILE_DEFAULT_THEME_ID;
 export const MOBILE_THEME_IDS = [...SHARED_MOBILE_THEME_IDS, "material-you"] as const;
-export type MobileThemeId = SharedMobileThemeId | "material-you";
+export type BuiltInMobileThemeId = SharedMobileThemeId | "material-you";
+export type MobileThemeId = string;
 export type MobileThemeAppearance = ThemeAppearance;
 export type MobileThemeMode = MobileThemeAppearance | "system";
 export type MobileThemeIds = Readonly<Record<MobileThemeAppearance, MobileThemeId>>;
 
 export const MOBILE_THEME_OPTIONS: ReadonlyArray<{
-  readonly id: MobileThemeId;
+  readonly id: BuiltInMobileThemeId;
   readonly label: string;
 }> = [
   { id: DEFAULT_MOBILE_THEME_ID, label: "T3 Code" },
   { id: "material-you", label: "Material You" },
-  ...BUILT_IN_THEMES.map((theme) => ({ id: theme.id as MobileThemeId, label: theme.label })),
+  ...BUILT_IN_THEMES.map((theme) => ({ id: theme.id as BuiltInMobileThemeId, label: theme.label })),
 ];
 
 export type MobileThemeVariable = keyof ReturnType<typeof createMobileThemeVariables>;
 export type MobileThemeVariables = Readonly<Record<MobileThemeVariable, string>>;
 
+export function isBuiltInMobileThemeId(id: string): id is BuiltInMobileThemeId {
+  return (MOBILE_THEME_IDS as readonly string[]).includes(id);
+}
+
+const MAX_MOBILE_THEME_ID_LENGTH = 128;
+
 function normalizeMobileThemeId(value: unknown): MobileThemeId {
-  return typeof value === "string" && (MOBILE_THEME_IDS as readonly string[]).includes(value)
-    ? (value as MobileThemeId)
+  return typeof value === "string" && value.length > 0 && value.length <= MAX_MOBILE_THEME_ID_LENGTH
+    ? value
     : DEFAULT_MOBILE_THEME_ID;
 }
 
@@ -448,23 +456,56 @@ export function createMobileThemeVariables(
   };
 }
 
-export function getMobileThemeColors(
-  themeId: SharedMobileThemeId,
+// Render code passes the registry snapshot it subscribed to: the React Compiler memoizes on
+// arguments, so a theme read from the module snapshot inside a component would go stale.
+export function getRegisteredThemeColors(
+  themeId: MobileThemeId,
   appearance: MobileThemeAppearance,
+  registry: MobileThemeRegistry = getRegisteredMobileThemes(),
+): ThemeColors | null {
+  if (isBuiltInMobileThemeId(themeId)) return null;
+  const definition = registry.byId.get(themeId)?.definition;
+  return definition ? getThemeColorsForAppearance(definition, appearance) : null;
+}
+
+/** The theme drawn for an appearance: a stored id whose theme is gone draws the standard one. */
+export function drawnMobileThemeId(
+  themeId: MobileThemeId,
+  appearance: MobileThemeAppearance,
+  registry: MobileThemeRegistry = getRegisteredMobileThemes(),
+): MobileThemeId {
+  return isBuiltInMobileThemeId(themeId) ||
+    getRegisteredThemeColors(themeId, appearance, registry) !== null
+    ? themeId
+    : DEFAULT_MOBILE_THEME_ID;
+}
+
+export function getMobileThemeColors(
+  themeId: MobileThemeId,
+  appearance: MobileThemeAppearance,
+  registry: MobileThemeRegistry = getRegisteredMobileThemes(),
 ): ThemeColors {
   if (themeId === DEFAULT_MOBILE_THEME_ID) {
     return appearance === "dark" ? T3_CODE_DARK_THEME_COLORS : T3_CODE_LIGHT_THEME_COLORS;
+  }
+  if (!isBuiltInMobileThemeId(themeId)) {
+    return (
+      getRegisteredThemeColors(themeId, appearance, registry) ??
+      (appearance === "dark" ? T3_CODE_DARK_THEME_COLORS : T3_CODE_LIGHT_THEME_COLORS)
+    );
   }
   const theme = BUILT_IN_THEMES.find((candidate) => candidate.id === themeId) ?? T3_CHAT_THEME;
   return getThemeColorsForAppearance(theme, appearance) ?? theme.colors;
 }
 
 export function getMobileThemeVariables(
-  themeId: SharedMobileThemeId,
+  rawThemeId: MobileThemeId,
   appearance: MobileThemeAppearance,
   overrides: Partial<MobileThemeVariables> | null = null,
+  registry: MobileThemeRegistry = getRegisteredMobileThemes(),
 ): MobileThemeVariables {
-  const colors = getMobileThemeColors(themeId, appearance);
+  const themeId = drawnMobileThemeId(rawThemeId, appearance, registry);
+  const colors = getMobileThemeColors(themeId, appearance, registry);
   const groupedCard =
     themeId === DEFAULT_MOBILE_THEME_ID
       ? appearance === "light"
@@ -505,11 +546,16 @@ export function getMobileThemeVariables(
 export function getMobileThemePreviewColors(
   themeId: MobileThemeId,
   appearance: MobileThemeAppearance,
+  registry: MobileThemeRegistry = getRegisteredMobileThemes(),
 ): ThemePreviewColors {
   if (themeId === DEFAULT_MOBILE_THEME_ID || themeId === "material-you")
     return STANDARD_THEME_PREVIEW_COLORS[appearance];
+  const registeredColors = getRegisteredThemeColors(themeId, appearance, registry);
+  if (!registeredColors && !isBuiltInMobileThemeId(themeId)) {
+    return STANDARD_THEME_PREVIEW_COLORS[appearance];
+  }
   const theme = BUILT_IN_THEMES.find((candidate) => candidate.id === themeId) ?? T3_CHAT_THEME;
-  const colors = getThemeColorsForAppearance(theme, appearance) ?? theme.colors;
+  const colors = registeredColors ?? getThemeColorsForAppearance(theme, appearance) ?? theme.colors;
   return {
     canvas: themeColorToNativeColor(colors.canvas),
     accent: themeColorToNativeColor(colors.accent),

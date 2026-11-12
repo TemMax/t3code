@@ -1,6 +1,7 @@
 import defaultThemeVariables from "../../generated-uniwind-default-theme-variables.json";
 import {
   DEFAULT_MOBILE_THEME_ID,
+  drawnMobileThemeId,
   flattenThemeColor,
   getMobileThemeVariables,
   themeColorWithAlpha,
@@ -9,6 +10,7 @@ import {
   type MobileThemeId,
   type MobileThemeVariables,
 } from "./mobileTheme";
+import { getRegisteredMobileThemes, type MobileThemeRegistry } from "./mobileThemeRegistry";
 
 const defaults = defaultThemeVariables as Readonly<
   Record<MobileThemeAppearance, MobileThemeVariables>
@@ -46,19 +48,23 @@ export function getMobileThemeRuntimeVariables(
   themeId: MobileThemeId,
   appearance: MobileThemeAppearance,
   platform: string,
+  registry: MobileThemeRegistry = getRegisteredMobileThemes(),
 ): MobileThemeVariables {
-  return withVisibleSelection(platformThemeVariables(themeId, appearance, platform));
+  return withVisibleSelection(platformThemeVariables(themeId, appearance, platform, registry));
 }
 
 function platformThemeVariables(
   themeId: MobileThemeId,
   appearance: MobileThemeAppearance,
   platform: string,
+  registry: MobileThemeRegistry,
 ): MobileThemeVariables {
-  const usesDefaultPalette = themeId === DEFAULT_MOBILE_THEME_ID || themeId === "material-you";
+  const usesDefaultPalette =
+    themeId === "material-you" ||
+    drawnMobileThemeId(themeId, appearance, registry) === DEFAULT_MOBILE_THEME_ID;
   const variables = usesDefaultPalette
     ? defaults[appearance]
-    : getMobileThemeVariables(themeId, appearance);
+    : getMobileThemeVariables(themeId, appearance, null, registry);
   const frame = themeColorWithAlpha(
     variables[usesDefaultPalette ? "--color-row-hover" : "--color-drawer"],
     1,
