@@ -1,4 +1,11 @@
-import { createContext, startTransition, use, useMemo, type ReactNode } from "react";
+import {
+  createContext,
+  startTransition,
+  use,
+  useMemo,
+  useSyncExternalStore,
+  type ReactNode,
+} from "react";
 import { AppState, Appearance, Platform, useColorScheme } from "react-native";
 
 import { manufacturer } from "expo-device";
@@ -38,6 +45,10 @@ import {
   type MobileThemeIds,
   type MobileThemeMode,
 } from "../../../lib/mobileTheme";
+import {
+  getRegisteredMobileThemes,
+  subscribeRegisteredMobileThemes,
+} from "../../../lib/mobileThemeRegistry";
 import {
   createMobileThemeRuntimeOperations,
   getMobileUniwindThemeName,
@@ -211,9 +222,14 @@ export function AppearancePreferencesProvider(props: { readonly children: ReactN
   const themeId = themeIds[themeAppearance];
   const systemColorsActive = themeId === "material-you" && isSystemColorsAvailable;
   const systemColorPalettes = useAtomValue(systemColorPalettesAtom);
-  const themeVariablesByAppearance = resolveThemeVariablesByAppearance(
-    themeIds,
-    systemColorPalettes,
+  const registeredThemes = useSyncExternalStore(
+    subscribeRegisteredMobileThemes,
+    getRegisteredMobileThemes,
+  );
+  const themeVariablesByAppearance = useMemo(
+    () => resolveThemeVariablesByAppearance(themeIds, systemColorPalettes),
+    // The registry is read through the theme functions, so a new snapshot must recompute.
+    [themeIds, systemColorPalettes, registeredThemes],
   );
   const themeVariables = themeVariablesByAppearance[themeAppearance];
   const activeThemeName = getMobileUniwindThemeName(themeId, themeAppearance);

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   createMobileThemeRuntimeOperations,
+  getMobileUniwindThemeName,
   type MobileThemeRuntimeState,
 } from "./mobileThemeRuntime";
 
@@ -19,5 +20,10 @@ describe("mobileThemeRuntime", () => {
     });
 
     expect(operations).toEqual([]);
+  });
+
+  it("uses the base Uniwind theme for themes that are not built in", () => {
+    expect(getMobileUniwindThemeName("islands-dark", "dark")).toBe("dark");
+    expect(getMobileUniwindThemeName("grove", "dark")).toBe("grove-dark");
   });
 });
