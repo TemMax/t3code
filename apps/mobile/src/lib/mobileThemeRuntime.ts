@@ -1,11 +1,14 @@
 import { resolveTextScaleVariables } from "./appearancePreferences";
 import { BUILT_IN_THEME_IDS, type BuiltInThemeId } from "@t3tools/shared/themePalettes";
 import {
-  DEFAULT_MOBILE_THEME_ID,
   type MobileThemeAppearance,
   type MobileThemeId,
   type MobileThemeMode,
 } from "./mobileTheme";
+
+function isBuiltInThemeId(themeId: string): themeId is BuiltInThemeId {
+  return (BUILT_IN_THEME_IDS as readonly string[]).includes(themeId);
+}
 
 export type MobileUniwindThemeName =
   | MobileThemeAppearance
@@ -42,9 +45,7 @@ export function getMobileUniwindThemeName(
   themeId: MobileThemeId,
   appearance: MobileThemeAppearance,
 ): MobileUniwindThemeName {
-  return themeId === DEFAULT_MOBILE_THEME_ID || themeId === "material-you"
-    ? appearance
-    : `${themeId}-${appearance}`;
+  return isBuiltInThemeId(themeId) ? `${themeId}-${appearance}` : appearance;
 }
 
 export function createMobileThemeRuntimeOperations(
