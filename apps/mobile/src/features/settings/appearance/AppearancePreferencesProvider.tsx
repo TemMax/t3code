@@ -222,14 +222,11 @@ export function AppearancePreferencesProvider(props: { readonly children: ReactN
   const themeId = themeIds[themeAppearance];
   const systemColorsActive = themeId === "material-you" && isSystemColorsAvailable;
   const systemColorPalettes = useAtomValue(systemColorPalettesAtom);
-  const registeredThemes = useSyncExternalStore(
-    subscribeRegisteredMobileThemes,
-    getRegisteredMobileThemes,
-  );
-  const themeVariablesByAppearance = useMemo(
-    () => resolveThemeVariablesByAppearance(themeIds, systemColorPalettes),
-    // The registry is read through the theme functions, so a new snapshot must recompute.
-    [themeIds, systemColorPalettes, registeredThemes],
+  // Theme functions read the registry directly; subscribing re-renders so they run again.
+  useSyncExternalStore(subscribeRegisteredMobileThemes, getRegisteredMobileThemes);
+  const themeVariablesByAppearance = resolveThemeVariablesByAppearance(
+    themeIds,
+    systemColorPalettes,
   );
   const themeVariables = themeVariablesByAppearance[themeAppearance];
   const activeThemeName = getMobileUniwindThemeName(themeId, themeAppearance);
