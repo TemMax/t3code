@@ -396,7 +396,7 @@ function ServerSettingsDetail(props: { readonly page: SettingsPage }) {
                 </SettingsSection>
                 <SettingsSection title="Live activity">
                   <SettingsSwitchRow
-                    icon="sparkles"
+                    icon="ellipsis.bubble"
                     label="Live activity summary"
                     subtitle="While Claude or Codex works, show what it is doing in a few words. Uses Claude Haiku or Codex Luna on the thread's own account."
                     value={uniform("threadActivitySummaryEnabled")}
