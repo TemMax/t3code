@@ -64,6 +64,7 @@ import {
   useComposerDraft,
 } from "../../state/use-composer-drafts";
 import { appAtomRegistry } from "../../state/atom-registry";
+import { mobilePreferencesAtom } from "../../state/preferences";
 import type { ComposerDocumentAttachment } from "../../lib/composerContext";
 import { useProject, useVisibleThreadShells } from "../../state/entities";
 import { useMentionableEnvironments } from "../../state/environments";
@@ -470,6 +471,7 @@ export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps
   };
 
   const uploadStates = useAtomValue(composerAttachmentUploadsAtom);
+  const preferences = useAtomValue(mobilePreferencesAtom);
   const attachmentsUploading =
     props.connectionState === "connected" &&
     composerAttachmentsStillUploading({
@@ -568,6 +570,9 @@ export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps
       usageLimitsOffered && draftAttachments.length === 0 ? openUsageLimits : undefined,
     modelOptions: mentionModelOptions,
     modelProviders: props.serverConfig?.providers,
+    modelMentionOptions: AsyncResult.isSuccess(preferences)
+      ? preferences.value.modelMentionOptions
+      : undefined,
     ...(props.onFreshSession === undefined ? {} : { onFreshSession: props.onFreshSession }),
     offersSideChat: props.offersSideChat === true,
   });

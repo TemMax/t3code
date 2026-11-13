@@ -1,4 +1,10 @@
-import type { ComposerContextRecord, EnvironmentId, ThreadId } from "@t3tools/contracts";
+import type {
+  ComposerContextRecord,
+  EnvironmentId,
+  ModelCapabilities,
+  ProviderOptionSelection,
+  ThreadId,
+} from "@t3tools/contracts";
 import {
   composerChipSizeSuffix,
   contextChipIcon,
@@ -7,7 +13,11 @@ import {
   type ContextChipIconRef,
   UNAVAILABLE_CONTEXT_CHIP_PRESENTATION,
 } from "./composerChipPresentation";
-import { formatComposerModelMention } from "@t3tools/client-runtime/composer-model-mentions";
+import {
+  collectComposerModelMentions,
+  formatComposerModelMention,
+} from "@t3tools/client-runtime/composer-model-mentions";
+import { modelMentionSettings } from "@t3tools/shared/model";
 import type {
   SelectableMarkdownModel,
   SelectableMarkdownSkill,
@@ -128,48 +138,81 @@ export function enrichedSkillInstructionsPath(skill: SelectableMarkdownSkill) {
   return skill.path && !/^[a-z][a-z\d+.-]*:\/\//i.test(skill.path) ? skill.path : undefined;
 }
 
+interface EnrichedModelProvider {
+  readonly instanceId: string;
+  readonly driver: string;
+  readonly displayName?: string | undefined;
+  readonly iconUrl?: string | undefined;
+  readonly models: ReadonlyArray<EnrichedModelProviderModel>;
+}
+
+interface EnrichedModelProviderModel {
+  readonly slug: string;
+  readonly name: string;
+  readonly subProvider?: string | undefined;
+  readonly capabilities?: ModelCapabilities | null | undefined;
+}
+
+function enrichedModelReferenceFor(
+  provider: EnrichedModelProvider,
+  model: EnrichedModelProviderModel,
+  source: string,
+  options: ReadonlyArray<ProviderOptionSelection>,
+): SelectableMarkdownModel {
+  const qualifier = model.subProvider?.trim();
+  const name = qualifier
+    ? model.name
+        .replace(
+          new RegExp(
+            `^${qualifier.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?:\\s*[.:/-]\\s*|\\s+)`,
+            "iu",
+          ),
+          "",
+        )
+        .trim() || model.name
+    : model.name;
+  // A mention without options (typed, or from upstream clients) leaves them to the agent.
+  const optionsLabel =
+    options.length > 0 ? modelMentionSettings(model.capabilities, options).optionsLabel : undefined;
+  return {
+    source,
+    instanceId: provider.instanceId,
+    model: model.slug,
+    options,
+    capabilities: model.capabilities,
+    label: optionsLabel ? `${name} · ${optionsLabel}` : name,
+    providerLabel: qualifier || provider.displayName || provider.instanceId,
+    driver: provider.driver,
+    iconUrl: provider.iconUrl,
+  };
+}
+
+/** References for the given mention sources, or for every model's bare mention. */
 export function buildEnrichedModelReferences(
-  providers: ReadonlyArray<{
-    readonly instanceId: string;
-    readonly driver: string;
-    readonly displayName?: string | undefined;
-    readonly iconUrl?: string | undefined;
-    readonly models: ReadonlyArray<{
-      readonly slug: string;
-      readonly name: string;
-      readonly subProvider?: string | undefined;
-    }>;
-  }>,
+  providers: ReadonlyArray<EnrichedModelProvider>,
   sources?: ReadonlySet<string>,
 ): ReadonlyArray<SelectableMarkdownModel> {
-  return providers.flatMap((provider) =>
-    provider.models
-      .filter(
-        (model) =>
-          !sources || sources.has(formatComposerModelMention(provider.instanceId, model.slug)),
-      )
-      .map((model) => {
-        const qualifier = model.subProvider?.trim();
-        const label = qualifier
-          ? model.name
-              .replace(
-                new RegExp(
-                  `^${qualifier.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?:\\s*[.:/-]\\s*|\\s+)`,
-                  "iu",
-                ),
-                "",
-              )
-              .trim() || model.name
-          : model.name;
-        return {
-          source: formatComposerModelMention(provider.instanceId, model.slug),
-          label,
-          providerLabel: qualifier || provider.displayName || provider.instanceId,
-          driver: provider.driver,
-          iconUrl: provider.iconUrl,
-        };
-      }),
-  );
+  if (!sources) {
+    return providers.flatMap((provider) =>
+      provider.models.map((model) =>
+        enrichedModelReferenceFor(
+          provider,
+          model,
+          formatComposerModelMention(provider.instanceId, model.slug),
+          [],
+        ),
+      ),
+    );
+  }
+  return [...sources].flatMap((source) => {
+    const mention = collectComposerModelMentions(source)[0];
+    if (mention?.source !== source) return [];
+    const provider = providers.find((candidate) => candidate.instanceId === mention.instanceId);
+    const model = provider?.models.find((candidate) => candidate.slug === mention.model);
+    return provider && model
+      ? [enrichedModelReferenceFor(provider, model, source, mention.options)]
+      : [];
+  });
 }
 
 export function enrichedModelLinkRegex(models?: ReadonlyArray<SelectableMarkdownModel>) {

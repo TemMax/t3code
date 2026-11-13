@@ -1,3 +1,5 @@
+import type { ModelCapabilities, ProviderOptionSelection } from "@t3tools/contracts";
+
 export interface NativeMarkdownTextStyle {
   readonly selectionColor?: string;
   readonly selectionHandleColor?: string;
@@ -29,6 +31,11 @@ export interface SelectableMarkdownSkill {
 
 export interface SelectableMarkdownModel {
   readonly source: string;
+  readonly instanceId: string;
+  readonly model: string;
+  readonly options: ReadonlyArray<ProviderOptionSelection>;
+  readonly capabilities?: ModelCapabilities | null | undefined;
+  /** The model's name, plus its options when the mention carries any. */
   readonly label: string;
   readonly providerLabel: string;
   readonly driver: string;

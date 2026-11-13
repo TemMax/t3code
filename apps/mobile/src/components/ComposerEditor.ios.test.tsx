@@ -116,6 +116,7 @@ vi.mock("expo-file-system", () => ({
 vi.mock("./ui/Dialog", () => ({ alert: vi.fn() }));
 vi.mock("./ui/AppText", () => ({ AppText: ({ children }: { children?: ReactNode }) => children }));
 vi.mock("./ComposerContextSheet", () => ({ ComposerContextSheet: () => null }));
+vi.mock("./ModelMentionSheet", () => ({ ModelMentionSheet: () => null }));
 vi.mock("./AssistantCitationSheet", () => ({ AssistantCitationSheet: () => null }));
 vi.mock("../features/threads/useOpenAssistantCitationSource", () => ({
   useOpenAssistantCitationSource: () => vi.fn(),
@@ -125,7 +126,10 @@ vi.mock("../state/peerLinks", () => ({ useLinkedEnvironments: () => [] }));
 vi.mock("../state/model-mentions", () => ({ useModelMentions: () => [] }));
 vi.mock("../state/preferences", async () => {
   const { Atom } = await import("effect/reactivity");
-  return { mobilePreferencesAtom: Atom.make({ _tag: "Initial" }) };
+  return {
+    mobilePreferencesAtom: Atom.make({ _tag: "Initial" }),
+    updateMobilePreferencesAtom: Atom.make(null),
+  };
 });
 vi.mock("../lib/composerContextClipboard", () => ({ importComposerContextClipboard: vi.fn() }));
 vi.mock("../lib/useUniwindTheme", () => ({ useUniwindTheme: () => ({}) }));

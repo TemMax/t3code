@@ -1,6 +1,11 @@
 import * as Dialog from "./ui/Dialog";
 import { ComposerContextId } from "@t3tools/contracts";
-import { useAtomValue } from "@effect/atom-react";
+import { useAtomSet, useAtomValue } from "@effect/atom-react";
+import {
+  formatComposerModelMention,
+  modelMentionOptionsKey,
+} from "@t3tools/client-runtime/composer-model-mentions";
+import { modelMentionSettings } from "@t3tools/shared/model";
 import { AsyncResult } from "effect/reactivity";
 import { settlePromise, squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import { useEffect, useState, useSyncExternalStore } from "react";
@@ -33,7 +38,8 @@ import { startComposerDraftOperation } from "../state/composerDraftOperations";
 import { appAtomRegistry } from "../state/atom-registry";
 import { enrichedModelDetails, enrichedModelReference } from "../lib/enrichedLinkPresentation";
 import { useModelMentions } from "../state/model-mentions";
-import { mobilePreferencesAtom } from "../state/preferences";
+import { mobilePreferencesAtom, updateMobilePreferencesAtom } from "../state/preferences";
+import { ModelMentionSheet } from "./ModelMentionSheet";
 import { useOpenLinkedThread } from "../features/threads/useOpenLinkedThread";
 import { useLinkedEnvironments } from "../state/peerLinks";
 import { ComposerContextSheet } from "./ComposerContextSheet";
@@ -131,6 +137,26 @@ export function ComposerEditor({
   };
   const linkedEnvironments = useLinkedEnvironments(environmentId ?? null);
   const models = useModelMentions(environmentId ?? draft.project?.environmentId, props.value);
+  const savePreferences = useAtomSet(updateMobilePreferencesAtom);
+  const [pressedModel, setPressedModel] = useState<{ source: string; start: number } | null>(null);
+  const openModel =
+    pressedModel && props.value.startsWith(pressedModel.source, pressedModel.start)
+      ? enrichedModelReference(pressedModel.source, models)
+      : undefined;
+  const changeModelOptions = (next: Parameters<typeof modelMentionSettings>[1]) => {
+    if (!pressedModel || !openModel) return;
+    const { options } = modelMentionSettings(openModel.capabilities, next);
+    const source = formatComposerModelMention(openModel.instanceId, openModel.model, options);
+    const end = pressedModel.start + pressedModel.source.length;
+    changeText(props.value.slice(0, pressedModel.start) + source + props.value.slice(end));
+    setPressedModel({ source, start: pressedModel.start });
+    const key = modelMentionOptionsKey(openModel.instanceId, openModel.model);
+    savePreferences({
+      transform: (current) => ({
+        modelMentionOptions: { ...current.modelMentionOptions, [key]: options },
+      }),
+    });
+  };
   const contextImports = useAtomValue(composerContextImportsAtom);
   const importing = draftKey ? contextImports[draftKey] === true : false;
   const pasteContext = async (
@@ -254,7 +280,15 @@ export function ComposerEditor({
           }
           const model = enrichedModelReference(selection.source, models);
           if (model) {
-            Dialog.alert(model.label, enrichedModelDetails(model));
+            if (
+              !props.readOnly &&
+              props.editable !== false &&
+              model.capabilities?.optionDescriptors?.length
+            ) {
+              setPressedModel({ source: selection.source, start: selection.start });
+            } else {
+              Dialog.alert(model.label, enrichedModelDetails(model));
+            }
             return;
           }
           const document = composerDocumentAttachment(selection.source, draft.context);
@@ -276,6 +310,13 @@ export function ComposerEditor({
       />
       {importing ? (
         <Text className="py-2 text-xs text-foreground-muted">Copying context…</Text>
+      ) : null}
+      {openModel ? (
+        <ModelMentionSheet
+          model={openModel}
+          onChangeOptions={changeModelOptions}
+          onClose={() => setPressedModel(null)}
+        />
       ) : null}
       {citation ? (
         <AssistantCitationSheet

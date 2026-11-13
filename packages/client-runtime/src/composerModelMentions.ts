@@ -1,3 +1,5 @@
+import type { ProviderOptionSelection } from "@t3tools/contracts";
+
 import { rankModelPickerSearch, type ModelPickerSearchableModel } from "./modelSearch.ts";
 
 const COMPOSER_MODEL_MENTION_LIMIT = 8;
@@ -44,14 +46,47 @@ export function rankComposerModelMentions<T>(
   return [];
 }
 
-/** Prompt text naming a provider instance and model for the agent. No `@`, which the editor would turn into a file chip. */
-export function formatComposerModelMention(instanceId: string, model: string): string {
-  return `model:${instanceId}/${model}`;
+/**
+ * Prompt text naming a provider instance, model and options for the agent, as in
+ * `model:codex/gpt-6.1-sol?reasoningEffort=xhigh&fastMode=true`. No `@`, which the editor
+ * would turn into a file chip.
+ */
+export function formatComposerModelMention(
+  instanceId: string,
+  model: string,
+  options: ReadonlyArray<ProviderOptionSelection> = [],
+): string {
+  const query = options
+    .map((option) => `${encodeURIComponent(option.id)}=${encodeURIComponent(option.value)}`)
+    .join("&");
+  return `model:${instanceId}/${model}${query ? `?${query}` : ""}`;
+}
+
+/** The key a device remembers a model's last mention options under. */
+export function modelMentionOptionsKey(instanceId: string, model: string): string {
+  return `${instanceId}:${model}`;
+}
+
+function parseMentionOptions(query: string): ReadonlyArray<ProviderOptionSelection> {
+  const options: ProviderOptionSelection[] = [];
+  for (const pair of query.split("&")) {
+    const separator = pair.indexOf("=");
+    if (separator <= 0) continue;
+    try {
+      const id = decodeURIComponent(pair.slice(0, separator)).trim();
+      const raw = decodeURIComponent(pair.slice(separator + 1));
+      if (id) options.push({ id, value: raw === "true" ? true : raw === "false" ? false : raw });
+    } catch {
+      // A hand-edited `%` escape that does not decode drops only that option.
+    }
+  }
+  return options;
 }
 
 export interface ComposerModelMentionOccurrence {
   readonly instanceId: string;
   readonly model: string;
+  readonly options: ReadonlyArray<ProviderOptionSelection>;
   readonly source: string;
   readonly start: number;
   readonly end: number;
@@ -79,7 +114,7 @@ function trimModelSlug(slug: string): string {
   return trimmed;
 }
 
-/** Finds the `model:<instance>/<model>` references that `formatComposerModelMention` writes. */
+/** Finds the `model:<instance>/<model>[?<options>]` references that `formatComposerModelMention` writes. */
 export function collectComposerModelMentions(
   text: string,
 ): ReadonlyArray<ComposerModelMentionOccurrence> {
@@ -87,11 +122,14 @@ export function collectComposerModelMentions(
   const occurrences: ComposerModelMentionOccurrence[] = [];
   for (const match of text.matchAll(MODEL_MENTION_PATTERN)) {
     const instanceId = match[1]!;
-    const model = trimModelSlug(match[2]!);
+    const reference = trimModelSlug(match[2]!);
+    const queryStart = reference.indexOf("?");
+    const model = queryStart < 0 ? reference : reference.slice(0, queryStart);
     if (model.length === 0) continue;
+    const options = queryStart < 0 ? [] : parseMentionOptions(reference.slice(queryStart + 1));
     const start = match.index;
-    const end = start + "model:".length + instanceId.length + 1 + model.length;
-    occurrences.push({ instanceId, model, source: text.slice(start, end), start, end });
+    const end = start + "model:".length + instanceId.length + 1 + reference.length;
+    occurrences.push({ instanceId, model, options, source: text.slice(start, end), start, end });
   }
   return occurrences;
 }

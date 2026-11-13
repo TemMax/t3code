@@ -106,7 +106,12 @@ export const OrchestratorMcpTarget = Schema.Struct({
       description: "Prefer `providerInstanceId`.",
     }),
   ),
-  model: Schema.optional(TrimmedNonEmptyString),
+  model: Schema.optional(
+    TrimmedNonEmptyString.annotate({
+      description:
+        "A `model:<instance>/<model>?<option>=<value>&…` mention in the user's message gives `providerInstanceId`, `model` and every `options` value.",
+    }),
+  ),
   options: Schema.optional(
     OrchestratorMcpTargetOptions.annotate({
       description:

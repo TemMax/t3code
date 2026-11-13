@@ -331,7 +331,7 @@ const ComposerSkillExtension = Node.create({
   },
 });
 
-function ComposerModelNodeView({ node }: NodeViewProps) {
+function ComposerModelNodeView({ node, updateAttributes }: NodeViewProps) {
   const actions = use(ComposerContextActionsContext);
   return (
     <NodeViewWrapper as="span" className={CHIP_NODE_SELECTION_CLASS_NAME}>
@@ -340,12 +340,13 @@ function ComposerModelNodeView({ node }: NodeViewProps) {
         instanceId={String(node.attrs.instanceId)}
         model={String(node.attrs.model)}
         source={String(node.attrs.source)}
+        onSourceChange={(source) => updateAttributes({ source })}
       />
     </NodeViewWrapper>
   );
 }
 
-/** `model:<instance>/<model>` from the `@` menu; `source` is the exact prompt text. */
+/** `model:<instance>/<model>[?<options>]` from the `@` menu; `source` is the exact prompt text. */
 const ComposerModelExtension = Node.create({
   name: "composer-model",
   group: "inline",
