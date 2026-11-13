@@ -11,6 +11,7 @@ import {
   ENRICHED_INLINE_FILE_LINK_REGEX,
   threadChipTargets,
 } from "./enrichedLinkPresentation";
+import { createModelCapabilities } from "@t3tools/shared/model";
 
 describe("Enriched link presentation", () => {
   it("recognizes file-shaped code without turning commands or URLs into links", () => {
@@ -90,6 +91,42 @@ describe("Enriched link presentation", () => {
     expect(
       "Use $review with (model:codex/gpt-6.1).".match(new RegExp(combined!.source, "gu")),
     ).toEqual(["$review", "model:codex/gpt-6.1"]);
+  });
+
+  it("resolves a mention carrying options and labels it with them", () => {
+    const capabilities = createModelCapabilities({
+      optionDescriptors: [
+        {
+          id: "reasoningEffort",
+          label: "Reasoning",
+          type: "select",
+          options: [
+            { id: "medium", label: "Medium", isDefault: true },
+            { id: "xhigh", label: "Extra High" },
+          ],
+        },
+      ],
+    });
+    const source = "model:codex/gpt-6.1?reasoningEffort=xhigh";
+    const models = buildEnrichedModelReferences(
+      [
+        {
+          instanceId: "codex",
+          driver: "codex",
+          models: [{ slug: "gpt-6.1", name: "GPT-6.1", capabilities }],
+        },
+      ],
+      new Set([source, "model:codex/gpt-6.1", "model:codex/unknown?reasoningEffort=xhigh"]),
+    );
+    expect(models.map(({ source, label, options }) => ({ source, label, options }))).toEqual([
+      {
+        source,
+        label: "GPT-6.1 · Extra High",
+        options: [{ id: "reasoningEffort", value: "xhigh" }],
+      },
+      { source: "model:codex/gpt-6.1", label: "GPT-6.1", options: [] },
+    ]);
+    expect(enrichedModelLinkRegex(models)?.exec(`Ask ${source}.`)?.[0]).toBe(source);
   });
 
   it("matches only the complete URL, including literal regex metacharacters", () => {

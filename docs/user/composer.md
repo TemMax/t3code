@@ -357,7 +357,9 @@ file attachment limits apply.
 
 Type `@` and part of a model or provider name, such as `@opus`, to name that model for the
 agent, for example when delegating. It does not change the thread's model. Join words with
-`:`, `/` or `-`, as in `@opus:opencode`.
+`:`, `/` or `-`, as in `@opus:opencode`. The chip shows the model's options, such as effort;
+click or tap it to change them. A new chip starts from the options you last set for that model
+on this device.
 
 Images keep their thumbnail shelf above the text and also get a chip at your cursor, so you can
 say exactly which image you mean. Deleting an image chip leaves the image on the shelf; removing

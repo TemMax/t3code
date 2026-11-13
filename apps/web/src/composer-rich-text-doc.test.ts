@@ -867,6 +867,10 @@ describe("model mention chips", () => {
 
   it.each([
     ["Ask model:codex/gpt-6.1 now", [chip]],
+    [
+      "Ask model:codex/gpt-6.1?reasoningEffort=xhigh&fastMode=true now",
+      [{ ...chip, source: "model:codex/gpt-6.1?reasoningEffort=xhigh&fastMode=true" }],
+    ],
     ["Ask model:openai/gpt-4o now", []],
     // Still being typed: `gpt-6` must not chip on the way to `gpt-6.1`.
     ["Ask model:codex/gpt-6.1", []],

@@ -10,6 +10,7 @@ import {
   getProviderOptionCurrentLabel,
   getProviderOptionDescriptors,
   readCustomModelEntries,
+  modelMentionSettings,
   modelSelectionsEqual,
 } from "./model.ts";
 
@@ -225,5 +226,48 @@ describe("provider-reported option display", () => {
     { ...selection, options: [{ id: "variant", value: "none" }] },
   ])("ignores reports after changing the model, instance, or option: %j", (selected) => {
     expect(getProviderOptionCurrentLabel(descriptor, selected, reported)).toBe("Unknown");
+  });
+});
+
+describe("modelMentionSettings", () => {
+  const caps = createModelCapabilities({
+    optionDescriptors: [
+      {
+        id: "reasoningEffort",
+        label: "Reasoning",
+        type: "select",
+        options: [
+          { id: "medium", label: "Medium", isDefault: true },
+          { id: "xhigh", label: "Extra High" },
+        ],
+      },
+      { id: "fastMode", label: "Fast", type: "boolean" },
+    ],
+  });
+
+  it("spells out every option of the model and describes the chosen ones", () => {
+    expect(
+      modelMentionSettings(caps, [
+        { id: "reasoningEffort", value: "xhigh" },
+        { id: "fastMode", value: true },
+      ]),
+    ).toEqual({
+      options: [
+        { id: "reasoningEffort", value: "xhigh" },
+        { id: "fastMode", value: true },
+      ],
+      optionsLabel: "Extra High · Fast",
+    });
+  });
+
+  it("falls back to the model's defaults and drops options the model no longer has", () => {
+    expect(modelMentionSettings(caps, [{ id: "retired", value: "x" }])).toEqual({
+      options: [{ id: "reasoningEffort", value: "medium" }],
+      optionsLabel: "Medium",
+    });
+  });
+
+  it("has nothing to describe for a model without options", () => {
+    expect(modelMentionSettings(null, [])).toEqual({ options: [], optionsLabel: undefined });
   });
 });

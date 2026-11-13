@@ -71,12 +71,48 @@ describe("collectComposerModelMentions", () => {
       {
         instanceId: "opencode",
         model: "anthropic/opus",
+        options: [],
         source: "model:opencode/anthropic/opus",
         start: 4,
         end: 33,
       },
-      { instanceId: "codex", model: "gpt-5.4", source: "model:codex/gpt-5.4", start: 40, end: 59 },
+      {
+        instanceId: "codex",
+        model: "gpt-5.4",
+        options: [],
+        source: "model:codex/gpt-5.4",
+        start: 40,
+        end: 59,
+      },
     ]);
+  });
+
+  it("reads back the options a mention carries", () => {
+    const options = [
+      { id: "reasoningEffort", value: "xhigh" },
+      { id: "fastMode", value: true },
+      { id: "contextWindow", value: "1m & more" },
+    ];
+    const source = formatComposerModelMention("codex", "gpt-6.1-sol", options);
+    expect(source).toBe(
+      "model:codex/gpt-6.1-sol?reasoningEffort=xhigh&fastMode=true&contextWindow=1m%20%26%20more",
+    );
+    expect(collectComposerModelMentions(`ask ${source}.`)).toEqual([
+      {
+        instanceId: "codex",
+        model: "gpt-6.1-sol",
+        options,
+        source,
+        start: 4,
+        end: 4 + source.length,
+      },
+    ]);
+  });
+
+  it("keeps a mention's model when its options are malformed", () => {
+    expect(
+      collectComposerModelMentions("model:codex/gpt-6.1?effort=low&=x&fast&bad=%E0%A4%A"),
+    ).toMatchObject([{ model: "gpt-6.1", options: [{ id: "effort", value: "low" }] }]);
   });
 
   it.each([

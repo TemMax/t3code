@@ -51,13 +51,16 @@ import {
 } from "@t3tools/client-runtime/providerSkills";
 import {
   formatComposerModelMention,
+  modelMentionOptionsKey,
   rankComposerModelMentions,
 } from "@t3tools/client-runtime/composer-model-mentions";
+import { modelMentionSettings } from "@t3tools/shared/model";
 import { useAtomRefresh } from "@effect/atom-react";
 import { Atom } from "effect/reactivity";
 import { useEffect, useState } from "react";
 
 import type { ComposerEditorSelection } from "../../components/ComposerEditor";
+import type { Preferences } from "../../persistence/mobile-preferences";
 import { serverEnvironment } from "../../state/server";
 import {
   useComposerPathSearch,
@@ -225,6 +228,8 @@ export function resolveComposerCommandSelection(input: {
   readonly draftMessage: string;
   readonly trigger: Pick<ComposerTrigger, "rangeStart" | "rangeEnd">;
   readonly item: ComposerCommandItem;
+  /** A new model mention starts from the options last set for that model on this device. */
+  readonly modelMentionOptions?: Preferences["modelMentionOptions"];
 }): { readonly text: string; readonly cursor: number } {
   const { draftMessage, trigger, item } = input;
   let replacement = "";
@@ -237,7 +242,12 @@ export function resolveComposerCommandSelection(input: {
   } else if (item.type === "provider-slash-command") {
     replacement = `/${item.command.name} `;
   } else if (item.type === "model") {
-    replacement = `${formatComposerModelMention(item.option.selection.instanceId, item.option.selection.model)} `;
+    const { instanceId, model } = item.option.selection;
+    const { options } = modelMentionSettings(
+      item.option.capabilities,
+      input.modelMentionOptions?.[modelMentionOptionsKey(instanceId, model)] ?? [],
+    );
+    replacement = `${formatComposerModelMention(instanceId, model, options)} `;
   }
   return replaceTextRange(draftMessage, trigger.rangeStart, trigger.rangeEnd, replacement);
 }
@@ -263,6 +273,7 @@ export function useComposerCommandMenu({
   onUsageLimits,
   modelOptions,
   modelProviders,
+  modelMentionOptions,
   onFreshSession,
   offersSideChat = false,
 }: {
@@ -287,6 +298,7 @@ export function useComposerCommandMenu({
   readonly onUsageLimits?: () => void;
   readonly modelOptions?: ReadonlyArray<ModelOption>;
   readonly modelProviders?: ReadonlyArray<ServerProvider>;
+  readonly modelMentionOptions?: Preferences["modelMentionOptions"];
   /** Arms a fresh session for the next message; absent where `/clear` is unavailable. */
   readonly onFreshSession?: () => void;
   readonly offersSideChat?: boolean;
@@ -651,7 +663,12 @@ export function useComposerCommandMenu({
       return;
     }
 
-    const result = resolveComposerCommandSelection({ draftMessage, trigger, item });
+    const result = resolveComposerCommandSelection({
+      draftMessage,
+      trigger,
+      item,
+      modelMentionOptions,
+    });
     setSelection({ start: result.cursor, end: result.cursor });
     onChangeDraftMessage(result.text);
   };
