@@ -196,8 +196,11 @@ export const make = Effect.gen(function* () {
       );
     }),
     generateThreadActivity: Effect.fn("TextGeneration.generateThreadActivity")(function (input) {
-      return generate("generateThreadActivity", input.modelSelection, (service, modelSelection) =>
-        service.generateThreadActivity({ ...input, modelSelection }),
+      return generate(
+        "generateThreadActivity",
+        input.modelSelection,
+        null,
+        (service, modelSelection) => service.generateThreadActivity({ ...input, modelSelection }),
       );
     }),
     generateTranscriptionPostProcessing: Effect.fn(
