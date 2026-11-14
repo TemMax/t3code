@@ -322,7 +322,11 @@ export function createAssetEnvironmentAtoms<R, E>(
   };
 }
 
-export function createProjectFaviconUrlAtomFamily(input: {
+/**
+ * Project favicon atoms. `url` is the image to show; `color` is the palette colour of that cached
+ * image, null while unknown, for a neutral icon, or when the project has no favicon.
+ */
+export function createProjectFaviconAtomFamilies(input: {
   readonly imageCache?: ProjectFaviconCache;
   readonly createUrl: (target: {
     readonly environmentId: EnvironmentId;
@@ -338,15 +342,23 @@ export function createProjectFaviconUrlAtomFamily(input: {
   const decodeKey = Schema.decodeUnknownSync(
     Schema.Tuple([EnvironmentId, Schema.String, Schema.NullOr(Schema.String)]),
   );
+  const targetOf = (key: string) => {
+    const [environmentId, cwd, faviconPath] = decodeKey(JSON.parse(key));
+    return { environmentId, cwd, faviconPath };
+  };
   const projectClones = input.projectClones;
-  const family = Atom.family((key: string) => {
-    const [environmentId, cwd, path] = decodeKey(JSON.parse(key));
-    const resource = { _tag: "project-favicon" as const, cwd, ...(path ? { path } : {}) };
+  const requestFamily = Atom.family((key: string) => {
+    const { environmentId, cwd, faviconPath } = targetOf(key);
+    const resource = {
+      _tag: "project-favicon" as const,
+      cwd,
+      ...(faviconPath ? { path: faviconPath } : {}),
+    };
     const query = input.createUrl({ environmentId, input: { resource } });
     // A cloned project exists before its files do, and the server reports its
     // icon missing until the clone lands. Ask again whenever the clone's phase
     // changes: the first list a client sees may already say done.
-    const request = projectClones
+    return projectClones
       ? query.pipe(
           Atom.makeRefreshOnSignal(
             Atom.make(
@@ -357,8 +369,11 @@ export function createProjectFaviconUrlAtomFamily(input: {
           ),
         )
       : query;
-    const resolvedUrl = Atom.make((get): string | null => {
-      const result = get(request);
+  });
+  const resolvedUrlFamily = Atom.family((key: string) => {
+    const { environmentId } = targetOf(key);
+    return Atom.make((get): string | null => {
+      const result = get(requestFamily(key));
       const connection = get(input.preparedConnection(environmentId));
       const state = assetUrlStateFromResult(
         result,
@@ -366,22 +381,40 @@ export function createProjectFaviconUrlAtomFamily(input: {
       );
       return state._tag === "Success" ? state.url : Option.getOrNull(get.self<string | null>());
     }).pipe(Atom.setIdleTTL(ASSET_URL_IDLE_TTL_MS));
-    const cache = input.imageCache;
-    if (!cache) return resolvedUrl;
-
-    const target = { environmentId, cwd, faviconPath: path };
-    const image = Atom.make((get) => {
-      get(request);
-      const url = get(resolvedUrl);
-      return Effect.promise((signal) => cache.resolve(target, url, signal));
+  });
+  const cache = input.imageCache;
+  const imageFamily = Atom.family((key: string) => {
+    const target = targetOf(key);
+    return Atom.make((get) => {
+      get(requestFamily(key));
+      const url = get(resolvedUrlFamily(key));
+      return cache
+        ? Effect.promise((signal) => cache.resolve(target, url, signal))
+        : Effect.succeed(url);
     }).pipe(Atom.setIdleTTL(ASSET_URL_IDLE_TTL_MS));
-
+  });
+  const urlFamily = Atom.family((key: string) => {
+    if (!cache) return resolvedUrlFamily(key);
+    const target = targetOf(key);
     return Atom.make((get): string | null => {
-      const result = get(image);
-      if (isProjectFaviconFallbackUrl(get(resolvedUrl))) return null;
+      const result = get(imageFamily(key));
+      if (isProjectFaviconFallbackUrl(get(resolvedUrlFamily(key)))) return null;
       return AsyncResult.getOrElse(result, () => cache.peek(target));
     }).pipe(Atom.setIdleTTL(ASSET_URL_IDLE_TTL_MS));
   });
-  return (target: ProjectFaviconTarget) =>
-    family(getProjectFaviconResourceKey(target.environmentId, target.cwd, target.faviconPath));
+  // Reads the image result too: a colour filled in for an already cached image keeps its URL.
+  const colorFamily = Atom.family((key: string) => {
+    const target = targetOf(key);
+    return Atom.make((get) => {
+      if (!cache) return null;
+      get(imageFamily(key));
+      return get(urlFamily(key)) === null ? null : cache.peekColor(target);
+    }).pipe(Atom.setIdleTTL(ASSET_URL_IDLE_TTL_MS));
+  });
+  const keyOf = (target: ProjectFaviconTarget) =>
+    getProjectFaviconResourceKey(target.environmentId, target.cwd, target.faviconPath);
+  return {
+    url: (target: ProjectFaviconTarget) => urlFamily(keyOf(target)),
+    color: (target: ProjectFaviconTarget) => colorFamily(keyOf(target)),
+  };
 }

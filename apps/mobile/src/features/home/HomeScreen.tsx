@@ -546,6 +546,9 @@ export function HomeScreen(props: HomeScreenProps) {
         <ThreadListV2ProjectFolderHeader
           folderKey={item.folderKey}
           title={item.title}
+          project={
+            projectScopes.find((scope) => scope.key === item.folderKey)?.representative ?? null
+          }
           count={item.count}
           collapsed={item.collapsed}
           dot={item.dot}
@@ -642,6 +645,7 @@ export function HomeScreen(props: HomeScreenProps) {
         timeLabel={item.timeLabel}
         showTrailingDivider={item.showTrailingDivider}
         project={projectByKey.get(scopedProjectKey(thread.environmentId, thread.projectId)) ?? null}
+        inFolder={item.item.inFolder}
         providerInstance={resolveProviderInstance(thread)}
         providers={providersByEnvironmentId.get(thread.environmentId)}
         environmentLabel={

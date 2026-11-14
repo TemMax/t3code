@@ -3,9 +3,12 @@ import {
   createProjectFaviconImageLoader,
   PROJECT_FAVICON_MAX_DATA_URL_LENGTH,
   PROJECT_FAVICON_THUMBNAIL_SIZE,
+  projectIconColorFromPixels,
   type ProjectFaviconEntry,
 } from "@t3tools/client-runtime/project-favicon-cache";
 import * as Effect from "effect/Effect";
+
+import { decodePngRgba } from "./pngPixels";
 
 import * as MobileDatabase from "../persistence/mobile-database";
 
@@ -69,6 +72,35 @@ export async function downscaleProjectFavicon(
   throw new Error("Project icon thumbnail exceeds the cache limit.");
 }
 
+const COLOR_SAMPLE_SIZE = 16;
+
+/** React Native cannot read pixels, so a 16px PNG re-encode is decoded in JS instead. */
+async function readProjectFaviconColor(dataUrl: string, signal: AbortSignal) {
+  const [{ ImageManipulator, SaveFormat }, { File }] = await Promise.all([
+    import("expo-image-manipulator"),
+    import("expo-file-system"),
+  ]);
+  const context = ImageManipulator.manipulate(dataUrl).resize({
+    width: COLOR_SAMPLE_SIZE,
+    height: COLOR_SAMPLE_SIZE,
+  });
+  try {
+    const image = await context.renderAsync();
+    try {
+      signal.throwIfAborted();
+      const saved = await image.saveAsync({ format: SaveFormat.PNG, base64: true });
+      new File(saved.uri).delete();
+      if (!saved.base64) throw new Error("Project icon sample has no pixels.");
+      const pixels = decodePngRgba(Uint8Array.from(atob(saved.base64), (c) => c.charCodeAt(0)));
+      return pixels ? projectIconColorFromPixels(pixels) : null;
+    } finally {
+      image.release();
+    }
+  } finally {
+    context.release();
+  }
+}
+
 export const projectFaviconDatabaseCache = createSharedProjectFaviconCache({
   storage: {
     list: () =>
@@ -99,4 +131,5 @@ export const projectFaviconDatabaseCache = createSharedProjectFaviconCache({
       runDatabase((database) => database.removeCache(entry.environmentId, CACHE_KIND, key)),
   },
   load: createProjectFaviconImageLoader({ downscale: downscaleProjectFavicon }),
+  readColor: readProjectFaviconColor,
 });

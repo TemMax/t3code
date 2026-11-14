@@ -3,6 +3,7 @@
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 import tailwindColors from "tailwindcss/colors";
+import { ProjectIconColor } from "@t3tools/contracts";
 import { BUILT_IN_THEME_IDS, type BuiltInThemeId } from "@t3tools/shared/themePalettes";
 
 import {
@@ -51,8 +52,17 @@ const color = (family: TailwindColorFamily, shade?: TailwindColorShade, opacity 
   return `color-mix(in srgb, ${value} ${percentage}%, transparent)`;
 };
 
+// Project titles take their icon's colour: 700 on light and 400 on dark keep 4.5:1 contrast.
+const PROJECT_TITLE_COLORS = Object.fromEntries(
+  ProjectIconColor.literals.map((family) => [
+    `--color-adaptive-${family}-700-400`,
+    [color(family, 700), color(family, 400)] as const,
+  ]),
+);
+
 // Named palette themes need semantic appearance variables because their names are neither light nor dark.
 const ADAPTIVE_COLORS: Readonly<Record<string, readonly [light: string, dark: string]>> = {
+  ...PROJECT_TITLE_COLORS,
   "--color-adaptive-amber-50-950-a40": [color("amber", 50), color("amber", 950, 0.4)],
   "--color-adaptive-amber-200-900-a60": [color("amber", 200), color("amber", 900, 0.6)],
   "--color-adaptive-amber-500-a12-a16": [color("amber", 500, 0.12), color("amber", 500, 0.16)],

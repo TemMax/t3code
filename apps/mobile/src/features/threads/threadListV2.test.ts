@@ -636,12 +636,12 @@ describe("buildThreadListV2Items", () => {
     it("lists pinned first, then a header per project in group order, then the settled shelf", () => {
       const layout = build(new Set());
 
-      expect(layout.items.map((item) => item.thread.id)).toEqual([
-        "pinned",
-        "b1",
-        "b2",
-        "a1",
-        "settled",
+      expect(layout.items.map((item) => [item.thread.id, item.inFolder === true])).toEqual([
+        ["pinned", false],
+        ["b1", true],
+        ["b2", true],
+        ["a1", true],
+        ["settled", false],
       ]);
       expect(
         layout.folderHeaders.map(({ index, key, title, count, collapsed, dot }) => ({

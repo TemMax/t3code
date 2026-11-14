@@ -1,4 +1,4 @@
-import { EnvironmentId } from "@t3tools/contracts";
+import { EnvironmentId, ProjectIconColor } from "@t3tools/contracts";
 import { mediaMimeType } from "@t3tools/shared/mediaPreview";
 import {
   getProjectFaviconCacheKey,
@@ -33,6 +33,8 @@ const Entry = Schema.Struct({
   faviconPath: Schema.NullOr(Schema.String),
   revision: Schema.String,
   dataUrl: ImageDataUrl,
+  // Absent until the colour is read, so a failed read retries from the cached image.
+  color: Schema.optionalKey(Schema.NullOr(ProjectIconColor)),
 });
 export type ProjectFaviconEntry = typeof Entry.Type;
 const decodeEntry = Schema.decodeUnknownOption(Entry);
@@ -40,6 +42,106 @@ const isImageDataUrl = Schema.is(ImageDataUrl);
 
 function keyFor(target: ProjectFaviconTarget) {
   return getProjectFaviconResourceKey(target.environmentId, target.cwd, target.faviconPath);
+}
+
+// A favicon's dominant hue snaps to the nearest monogram swatch, so a project title never
+// takes a raw image colour and every tint comes from one palette tuned for contrast.
+const PALETTE_SWATCHES = [
+  ["red", 0xef4444],
+  ["orange", 0xf97316],
+  ["amber", 0xf59e0b],
+  ["yellow", 0xeab308],
+  ["lime", 0x84cc16],
+  ["green", 0x22c55e],
+  ["emerald", 0x10b981],
+  ["teal", 0x14b8a6],
+  ["cyan", 0x06b6d4],
+  ["sky", 0x0ea5e9],
+  ["blue", 0x3b82f6],
+  ["indigo", 0x6366f1],
+  ["violet", 0x8b5cf6],
+  ["purple", 0xa855f7],
+  ["fuchsia", 0xd946ef],
+  ["pink", 0xec4899],
+  ["rose", 0xf43f5e],
+] as const satisfies ReadonlyArray<readonly [ProjectIconColor, number]>;
+const MIN_CHROMA = 48;
+const MIN_COLORFUL_SHARE = 0.08;
+const HUE_BINS = 36;
+
+function hueOf(r: number, g: number, b: number, max: number, chroma: number) {
+  const sector =
+    max === r
+      ? (g - b) / chroma + (g < b ? 6 : 0)
+      : max === g
+        ? (b - r) / chroma + 2
+        : (r - g) / chroma + 4;
+  return sector * 60;
+}
+
+const SWATCH_HUES = PALETTE_SWATCHES.map(([color, hex]) => {
+  const r = hex >> 16;
+  const g = (hex >> 8) & 0xff;
+  const b = hex & 0xff;
+  const max = Math.max(r, g, b);
+  return [color, hueOf(r, g, b, max, max - Math.min(r, g, b))] as const;
+});
+
+/**
+ * Picks the palette colour of an icon's dominant hue from RGBA pixels, or null when the icon
+ * is mostly transparent, black, white, or gray and its project title should stay neutral.
+ */
+export function projectIconColorFromPixels(rgba: ArrayLike<number>): ProjectIconColor | null {
+  const weights = new Float64Array(HUE_BINS);
+  const cosines = new Float64Array(HUE_BINS);
+  const sines = new Float64Array(HUE_BINS);
+  let opaque = 0;
+  let colorful = 0;
+  for (let index = 0; index + 3 < rgba.length; index += 4) {
+    if ((rgba[index + 3] ?? 0) < 128) continue;
+    opaque += 1;
+    const r = rgba[index] ?? 0;
+    const g = rgba[index + 1] ?? 0;
+    const b = rgba[index + 2] ?? 0;
+    const max = Math.max(r, g, b);
+    const chroma = max - Math.min(r, g, b);
+    if (chroma < MIN_CHROMA) continue;
+    colorful += 1;
+    const hue = hueOf(r, g, b, max, chroma);
+    const bin = Math.floor(hue / (360 / HUE_BINS)) % HUE_BINS;
+    const radians = (hue * Math.PI) / 180;
+    weights[bin]! += chroma;
+    cosines[bin]! += chroma * Math.cos(radians);
+    sines[bin]! += chroma * Math.sin(radians);
+  }
+  if (opaque === 0 || colorful / opaque < MIN_COLORFUL_SHARE) return null;
+
+  const around = (bin: number) => [(bin + HUE_BINS - 1) % HUE_BINS, bin, (bin + 1) % HUE_BINS];
+  let peak = 0;
+  let peakWeight = -1;
+  for (let bin = 0; bin < HUE_BINS; bin += 1) {
+    const weight = around(bin).reduce((sum, neighbor) => sum + weights[neighbor]!, 0);
+    if (weight > peakWeight) {
+      peak = bin;
+      peakWeight = weight;
+    }
+  }
+  const [cos, sin] = around(peak).reduce(
+    ([cosSum, sinSum], neighbor) => [cosSum + cosines[neighbor]!, sinSum + sines[neighbor]!],
+    [0, 0],
+  );
+  const hue = ((Math.atan2(sin, cos) * 180) / Math.PI + 360) % 360;
+  let nearest: ProjectIconColor = "blue";
+  let nearestDistance = Infinity;
+  for (const [color, swatchHue] of SWATCH_HUES) {
+    const delta = Math.abs(hue - swatchHue);
+    const distance = Math.min(delta, 360 - delta);
+    if (distance < nearestDistance) {
+      nearest = color;
+      nearestDistance = distance;
+    }
+  }
+  return nearest;
 }
 
 export interface ProjectFaviconStorage {
@@ -120,6 +222,8 @@ export function createProjectFaviconImageLoader(input: {
 export function createProjectFaviconCache(input: {
   readonly storage: ProjectFaviconStorage;
   readonly load: (url: string, signal: AbortSignal) => Promise<string>;
+  /** Decodes a cached data URL and returns `projectIconColorFromPixels` of it. */
+  readonly readColor: (dataUrl: string, signal: AbortSignal) => Promise<ProjectIconColor | null>;
 }) {
   const entries = new Map<string, ProjectFaviconEntry>();
   const environmentRevisions = new Map<EnvironmentId, number>();
@@ -168,6 +272,7 @@ export function createProjectFaviconCache(input: {
     })());
 
   const peek = (target: ProjectFaviconTarget) => entries.get(keyFor(target))?.dataUrl ?? null;
+  const peekColor = (target: ProjectFaviconTarget) => entries.get(keyFor(target))?.color ?? null;
 
   const resolve = async (
     target: ProjectFaviconTarget,
@@ -185,32 +290,46 @@ export function createProjectFaviconCache(input: {
       return null;
     }
     const revision = getProjectFaviconCacheKey(target.environmentId, target.cwd, url);
+    const stale = () =>
+      signal.aborted ||
+      startGeneration !== generation ||
+      startRevision !== (environmentRevisions.get(target.environmentId) ?? 0);
+    const store = (entry: ProjectFaviconEntry) => {
+      entries.set(key, entry);
+      persist(() => input.storage.put(key, entry));
+      trim();
+    };
+    const readColor = (dataUrl: string) =>
+      input.readColor(dataUrl, signal).then(
+        (color) => ({ color }),
+        () => ({}),
+      );
     const cached = entries.get(key);
     if (cached) {
       entries.delete(key);
       entries.set(key, cached);
-      if (cached.revision === revision) return cached.dataUrl;
+      if (cached.revision === revision) {
+        if (cached.color !== undefined) return cached.dataUrl;
+        const color = await readColor(cached.dataUrl);
+        if (!stale() && entries.get(key) === cached && "color" in color) {
+          store({ ...cached, ...color });
+        }
+        return peek(target);
+      }
     }
     try {
       const dataUrl = await input.load(url, signal);
-      if (
-        signal.aborted ||
-        startGeneration !== generation ||
-        startRevision !== (environmentRevisions.get(target.environmentId) ?? 0)
-      ) {
-        return peek(target);
-      }
+      const color = isImageDataUrl(dataUrl) ? await readColor(dataUrl) : {};
+      if (stale()) return peek(target);
       if (isImageDataUrl(dataUrl)) {
-        const entry = {
+        store({
           environmentId: target.environmentId,
           cwd: target.cwd,
           faviconPath: target.faviconPath || null,
           revision,
           dataUrl,
-        };
-        entries.set(key, entry);
-        persist(() => input.storage.put(key, entry));
-        trim();
+          ...color,
+        });
         return dataUrl;
       }
     } catch {}
@@ -245,6 +364,7 @@ export function createProjectFaviconCache(input: {
   return {
     hydrate,
     peek,
+    peekColor,
     resolve,
     clearEnvironment: (environmentId: EnvironmentId) => clear(environmentId),
     clearAll: () => clear(),

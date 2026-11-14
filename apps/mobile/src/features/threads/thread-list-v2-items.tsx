@@ -35,6 +35,7 @@ import {
 } from "@t3tools/client-runtime/state/thread-execution";
 import {
   AuthOrchestrationOperateScope,
+  type EnvironmentId,
   type EnvironmentMachineKind,
   type ThreadPinScope,
 } from "@t3tools/contracts";
@@ -51,7 +52,7 @@ import { SymbolView, type AppSymbolName } from "../../components/ui/AppSymbol";
 import { AppText as Text } from "../../components/ui/AppText";
 import { Menu } from "../../components/ui/Menu";
 import { EnvironmentMachineSymbol } from "../../components/EnvironmentMachineSymbol";
-import { ProjectFavicon } from "../../components/ProjectFavicon";
+import { ProjectFavicon, useProjectTitleColorClassName } from "../../components/ProjectFavicon";
 import {
   ProviderIcon,
   ProviderInstanceIcon,
@@ -201,8 +202,19 @@ const LEGACY_MENU_ACTIONS: MenuAction[] = [
   { id: "delete", title: "Delete", image: "trash", attributes: { destructive: true } },
 ];
 
+// The section header's gap-2.5.
+const FOLDER_HEADER_ICON_GAP = 10;
+
+/** A folder header's project icon; its rows indent by it to sit under the folder name. */
+function useFolderHeaderIconSize() {
+  const { fontScale } = useWindowDimensions();
+  return useScaledTextRole("label").fontSize * 1.25 * fontScale;
+}
+
 function ThreadListV2Section(props: {
   readonly label: string;
+  readonly labelClassName?: string | null;
+  readonly icon?: ReactNode;
   readonly pane?: "screen" | "sidebar";
   readonly tone?: "default" | "snoozed";
   readonly accessory?: ReactNode;
@@ -222,14 +234,16 @@ function ThreadListV2Section(props: {
   );
   const content = (
     <>
+      {props.icon}
       <Text
         className={cn(
           "text-xs font-t3-medium",
-          sidebarPane
-            ? "text-drawer-foreground-muted"
-            : snoozed
-              ? "text-foreground-secondary"
-              : "text-foreground-tertiary",
+          props.labelClassName ??
+            (sidebarPane
+              ? "text-drawer-foreground-muted"
+              : snoozed
+                ? "text-foreground-secondary"
+                : "text-foreground-tertiary"),
         )}
       >
         {props.label}
@@ -328,6 +342,7 @@ export const ThreadListV2ProjectFolderHeader = memo(
   function ThreadListV2ProjectFolderHeader(props: {
     readonly folderKey: string;
     readonly title: string;
+    readonly project: EnvironmentProject | null;
     readonly count: number;
     readonly collapsed: boolean;
     readonly dot: ProjectFolderDot | null;
@@ -340,9 +355,24 @@ export const ThreadListV2ProjectFolderHeader = memo(
   }) {
     const dot = props.collapsed && props.dot ? FOLDER_DOT[props.dot] : null;
     const { folderKey, moveUpKey, moveDownKey, onMove } = props;
+    const labelClassName = useProjectTitleColorClassName(props.project);
+    const iconSize = useFolderHeaderIconSize();
     const header = (
       <ThreadListV2Section
         label={props.collapsed ? `${props.title} (${props.count})` : props.title}
+        labelClassName={labelClassName}
+        icon={
+          props.project ? (
+            <ProjectFavicon
+              environmentId={props.project.environmentId}
+              faviconPath={props.project.faviconPath}
+              projectIcon={props.project.projectIcon}
+              size={iconSize}
+              projectTitle={props.project.title}
+              workspaceRoot={props.project.workspaceRoot}
+            />
+          ) : undefined
+        }
         pane={props.pane}
         accessory={
           dot ? (
@@ -454,6 +484,48 @@ const DRAFT_TASK_MENU_ACTIONS: MenuAction[] = [
   { id: "delete", title: "Discard", image: "trash", attributes: { destructive: true } },
 ];
 
+/** A thread row's first line: the project icon and its name in the icon's colour. */
+function ThreadListV2ProjectLine(props: {
+  readonly environmentId: EnvironmentId;
+  readonly project: EnvironmentProject;
+  readonly iconSize: number;
+  readonly lineHeight: number;
+  readonly selected: boolean;
+  readonly muted?: boolean;
+}) {
+  const { project } = props;
+  const titleColorClassName = useProjectTitleColorClassName({
+    ...project,
+    environmentId: props.environmentId,
+  });
+  return (
+    <View
+      className="min-w-0 flex-1 flex-row items-center gap-2"
+      style={{ height: props.lineHeight, opacity: props.muted ? 0.55 : 1 }}
+    >
+      <ProjectFavicon
+        environmentId={props.environmentId}
+        faviconPath={project.faviconPath}
+        projectIcon={project.projectIcon}
+        size={props.iconSize}
+        projectTitle={project.title}
+        workspaceRoot={project.workspaceRoot}
+      />
+      <Text
+        className={cn(
+          "flex-1 text-sm font-t3-medium",
+          props.selected
+            ? selectedThreadRowColors.mutedForegroundClassName
+            : (titleColorClassName ?? "text-foreground-secondary"),
+        )}
+        numberOfLines={1}
+      >
+        {project.title}
+      </Text>
+    </View>
+  );
+}
+
 export const ThreadListV2PendingRow = memo(function ThreadListV2PendingRow(props: {
   readonly pendingTask: PendingNewTask;
   readonly selected?: boolean;
@@ -537,42 +609,41 @@ export const ThreadListV2PendingRow = memo(function ThreadListV2PendingRow(props
   );
 
   const titleTextInset = props.project ? projectIconSize + 8 : 0;
+  const taskTitle = (
+    <Text
+      className={cn(
+        "flex-1 text-base font-t3-medium",
+        selected ? selectedThreadRowColors.foregroundClassName : rowAppearance.foregroundClassName,
+      )}
+      numberOfLines={2}
+      onTextLayout={
+        Platform.OS === "android"
+          ? ({ nativeEvent }) => {
+              const firstLine = nativeEvent.lines[0];
+              if (firstLine && Math.abs(firstLine.height - titleLineHeight) > 0.5) {
+                setTitleLineHeight(firstLine.height);
+              }
+            }
+          : undefined
+      }
+    >
+      {pendingTask.title}
+    </Text>
+  );
   const rowContent = (
     <>
       <View className="flex-row items-start gap-2">
         {props.project ? (
-          <View className="justify-center" style={{ height: titleLineHeight }}>
-            <ProjectFavicon
-              environmentId={pendingTask.environmentId}
-              faviconPath={props.project.faviconPath}
-              projectIcon={props.project.projectIcon}
-              size={projectIconSize}
-              projectTitle={projectTitle}
-              workspaceRoot={props.project.workspaceRoot}
-            />
-          </View>
-        ) : null}
-        <Text
-          className={cn(
-            "flex-1 text-base font-t3-medium",
-            selected
-              ? selectedThreadRowColors.foregroundClassName
-              : rowAppearance.foregroundClassName,
-          )}
-          numberOfLines={2}
-          onTextLayout={
-            Platform.OS === "android"
-              ? ({ nativeEvent }) => {
-                  const firstLine = nativeEvent.lines[0];
-                  if (firstLine && Math.abs(firstLine.height - titleLineHeight) > 0.5) {
-                    setTitleLineHeight(firstLine.height);
-                  }
-                }
-              : undefined
-          }
-        >
-          {pendingTask.title}
-        </Text>
+          <ThreadListV2ProjectLine
+            environmentId={pendingTask.environmentId}
+            project={{ ...props.project, title: projectTitle }}
+            iconSize={projectIconSize}
+            lineHeight={titleLineHeight}
+            selected={selected}
+          />
+        ) : (
+          taskTitle
+        )}
         {isDraft ? (
           <View className="flex-row items-center gap-1" style={{ minHeight: titleLineHeight }}>
             <SymbolView
@@ -599,6 +670,11 @@ export const ThreadListV2PendingRow = memo(function ThreadListV2PendingRow(props
           </View>
         ) : null}
       </View>
+      {props.project ? (
+        <View className="flex-row" style={{ paddingLeft: titleTextInset }}>
+          {taskTitle}
+        </View>
+      ) : null}
       {!isDraft ? (
         <View className="mt-1" style={{ paddingLeft: titleTextInset }}>
           <Text
@@ -741,6 +817,8 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
   readonly timeLabel: string;
   readonly snoozePresetMinute: string;
   readonly project: EnvironmentProject | null;
+  /** Under the project's folder header, which already names the project. */
+  readonly inFolder?: boolean;
   readonly providers: ReadonlyArray<ThreadListProvider> | undefined;
   readonly providerInstance: ThreadRowProviderInstance | null;
   readonly environmentLabel: string | null;
@@ -800,6 +878,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
   );
   const titleLineHeight =
     Platform.OS === "android" ? androidTitleLineHeight : titleTypography.lineHeight * fontScale;
+  const folderIconSize = useFolderHeaderIconSize();
   const {
     thread,
     variant,
@@ -1260,45 +1339,47 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
       ? `Opens the thread. Swipe left to ${primaryAction.label.toLowerCase()}.`
       : `Opens the thread. Swipe left for ${primaryAction.label.toLowerCase()} and snooze actions.`;
 
-  const titleTextInset = props.project ? projectIconSize + 8 : 0;
+  // The folder header carries the project's icon and name; its rows indent under that name.
+  const projectLine = props.inFolder ? null : props.project;
+  const folderIndent = props.inFolder ? folderIconSize + FOLDER_HEADER_ICON_GAP : 0;
+  const titleTextInset = projectLine ? projectIconSize + 8 : 0;
+  const threadTitle = (
+    <Text
+      className={cn(
+        "flex-1 text-base",
+        !recede && "font-t3-medium",
+        selected ? selectedThreadRowColors.foregroundClassName : rowAppearance.foregroundClassName,
+        isRegeneratingTitle && "opacity-55",
+      )}
+      numberOfLines={2}
+      onTextLayout={
+        Platform.OS === "android"
+          ? ({ nativeEvent }) => {
+              const firstLine = nativeEvent.lines[0];
+              if (firstLine && Math.abs(firstLine.height - titleLineHeight) > 0.5) {
+                setTitleLineHeight(firstLine.height);
+              }
+            }
+          : undefined
+      }
+    >
+      {thread.title}
+    </Text>
+  );
   const cardContent = (
     <>
       <View className="flex-row items-start gap-2">
-        {props.project ? (
-          <View className="justify-center" style={{ height: titleLineHeight }}>
-            <ProjectFavicon
-              environmentId={thread.environmentId}
-              faviconPath={props.project.faviconPath}
-              projectIcon={props.project.projectIcon}
-              size={projectIconSize}
-              projectTitle={props.project.title}
-              workspaceRoot={props.project.workspaceRoot}
-            />
-          </View>
-        ) : null}
-        <Text
-          className={cn(
-            "flex-1 text-base",
-            !recede && "font-t3-medium",
-            selected
-              ? selectedThreadRowColors.foregroundClassName
-              : rowAppearance.foregroundClassName,
-            isRegeneratingTitle && "opacity-55",
-          )}
-          numberOfLines={2}
-          onTextLayout={
-            Platform.OS === "android"
-              ? ({ nativeEvent }) => {
-                  const firstLine = nativeEvent.lines[0];
-                  if (firstLine && Math.abs(firstLine.height - titleLineHeight) > 0.5) {
-                    setTitleLineHeight(firstLine.height);
-                  }
-                }
-              : undefined
-          }
-        >
-          {thread.title}
-        </Text>
+        {projectLine ? (
+          <ThreadListV2ProjectLine
+            environmentId={thread.environmentId}
+            project={projectLine}
+            iconSize={projectIconSize}
+            lineHeight={titleLineHeight}
+            selected={selected}
+          />
+        ) : (
+          threadTitle
+        )}
         <View className="flex-row items-center gap-1.5" style={{ minHeight: titleLineHeight }}>
           {props.hasQueuedMessages ? <QueuedMessageIcon selected={selected} /> : null}
           {pinnedRow ? (
@@ -1417,6 +1498,11 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
           )}
         </View>
       </View>
+      {projectLine ? (
+        <View className="flex-row" style={{ paddingLeft: titleTextInset }}>
+          {threadTitle}
+        </View>
+      ) : null}
       {props.searchMatch ? (
         <View className="mt-1" style={{ paddingLeft: titleTextInset }}>
           <ThreadSearchMatchExcerpt
@@ -1587,10 +1673,70 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
     </>
   );
 
-  const fadedCardContent = recede ? (
-    <View style={{ opacity: 0.55 }}>{cardContent}</View>
-  ) : (
-    cardContent
+  const fadedCardContent =
+    recede || folderIndent > 0 ? (
+      <View style={{ opacity: recede ? 0.55 : 1, paddingLeft: folderIndent }}>{cardContent}</View>
+    ) : (
+      cardContent
+    );
+
+  const slimDetails = (
+    <View className="min-w-0 flex-1">
+      <Text
+        className={cn(
+          "text-base",
+          selected
+            ? selectedThreadRowColors.foregroundClassName
+            : rowAppearance.mutedForegroundClassName,
+          isRegeneratingTitle && "opacity-55",
+        )}
+        numberOfLines={1}
+      >
+        {thread.title}
+      </Text>
+      {providerNameLabel ? (
+        <Text
+          className={cn(
+            "text-xs",
+            selected
+              ? selectedThreadRowColors.mutedForegroundClassName
+              : rowAppearance.tertiaryForegroundClassName,
+          )}
+          ellipsizeMode="middle"
+          numberOfLines={1}
+        >
+          {providerNameLabel}
+        </Text>
+      ) : null}
+      {props.searchMatch ? (
+        <ThreadSearchMatchExcerpt
+          sidebar={sidebarPane}
+          match={props.searchMatch}
+          query={props.searchQuery ?? ""}
+          selected={selected}
+        />
+      ) : null}
+    </View>
+  );
+  const slimTrailing = (
+    <>
+      {props.hasQueuedMessages ? <QueuedMessageIcon selected={selected} /> : null}
+      <Text
+        className={cn(
+          "text-sm tabular-nums",
+          selected
+            ? selectedThreadRowColors.mutedForegroundClassName
+            : snoozedRow
+              ? rowAppearance.mutedForegroundClassName
+              : rowAppearance.tertiaryForegroundClassName,
+        )}
+        style={{ fontFamily: MONO_FONT }}
+      >
+        {snoozedRow && props.snoozeWakeLabelText !== undefined
+          ? props.snoozeWakeLabelText
+          : timeLabel}
+      </Text>
+    </>
   );
 
   const rowContent = (close: () => void) =>
@@ -1621,7 +1767,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
           <View>
             <View className={THREAD_LIST_V2_ROW_CONTENT_CLASS_NAME}>{fadedCardContent}</View>
             {THREAD_LIST_V2_ROW_DIVIDERS && props.showTrailingDivider !== false ? (
-              <View className="ml-5 h-px bg-border-subtle" />
+              <View className="h-px bg-border-subtle" style={{ marginLeft: 20 + folderIndent }} />
             ) : null}
           </View>
         )}
@@ -1642,78 +1788,41 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
         }}
         style={rowAppearance.style}
       >
-        <View
-          className={cn(
-            THREAD_LIST_V2_ROW_CONTENT_CLASS_NAME,
-            "min-h-[44px] flex-row items-center gap-2 py-2",
-            sidebarPane && "px-3",
-          )}
-        >
-          {props.project ? (
-            <View className="opacity-40">
-              <ProjectFavicon
-                environmentId={thread.environmentId}
-                faviconPath={props.project.faviconPath}
-                projectIcon={props.project.projectIcon}
-                size={projectIconSize}
-                projectTitle={props.project.title}
-                workspaceRoot={props.project.workspaceRoot}
-              />
-            </View>
-          ) : null}
-          <View className="min-w-0 flex-1">
-            <Text
-              className={cn(
-                "text-base",
-                selected
-                  ? selectedThreadRowColors.foregroundClassName
-                  : rowAppearance.mutedForegroundClassName,
-                isRegeneratingTitle && "opacity-55",
-              )}
-              numberOfLines={1}
-            >
-              {thread.title}
-            </Text>
-            {providerNameLabel ? (
-              <Text
-                className={cn(
-                  "text-xs",
-                  selected
-                    ? selectedThreadRowColors.mutedForegroundClassName
-                    : rowAppearance.tertiaryForegroundClassName,
-                )}
-                ellipsizeMode="middle"
-                numberOfLines={1}
-              >
-                {providerNameLabel}
-              </Text>
-            ) : null}
-            {props.searchMatch ? (
-              <ThreadSearchMatchExcerpt
-                sidebar={sidebarPane}
-                match={props.searchMatch}
-                query={props.searchQuery ?? ""}
-                selected={selected}
-              />
-            ) : null}
-          </View>
-          {props.hasQueuedMessages ? <QueuedMessageIcon selected={selected} /> : null}
-          <Text
+        {projectLine ? (
+          <View
             className={cn(
-              "text-sm tabular-nums",
-              selected
-                ? selectedThreadRowColors.mutedForegroundClassName
-                : snoozedRow
-                  ? rowAppearance.mutedForegroundClassName
-                  : rowAppearance.tertiaryForegroundClassName,
+              THREAD_LIST_V2_ROW_CONTENT_CLASS_NAME,
+              "min-h-[44px] py-2",
+              sidebarPane && "px-3",
             )}
-            style={{ fontFamily: MONO_FONT }}
           >
-            {snoozedRow && props.snoozeWakeLabelText !== undefined
-              ? props.snoozeWakeLabelText
-              : timeLabel}
-          </Text>
-        </View>
+            <View className="flex-row items-center gap-2">
+              <ThreadListV2ProjectLine
+                environmentId={thread.environmentId}
+                project={projectLine}
+                iconSize={projectIconSize}
+                lineHeight={titleLineHeight}
+                selected={selected}
+                muted
+              />
+              {slimTrailing}
+            </View>
+            <View className="flex-row" style={{ paddingLeft: titleTextInset }}>
+              {slimDetails}
+            </View>
+          </View>
+        ) : (
+          <View
+            className={cn(
+              THREAD_LIST_V2_ROW_CONTENT_CLASS_NAME,
+              "min-h-[44px] flex-row items-center gap-2 py-2",
+              sidebarPane && "px-3",
+            )}
+          >
+            {slimDetails}
+            {slimTrailing}
+          </View>
+        )}
       </RowPressable>
     );
 

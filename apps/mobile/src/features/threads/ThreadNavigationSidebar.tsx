@@ -438,6 +438,9 @@ function ThreadNavigationSidebarPane(props: ThreadNavigationSidebarProps) {
           <ThreadListV2ProjectFolderHeader
             folderKey={item.folderKey}
             title={item.title}
+            project={
+              projectScopes.find((scope) => scope.key === item.folderKey)?.representative ?? null
+            }
             count={item.count}
             collapsed={item.collapsed}
             dot={item.dot}
@@ -465,6 +468,7 @@ function ThreadNavigationSidebarPane(props: ThreadNavigationSidebarProps) {
             snoozeWakeLabelText={item.snoozeWakeLabelText}
             timeLabel={item.timeLabel}
             project={projectByKey.get(scopeKey) ?? null}
+            inFolder={item.item.inFolder}
             providerInstance={resolveProviderInstance(thread)}
             providers={providersByEnvironmentId.get(thread.environmentId)}
             environmentLabel={

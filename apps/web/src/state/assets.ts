@@ -1,6 +1,6 @@
 import {
   createAssetEnvironmentAtoms,
-  createProjectFaviconUrlAtomFamily,
+  createProjectFaviconAtomFamilies,
 } from "@t3tools/client-runtime/state/assets";
 import { Atom } from "effect/reactivity";
 
@@ -27,9 +27,12 @@ export const assetEnvironment = createAssetEnvironmentAtoms(
   localMediaEnvironment,
 );
 
-export const projectFaviconUrlAtom = createProjectFaviconUrlAtomFamily({
+const projectFavicon = createProjectFaviconAtomFamilies({
   imageCache: projectFaviconCache,
   createUrl: assetEnvironment.createUrl,
   preparedConnection: environmentSession.preparedConnectionValueAtom,
   projectClones: environmentProjectClonesAtom,
 });
+
+export const projectFaviconUrlAtom = projectFavicon.url;
+export const projectFaviconColorAtom = projectFavicon.color;

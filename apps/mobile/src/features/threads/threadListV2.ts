@@ -406,6 +406,8 @@ export interface ThreadListV2Item {
   readonly pinned: boolean;
   readonly wokeAt: string | null;
   readonly isLast: boolean;
+  /** Listed under its project's folder header, so the row leaves out the project name. */
+  readonly inFolder?: boolean;
 }
 
 export interface ThreadListV2FolderGroup {
@@ -547,6 +549,7 @@ export function threadListV2ListItemsAreEqual(
         previous.item.snoozed === item.item.snoozed &&
         previous.item.pinned === item.item.pinned &&
         previous.item.wokeAt === item.item.wokeAt &&
+        previous.item.inFolder === item.item.inFolder &&
         previous.snoozeWakeLabelText === item.snoozeWakeLabelText &&
         previous.timeLabel === item.timeLabel &&
         previous.snoozePresetMinute === item.snoozePresetMinute &&
@@ -1016,7 +1019,7 @@ export function buildThreadListV2Items(input: {
     });
   }
   const folderHeaders: ThreadListV2FolderHeader[] = [];
-  const pushActive = (thread: EnvironmentThreadShell) => {
+  const pushActive = (thread: EnvironmentThreadShell, inFolder: boolean) => {
     items.push({
       thread,
       variant: "card",
@@ -1024,6 +1027,7 @@ export function buildThreadListV2Items(input: {
       pinned: thread.pinnedAt != null,
       wokeAt: resolveThreadListV2WokeAt(thread, { now }),
       isLast: false,
+      ...(inFolder ? { inFolder } : {}),
     });
   };
   if (projectFolders) {
@@ -1062,7 +1066,7 @@ export function buildThreadListV2Items(input: {
         moveUpKey: null,
         moveDownKey: null,
       });
-      visible.forEach(pushActive);
+      for (const thread of visible) pushActive(thread, true);
     }
     const sectionOf = (group: ThreadListV2FolderGroup) =>
       group.archived ? "archived" : group.pinned ? "pinned" : "open";
@@ -1077,7 +1081,7 @@ export function buildThreadListV2Items(input: {
       };
     });
   } else {
-    orderedActive.forEach(pushActive);
+    for (const thread of orderedActive) pushActive(thread, false);
   }
   const workingShelfHeaderIndex = orderedWorking.length > 0 ? items.length : null;
   for (const thread of visibleWorking) {

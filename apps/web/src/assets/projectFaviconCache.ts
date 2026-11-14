@@ -3,6 +3,7 @@ import {
   createProjectFaviconImageLoader,
   PROJECT_FAVICON_MAX_DATA_URL_LENGTH,
   PROJECT_FAVICON_THUMBNAIL_SIZE,
+  projectIconColorFromPixels,
 } from "@t3tools/client-runtime/project-favicon-cache";
 
 const DATABASE_NAME = "t3code:project-favicons";
@@ -70,6 +71,24 @@ async function downscaleProjectFavicon(
   }
 }
 
+const COLOR_SAMPLE_SIZE = 16;
+
+async function readProjectFaviconColor(dataUrl: string, signal: AbortSignal) {
+  const image = new Image();
+  image.src = dataUrl;
+  await image.decode();
+  signal.throwIfAborted();
+  const canvas = document.createElement("canvas");
+  canvas.width = COLOR_SAMPLE_SIZE;
+  canvas.height = COLOR_SAMPLE_SIZE;
+  const context = canvas.getContext("2d", { willReadFrequently: true });
+  if (!context) throw new Error("Canvas is unavailable.");
+  context.drawImage(image, 0, 0, COLOR_SAMPLE_SIZE, COLOR_SAMPLE_SIZE);
+  return projectIconColorFromPixels(
+    context.getImageData(0, 0, COLOR_SAMPLE_SIZE, COLOR_SAMPLE_SIZE).data,
+  );
+}
+
 export const projectFaviconCache = createProjectFaviconCache({
   storage: {
     list: async () => (await withStore("readonly", (store) => store.getAll())) ?? [],
@@ -81,4 +100,5 @@ export const projectFaviconCache = createProjectFaviconCache({
     },
   },
   load: createProjectFaviconImageLoader({ downscale: downscaleProjectFavicon }),
+  readColor: readProjectFaviconColor,
 });

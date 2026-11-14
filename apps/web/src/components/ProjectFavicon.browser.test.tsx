@@ -12,6 +12,7 @@ vi.mock(import("../state/assets"), () => ({
     if (!state.favicon) throw new Error("Favicon resource not configured");
     return state.favicon;
   },
+  projectFaviconColorAtom: () => Atom.make(null),
 }));
 
 function setup() {

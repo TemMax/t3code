@@ -8,6 +8,7 @@ import {
   PROJECT_FAVICON_CACHE_MAX_ENTRIES,
   PROJECT_FAVICON_MAX_DATA_URL_LENGTH,
   PROJECT_FAVICON_MAX_SOURCE_BYTES,
+  projectIconColorFromPixels,
   type ProjectFaviconEntry,
   type ProjectFaviconStorage,
 } from "./projectFaviconCache.ts";
@@ -29,6 +30,7 @@ function deferred<A>() {
 function fixture() {
   const records = new Map<string, ProjectFaviconEntry>();
   const load = vi.fn(async () => image);
+  const readColor = vi.fn(async (): Promise<"blue" | null> => "blue");
   const storage: ProjectFaviconStorage = {
     list: async () => [...records.values()],
     put: async (key, entry) => {
@@ -41,8 +43,9 @@ function fixture() {
   return {
     storage,
     load,
+    readColor,
     records,
-    cache: createProjectFaviconCache({ storage, load }),
+    cache: createProjectFaviconCache({ storage, load, readColor }),
   };
 }
 
@@ -51,6 +54,8 @@ describe("persistent project favicon cache", () => {
     const { cache } = fixture();
     await cache.resolve(target, url, signal());
     expect(cache.peek({ ...target, faviconPath: null })).toBe(image);
+    expect(cache.peekColor(target)).toBe("blue");
+    expect(cache.peekColor({ ...target, cwd: "/other" })).toBeNull();
     expect(cache.peek({ ...target, faviconPath: "brand.svg" })).toBeNull();
     expect(cache.peek({ ...target, cwd: "/other" })).toBeNull();
     expect(cache.peek({ ...target, environmentId: EnvironmentId.make("other") })).toBeNull();
@@ -91,6 +96,20 @@ describe("persistent project favicon cache", () => {
     },
   );
 
+  it("retries a failed colour read from the cached image without downloading it again", async () => {
+    const { cache, load, readColor, records } = fixture();
+    readColor.mockRejectedValueOnce(new Error("decoder busy"));
+    await cache.resolve(target, url, signal());
+    expect(cache.peekColor(target)).toBeNull();
+    const rotated = url.replace("token-a", "token-b");
+    expect(await cache.resolve(target, rotated, signal())).toBe(image);
+    await cache.flush();
+    expect(load).toHaveBeenCalledTimes(1);
+    expect(readColor).toHaveBeenCalledTimes(2);
+    expect(cache.peekColor(target)).toBe("blue");
+    expect([...records.values()][0]?.color).toBe("blue");
+  });
+
   it("bounds individual images, total bytes, and entry count in storage", async () => {
     const { cache, load, records } = fixture();
     load.mockResolvedValueOnce(
@@ -122,17 +141,29 @@ describe("persistent project favicon cache", () => {
     const corrupt = createProjectFaviconCache({
       storage: {
         list: async () => [
-          { ...target, faviconPath: null, revision: "r", dataUrl: image },
-          { ...target, cwd: "/broken", faviconPath: null, revision: "r", dataUrl: "not-an-image" },
+          { ...target, faviconPath: null, revision: "r", dataUrl: image, color: "teal" },
+          { ...target, cwd: "/before-colors", faviconPath: null, revision: "r", dataUrl: image },
+          {
+            ...target,
+            cwd: "/broken",
+            faviconPath: null,
+            revision: "r",
+            dataUrl: "not-an-image",
+            color: null,
+          },
           "garbage",
         ],
         put: async () => {},
         remove: async () => {},
       },
       load: async () => replacement,
+      readColor: async () => null,
     });
     await corrupt.hydrate();
     expect(corrupt.peek(target)).toBe(image);
+    expect(corrupt.peekColor(target)).toBe("teal");
+    expect(corrupt.peek({ ...target, cwd: "/before-colors" })).toBe(image);
+    expect(corrupt.peekColor({ ...target, cwd: "/before-colors" })).toBeNull();
     expect(corrupt.peek({ ...target, cwd: "/broken" })).toBeNull();
 
     const unavailable = createProjectFaviconCache({
@@ -148,10 +179,51 @@ describe("persistent project favicon cache", () => {
         },
       },
       load: async () => image,
+      readColor: async () => {
+        throw new Error("decode failed");
+      },
     });
     expect(await unavailable.resolve(target, url, signal())).toBe(image);
     await unavailable.flush();
     expect(unavailable.peek(target)).toBe(image);
+  });
+});
+
+function pixels(...runs: ReadonlyArray<readonly [count: number, rgba: readonly number[]]>) {
+  return runs.flatMap(([count, rgba]) => Array.from({ length: count }, () => rgba).flat());
+}
+
+describe("project icon color from pixels", () => {
+  it.each([
+    { icon: "a solid red square", rgba: pixels([256, [220, 38, 38, 255]]), color: "red" },
+    {
+      icon: "a blue mark on transparency",
+      rgba: pixels([200, [0, 0, 0, 0]], [56, [37, 99, 235, 255]]),
+      color: "blue",
+    },
+    {
+      icon: "a green majority beside purple",
+      rgba: pixels([150, [22, 163, 74, 255]], [100, [147, 51, 234, 255]]),
+      color: "green",
+    },
+    {
+      icon: "a hue between sky and blue",
+      rgba: pixels([256, [30, 150, 240, 255]]),
+      color: "sky",
+    },
+    {
+      icon: "black and white",
+      rgba: pixels([128, [0, 0, 0, 255]], [128, [255, 255, 255, 255]]),
+      color: null,
+    },
+    {
+      icon: "a tiny accent on white",
+      rgba: pixels([250, [255, 255, 255, 255]], [6, [220, 38, 38, 255]]),
+      color: null,
+    },
+    { icon: "only transparency", rgba: pixels([256, [255, 0, 0, 0]]), color: null },
+  ])("names $icon $color", ({ rgba, color }) => {
+    expect(projectIconColorFromPixels(rgba)).toBe(color);
   });
 });
 
