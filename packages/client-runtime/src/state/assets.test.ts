@@ -23,11 +23,12 @@ import {
 } from "../connection/model.ts";
 import * as EnvironmentRegistry from "../connection/registry.ts";
 import * as EnvironmentSupervisor from "../connection/supervisor.ts";
+import { createProjectFaviconCache } from "../projectFaviconCache.ts";
 import type * as RpcSession from "../rpc/session.ts";
 import {
   ASSET_URL_MAX_IN_FLIGHT,
   createAssetEnvironmentAtoms,
-  createProjectFaviconUrlAtomFamily,
+  createProjectFaviconAtomFamilies,
   makeRevisionedAssetUrlFamily,
 } from "./assets.ts";
 
@@ -40,10 +41,10 @@ describe("project favicon URL cache", () => {
         relativeUrl: "/api/assets/token/icon.svg",
       }),
     );
-    const favicon = createProjectFaviconUrlAtomFamily({
+    const favicon = createProjectFaviconAtomFamilies({
       createUrl: () => result,
       preparedConnection: () => Atom.make(Option.some({ httpBaseUrl: "https://remote.test" })),
-    });
+    }).url;
     const target = { environmentId: EnvironmentId.make("remote"), cwd: "/workspace" };
     const unmount = registry.mount(favicon(target));
     try {
@@ -59,6 +60,61 @@ describe("project favicon URL cache", () => {
       );
     } finally {
       unmount();
+      registry.dispose();
+    }
+  });
+});
+
+describe("project favicon color", () => {
+  it("updates when a retried read colours an image whose URL did not change", async () => {
+    const registry = AtomRegistry.make();
+    const image = "data:image/png;base64,aWNvbg==";
+    const reads = [
+      () => Promise.reject(new Error("decoder busy")),
+      () => Promise.resolve("blue" as const),
+    ];
+    const cache = createProjectFaviconCache({
+      storage: { list: async () => [], put: async () => {}, remove: async () => {} },
+      load: async () => image,
+      readColor: () => reads.shift()?.() ?? Promise.resolve(null),
+    });
+    const minted = (token: string) =>
+      AsyncResult.success({
+        expiresAt: 4_000_000_000_000,
+        relativeUrl: `/api/assets/${token}/vabc-icon.png`,
+      });
+    const result = Atom.make<AsyncResult.AsyncResult<AssetCreateUrlResult, unknown>>(
+      minted("token-a"),
+    );
+    const favicon = createProjectFaviconAtomFamilies({
+      imageCache: cache,
+      createUrl: () => result,
+      preparedConnection: () => Atom.make(Option.some({ httpBaseUrl: "https://remote.test" })),
+    });
+    const target = { environmentId: EnvironmentId.make("remote"), cwd: "/workspace" };
+    const valueOnce = <A>(atom: Atom.Atom<A>, expected: A) =>
+      new Promise<void>((resolve) => {
+        const stop = registry.subscribe(
+          atom,
+          (value) => {
+            if (value !== expected) return;
+            queueMicrotask(() => stop());
+            resolve();
+          },
+          { immediate: true },
+        );
+      });
+    const unmountUrl = registry.mount(favicon.url(target));
+    const unmountColor = registry.mount(favicon.color(target));
+    try {
+      await valueOnce(favicon.url(target), image);
+      expect(registry.get(favicon.color(target))).toBeNull();
+      registry.set(result, minted("token-b"));
+      await valueOnce(favicon.color(target), "blue");
+      expect(registry.get(favicon.url(target))).toBe(image);
+    } finally {
+      unmountColor();
+      unmountUrl();
       registry.dispose();
     }
   });

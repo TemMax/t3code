@@ -224,7 +224,11 @@ import {
   snoozeWakeLabel,
   type SnoozePreset,
 } from "./Sidebar.snooze";
-import { ProjectFavicon } from "./ProjectFavicon";
+import {
+  ProjectFavicon,
+  type ProjectFaviconProject,
+  useProjectTitleColorClassName,
+} from "./ProjectFavicon";
 import { deriveProviderEntriesByEnvironment } from "../providerInstances";
 import { useStableCallback } from "../hooks/useStableCallback";
 import {
@@ -866,6 +870,11 @@ function useSidebarLookups() {
     projectGroupByScopeKey,
     projectScopeItems,
   };
+}
+
+function ProjectScopeRowLabel(props: { project: ProjectFaviconProject | null; label: string }) {
+  const titleColorClassName = useProjectTitleColorClassName(props.project);
+  return <span className={cn("min-w-0 truncate text-sm", titleColorClassName)}>{props.label}</span>;
 }
 
 function ProjectScopeRowIcon(props: { isSelected: boolean; children: ReactNode }) {
@@ -3187,7 +3196,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                                 <FolderIcon className="size-4 shrink-0" />
                               )}
                             </ProjectScopeRowIcon>
-                            <span className="min-w-0 truncate text-sm">{item.label}</span>
+                            <ProjectScopeRowLabel project={project} label={item.label} />
                             {project && showProjectEnvironments ? (
                               <ProjectEnvironmentBadge
                                 group={project}

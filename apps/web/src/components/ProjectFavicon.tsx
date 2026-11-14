@@ -7,9 +7,11 @@ import { FolderCodeIcon } from "lucide-react";
 import type { ComponentType } from "react";
 import { createElement, lazy, Suspense, useState } from "react";
 import { useAtomValue } from "@effect/atom-react";
-import { projectFaviconUrlAtom } from "../state/assets";
+import { Atom } from "effect/reactivity";
+import type { ProjectIconColor } from "@t3tools/contracts";
+import { projectFaviconColorAtom, projectFaviconUrlAtom } from "../state/assets";
 import { deriveProjectIdentity } from "../projectIdentity";
-import { projectIconColorClassName } from "../projectIconColors";
+import { projectIconColorClassName, projectTitleColorClassName } from "../projectIconColors";
 import { ProjectMonogram } from "./ProjectMonogram";
 import { cn } from "~/lib/utils";
 
@@ -32,6 +34,36 @@ export type ProjectFaviconProject = Pick<
   EnvironmentProject,
   "environmentId" | "workspaceRoot" | "title" | "faviconPath" | "projectIcon"
 >;
+const NO_FAVICON_URL = Atom.make<string | null>(null);
+const NO_FAVICON_COLOR = Atom.make<ProjectIconColor | null>(null);
+
+/** The text colour class that ties a project's title to the colour its icon shows. */
+export function useProjectTitleColorClassName(project: ProjectFaviconProject | null) {
+  const target =
+    project && project.projectIcon == null
+      ? {
+          environmentId: project.environmentId,
+          cwd: project.workspaceRoot,
+          faviconPath: project.faviconPath,
+        }
+      : null;
+  const faviconUrl = useAtomValue(target ? projectFaviconUrlAtom(target) : NO_FAVICON_URL);
+  const faviconColor = useAtomValue(target ? projectFaviconColorAtom(target) : NO_FAVICON_COLOR);
+  if (!project) return null;
+  const icon = project.projectIcon;
+  const color =
+    icon?.kind === "monogram" || icon?.kind === "lucide"
+      ? icon.color
+      : icon?.kind === "emoji"
+        ? null
+        : faviconUrl && !isProjectFaviconFallbackUrl(faviconUrl)
+          ? faviconColor
+          : project.title.trim()
+            ? deriveProjectIdentity(project.title).color
+            : null;
+  return color ? projectTitleColorClassName(color) : null;
+}
+
 export function ProjectFavicon(input: {
   project: ProjectFaviconProject;
   className?: string | undefined;

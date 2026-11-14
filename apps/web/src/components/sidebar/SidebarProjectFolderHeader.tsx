@@ -7,7 +7,7 @@ import { cn } from "~/lib/utils";
 import type { SidebarProjectSnapshot } from "../../sidebarProjectGrouping";
 import { useUiStateStore } from "../../uiStateStore";
 import { resolveSidebarFolderDot, resolveThreadLastVisitedAt } from "../Sidebar.logic";
-import { ProjectFavicon } from "../ProjectFavicon";
+import { ProjectFavicon, useProjectTitleColorClassName } from "../ProjectFavicon";
 import { Button } from "../ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 
@@ -57,6 +57,7 @@ export const SidebarProjectFolderHeader = memo(function SidebarProjectFolderHead
 }) {
   const { group, collapsed, hiddenThreads, reorderable } = props;
   const rowId = sidebarFolderRowId(group.projectKey);
+  const titleColorClassName = useProjectTitleColorClassName(group);
   const localLastVisitedAtById = useUiStateStore((state) => state.threadLastVisitedAtById);
   const dot = collapsed
     ? resolveSidebarFolderDot(
@@ -129,7 +130,12 @@ export const SidebarProjectFolderHeader = memo(function SidebarProjectFolderHead
         )}
       >
         <ProjectFavicon project={group} className="size-4 shrink-0" />
-        <span className="min-w-0 flex-1 truncate text-sm font-medium text-sidebar-foreground/90">
+        <span
+          className={cn(
+            "min-w-0 flex-1 truncate text-sm font-medium",
+            titleColorClassName ?? "text-sidebar-foreground/90",
+          )}
+        >
           {group.displayName}
         </span>
         {dot ? (

@@ -4,7 +4,7 @@ import {
   assetUrlStateFromResult,
   blockedAssetUrlState,
   createAssetEnvironmentAtoms,
-  createProjectFaviconUrlAtomFamily,
+  createProjectFaviconAtomFamilies,
   EMPTY_ASSET_URL_ATOM,
   makeRevisionedAssetUrlFamily,
 } from "@t3tools/client-runtime/state/assets";
@@ -30,12 +30,15 @@ export type { AssetUrlFailureReason, AssetUrlState } from "./asset-url-state";
 
 export const assetEnvironment = createAssetEnvironmentAtoms(connectionAtomRuntime);
 
-export const projectFaviconUrlAtom = createProjectFaviconUrlAtomFamily({
+const projectFavicon = createProjectFaviconAtomFamilies({
   imageCache: projectFaviconDatabaseCache,
   createUrl: assetEnvironment.createUrl,
   preparedConnection: environmentSession.preparedConnectionValueAtom,
   projectClones: environmentProjectCloneListAtom,
 });
+
+export const projectFaviconUrlAtom = projectFavicon.url;
+export const projectFaviconColorAtom = projectFavicon.color;
 
 const revisionedAssetUrl = makeRevisionedAssetUrlFamily(assetEnvironment.createUrl);
 

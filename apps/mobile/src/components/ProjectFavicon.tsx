@@ -3,7 +3,7 @@ import { AppText } from "./ui/AppText";
 import { Image } from "expo-image";
 import { memo, useLayoutEffect, useState } from "react";
 import { View } from "react-native";
-import type { EnvironmentId, ProjectIconOverride } from "@t3tools/contracts";
+import type { EnvironmentId, ProjectIconColor, ProjectIconOverride } from "@t3tools/contracts";
 import {
   getProjectFaviconCacheKey,
   getProjectFaviconResourceKey,
@@ -11,7 +11,7 @@ import {
 } from "@t3tools/shared/projectFavicon";
 import { useAtomValue } from "@effect/atom-react";
 import { Atom } from "effect/reactivity";
-import { projectFaviconUrlAtom } from "../state/assets";
+import { projectFaviconColorAtom, projectFaviconUrlAtom } from "../state/assets";
 import {
   countGlyphs,
   projectAutoMonogram,
@@ -30,6 +30,43 @@ import {
 } from "../lib/projectFaviconRequests";
 
 const EMPTY_FAVICON_URL = Atom.make<string | null>(null);
+const EMPTY_FAVICON_COLOR = Atom.make<ProjectIconColor | null>(null);
+
+/** The text colour class that ties a project's title to the colour its icon shows. */
+export function useProjectTitleColorClassName(
+  project: {
+    readonly environmentId: EnvironmentId;
+    readonly title: string;
+    readonly workspaceRoot?: string | null;
+    readonly faviconPath?: string | null;
+    readonly projectIcon?: ProjectIconOverride | null;
+  } | null,
+) {
+  const target =
+    project && project.projectIcon == null && project.workspaceRoot != null
+      ? {
+          environmentId: project.environmentId,
+          cwd: project.workspaceRoot,
+          faviconPath: project.faviconPath,
+        }
+      : null;
+  const faviconUrl = useAtomValue(target ? projectFaviconUrlAtom(target) : EMPTY_FAVICON_URL);
+  const faviconColor = useAtomValue(target ? projectFaviconColorAtom(target) : EMPTY_FAVICON_COLOR);
+  if (!project) return null;
+  const icon = project.projectIcon;
+  const auto = projectAutoMonogram(project.title);
+  const color =
+    icon?.kind === "monogram" || icon?.kind === "lucide"
+      ? icon.color
+      : icon?.kind === "emoji"
+        ? null
+        : faviconUrl && !isProjectFaviconFallbackUrl(faviconUrl)
+          ? faviconColor
+          : auto?.kind === "monogram"
+            ? auto.color
+            : null;
+  return color ? projectIconColorClassNames(color).title : null;
+}
 
 export const ProjectFavicon = memo(function ProjectFavicon(props: {
   readonly environmentId: EnvironmentId;
