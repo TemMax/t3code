@@ -115,7 +115,11 @@ import { pickSnoozePreset, resolveSnoozePresets, type SnoozePreset } from "../Si
 import { useThreadShell } from "../../state/entities";
 import { useWorkingSubagentCount } from "./subagentActivity";
 import { ownWorkingSubagentCount, withWorkingSubagents } from "./subagentActivity.logic";
-import { ProjectFavicon, type ProjectFaviconProject } from "../ProjectFavicon";
+import {
+  ProjectFavicon,
+  type ProjectFaviconProject,
+  useProjectTitleColorClassName,
+} from "../ProjectFavicon";
 import { ThreadSearchMatchExcerpt } from "../ThreadSearchMatch";
 import { makeWorkspaceFileDropHandlers } from "../chat/workspaceFileDrop";
 import { ProviderInstanceIcon } from "../chat/ProviderInstanceIcon";
@@ -273,6 +277,7 @@ function SidebarThreadTooltip({
   activity: SidebarThreadSummary["activity"];
   workingSubagents: number;
 }) {
+  const projectTitleColorClassName = useProjectTitleColorClassName(project);
   const activityPresentation = activity ? THREAD_ACTIVITY_PRESENTATION[activity.phase] : null;
   const driverKind = providerEntry?.driverKind ?? null;
   const previousProviderNames = thread.providerInstanceHistory
@@ -314,7 +319,11 @@ function SidebarThreadTooltip({
         {projectDisplayName ? (
           <div className="flex min-w-0 items-center gap-2">
             {project ? <ProjectFavicon project={project} className="size-3 shrink-0" /> : null}
-            <div className="min-w-0 truncate text-foreground/75">{projectDisplayName}</div>
+            <div
+              className={cn("min-w-0 truncate", projectTitleColorClassName ?? "text-foreground/75")}
+            >
+              {projectDisplayName}
+            </div>
           </div>
         ) : null}
         {environmentLabel ? (
@@ -765,6 +774,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     ? resolveThreadCurrentPullRequestLink(thread.pullRequests)
     : null;
 
+  const projectTitleColorClassName = useProjectTitleColorClassName(props.project);
   const isUnread = hasUnseenCompletion({ ...thread, lastVisitedAt });
   // Tasks delegated to other environments only show through the thread's own wait.
   const workingSubagents = Math.max(
@@ -1020,7 +1030,8 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     "group/sidebar-row relative w-full cursor-pointer overflow-hidden rounded-md text-left outline-none select-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
     variantAction === "unsettle" &&
       !props.isActive &&
-      "[&:not(:hover):not(:focus-within)_*]:text-secondary-label",
+      // The project name keeps its colour and recedes by opacity instead, as on mobile.
+      "[&:not(:hover):not(:focus-within)_*:not([data-project-name])]:text-secondary-label",
     props.isActive
       ? "bg-sidebar-row-active text-sidebar-foreground light:ring-1 light:ring-inset light:ring-sidebar-border/70"
       : isSelected || props.sweepAction !== null
@@ -1266,6 +1277,18 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
   if (variant !== "card") {
     const multiline = variant === "folder-multiline";
     const inFolder = variant === "folder" || multiline;
+    // Outside folders a slim row names its project above the title, as on mobile.
+    const projectLine = !inFolder && props.project && props.projectDisplayName;
+    const recedeProject = !props.isActive || variantAction === "unsettle";
+    const rowTitle = (
+      <>
+        {draftIndicator}
+        {title}
+        {multiline ? titleLineIcons : null}
+        {pinIndicator}
+        {multiline ? null : terminalStatusIcon}
+      </>
+    );
     return (
       <li
         data-thread-item={threadKey}
@@ -1274,6 +1297,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
         className={cn(
           "list-none [content-visibility:auto] [contain-intrinsic-size:auto_--spacing(9)]",
           metaLine !== null && multiline && "[contain-intrinsic-size:auto_--spacing(13.5)]",
+          projectLine && "[contain-intrinsic-size:auto_--spacing(13)]",
           sortable?.isDragging && "relative z-20",
         )}
       >
@@ -1292,7 +1316,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                 aria-busy={isRegeneratingTitle || undefined}
                 className={cn(
                   rowSurfaceClassName,
-                  multiline
+                  multiline || projectLine
                     ? "flex flex-col justify-center px-2.5 py-1.5"
                     : "flex h-9 items-center gap-2.5 px-2.5",
                   // Lines titles up with the folder name, past its chevron and icon.
@@ -1306,13 +1330,21 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
             }
           >
             {/* `contents` keeps one-line rows a single flex row. */}
-            <div className={multiline ? "flex h-6 min-w-0 items-center gap-2.5" : "contents"}>
+            <div
+              className={
+                multiline
+                  ? "flex h-6 min-w-0 items-center gap-2.5"
+                  : projectLine
+                    ? "flex h-5 min-w-0 items-center gap-1.5"
+                    : "contents"
+              }
+            >
               {accessibleTitle}
               {inFolder ? null : (
                 <span
                   className={cn(
                     "flex shrink-0 items-center transition-opacity",
-                    (!props.isActive || variantAction === "unsettle") &&
+                    recedeProject &&
                       "opacity-40 grayscale group-focus-within/sidebar-row:opacity-100 group-focus-within/sidebar-row:grayscale-0 group-hover/sidebar-row:opacity-100 group-hover/sidebar-row:grayscale-0",
                   )}
                 >
@@ -1321,11 +1353,21 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                   ) : null}
                 </span>
               )}
-              {draftIndicator}
-              {title}
-              {multiline ? titleLineIcons : null}
-              {pinIndicator}
-              {multiline ? null : terminalStatusIcon}
+              {projectLine ? (
+                <span
+                  data-project-name
+                  className={cn(
+                    "min-w-0 flex-1 truncate text-xs transition-opacity",
+                    projectTitleColorClassName ?? "text-secondary-label",
+                    recedeProject &&
+                      "opacity-55 group-focus-within/sidebar-row:opacity-100 group-hover/sidebar-row:opacity-100",
+                  )}
+                >
+                  {props.projectDisplayName}
+                </span>
+              ) : (
+                rowTitle
+              )}
               {isRegeneratingTitle ? (
                 <span role="status" className="sr-only">
                   Regenerating title
@@ -1463,6 +1505,10 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
               )}
               {props.sweepAction !== null ? dragDestination : null}
             </div>
+            {projectLine ? (
+              // Indented past the icon and gap so the title sits under the project name.
+              <div className="flex h-5 min-w-0 items-center gap-2.5 ps-5.5">{rowTitle}</div>
+            ) : null}
             {multiline ? metaLine : null}
           </TooltipTrigger>
           {detailsTooltip}
@@ -1534,7 +1580,10 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                 </span>
               ) : props.projectDisplayName ? (
                 <span
-                  className={cn("min-w-0 flex-1 truncate font-normal text-secondary-label text-xs")}
+                  className={cn(
+                    "min-w-0 flex-1 truncate font-normal text-xs",
+                    projectTitleColorClassName ?? "text-secondary-label",
+                  )}
                 >
                   {props.projectDisplayName}
                 </span>
