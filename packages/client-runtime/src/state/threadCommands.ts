@@ -46,7 +46,10 @@ import {
   revertThreadCheckpoint,
   setThreadInteractionMode,
   setThreadRuntimeMode,
+  attachThreadToGroup,
+  detachThreadFromGroup,
   pinThread,
+  reorderThreadInGroup,
   reorderPinnedThread,
   reorderActiveThread,
   setThreadAutoSettle,
@@ -235,6 +238,24 @@ export function createThreadEnvironmentAtoms<R, E>(
     reorderPin: createEnvironmentCommand(runtime, {
       label: "environment-data:commands:thread:reorder-pin",
       execute: reorderPinnedThread,
+      scheduler,
+      concurrency,
+    }),
+    attachToGroup: createEnvironmentCommand(runtime, {
+      label: "environment-data:commands:thread:group-attach",
+      execute: attachThreadToGroup,
+      scheduler,
+      concurrency,
+    }),
+    detachFromGroup: createEnvironmentCommand(runtime, {
+      label: "environment-data:commands:thread:group-detach",
+      execute: detachThreadFromGroup,
+      scheduler,
+      concurrency,
+    }),
+    reorderInGroup: createEnvironmentCommand(runtime, {
+      label: "environment-data:commands:thread:group-reorder",
+      execute: reorderThreadInGroup,
       scheduler,
       concurrency,
     }),
@@ -549,6 +570,20 @@ export function createThreadEnvironmentAtoms<R, E>(
     reorderPin: optimistic.wrap(commands.reorderPin, (thread, input) => ({
       ...thread,
       pinOrderKey: input.orderKey,
+    })),
+    attachToGroup: optimistic.wrap(commands.attachToGroup, (thread, input) => ({
+      ...thread,
+      groupParentThreadId: input.parentThreadId,
+      ...(input.orderKey === undefined ? {} : { groupOrderKey: input.orderKey }),
+    })),
+    detachFromGroup: optimistic.wrap(commands.detachFromGroup, (thread) => ({
+      ...thread,
+      groupParentThreadId: null,
+      groupOrderKey: null,
+    })),
+    reorderInGroup: optimistic.wrap(commands.reorderInGroup, (thread, input) => ({
+      ...thread,
+      groupOrderKey: input.orderKey,
     })),
     reorderActive: optimistic.wrap(commands.reorderActive, (thread, input) => ({
       ...thread,
