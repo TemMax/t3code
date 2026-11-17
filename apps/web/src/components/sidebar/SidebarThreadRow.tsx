@@ -1356,6 +1356,8 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
       />
     </span>
   ) : null;
+  // A worker under its parent drops the project line, so its title takes that first line.
+  const workerTitleInline = hideCardProjectLine && !(activity && activityPresentation);
 
   if (variant !== "card") {
     const multiline = variant === "folder-multiline";
@@ -1633,7 +1635,9 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
       // that have not rendered yet, so a hint off by a pixel lands it a pixel short per row above.
       className={cn(
         "list-none py-0.5 [content-visibility:auto] [contain-intrinsic-size:auto_78px]",
-        metaLineEmpty && "[contain-intrinsic-size:auto_60px]",
+        metaLineEmpty && !workerTitleInline && "[contain-intrinsic-size:auto_60px]",
+        workerTitleInline && !metaLineEmpty && "[contain-intrinsic-size:auto_54px]",
+        workerTitleInline && metaLineEmpty && "[contain-intrinsic-size:auto_36px]",
         sortable?.isDragging && "relative z-20",
       )}
     >
@@ -1661,10 +1665,13 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
           <div
             className={cn(
               "relative z-10 h-[4.875rem] px-(--sidebar-row-content-inset) py-(--sidebar-content-inset)",
-              metaLineEmpty && "h-auto",
+              (metaLineEmpty || workerTitleInline) && "h-auto",
             )}
           >
-            <div className="flex h-5 min-w-0 items-center gap-1.5">
+            <div
+              {...(workerTitleInline ? groupAnchorProps : undefined)}
+              className="flex h-5 min-w-0 items-center gap-1.5"
+            >
               {draftIndicator}
               {props.project && !hideCardProjectLine ? (
                 <ProjectFavicon project={props.project} className="size-4 shrink-0" />
@@ -1695,6 +1702,16 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                 >
                   {props.projectDisplayName}
                 </span>
+              ) : workerTitleInline ? (
+                <>
+                  {title}
+                  {isRegeneratingTitle ? (
+                    <span role="status" className="sr-only">
+                      Regenerating title
+                    </span>
+                  ) : null}
+                  {titleLineIcons}
+                </>
               ) : (
                 <span className="flex-1" />
               )}
@@ -1851,15 +1868,17 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
               )}
               {props.sweepAction !== null ? dragDestination : null}
             </div>
-            <div {...groupAnchorProps} className="mt-1 flex min-w-0 items-center gap-1.5">
-              {title}
-              {isRegeneratingTitle ? (
-                <span role="status" className="sr-only">
-                  Regenerating title
-                </span>
-              ) : null}
-              {titleLineIcons}
-            </div>
+            {workerTitleInline ? null : (
+              <div {...groupAnchorProps} className="mt-1 flex min-w-0 items-center gap-1.5">
+                {title}
+                {isRegeneratingTitle ? (
+                  <span role="status" className="sr-only">
+                    Regenerating title
+                  </span>
+                ) : null}
+                {titleLineIcons}
+              </div>
+            )}
             {metaLine}
           </div>
         </TooltipTrigger>
