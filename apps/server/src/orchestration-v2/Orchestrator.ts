@@ -645,6 +645,9 @@ const threadOutsideGroup = (thread: OrchestrationV2AppThread): OrchestrationV2Ap
 const nextGroupOrderKey = (previous: string | null, next: string | null): string =>
   pinOrderKeyBetween(previous, next) ?? `${previous ?? ""}n`;
 
+// pinOrderKeyBetween rejects a bound that is not a valid pin order key.
+const isValidGroupOrderKey = (key: string): boolean => pinOrderKeyBetween(key, null) !== null;
+
 function commandThreadId(command: OrchestrationV2ServerCommand): ThreadId {
   switch (command.type) {
     case "thread.create":
@@ -1921,17 +1924,18 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     if (requested === null || !threadCanJoinGroup(requested)) {
       return Result.fail(`Thread ${requestedParentId} cannot be a group parent.`);
     }
-    const parentId = requested.groupParentThreadId ?? requested.id;
-    if (parentId === threadId) {
+    const leadId = requested.groupParentThreadId;
+    if (leadId === threadId) {
       return Result.fail(`Thread ${threadId} is the group parent of ${requestedParentId}.`);
     }
-    const parent = parentId === requested.id ? requested : yield* findThread(parentId);
-    if (parent === null || !threadCanJoinGroup(parent)) {
-      return Result.fail(`Thread ${parentId} cannot be a group parent.`);
-    }
+    // Membership survives archive, so an archived lead still owns its workers. A missing or
+    // deleted lead leaves the worker effectively standalone, so it becomes the parent itself.
+    const lead = leadId == null ? null : yield* findThread(leadId);
+    const joinsLead =
+      lead !== null && lead.deletedAt === null && isListedThreadLineage(lead.lineage);
     return Result.succeed({
-      parent,
-      launchedByThreadId: parent.id === requested.id ? null : requested.id,
+      parent: joinsLead ? lead : requested,
+      launchedByThreadId: joinsLead ? requested.id : null,
     });
   });
 
@@ -4081,6 +4085,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     }
 
     if (command.type === "thread.group.reorder") {
+      if (!isValidGroupOrderKey(command.orderKey)) {
+        return yield* invalid(`Order key ${command.orderKey} is not valid.`);
+      }
       if (thread.groupParentThreadId == null) {
         return yield* invalid(`Thread ${command.threadId} is not in a group.`);
       }
@@ -4098,6 +4105,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       return;
     }
 
+    if (command.orderKey !== undefined && !isValidGroupOrderKey(command.orderKey)) {
+      return yield* invalid(`Order key ${command.orderKey} is not valid.`);
+    }
     const resolved = yield* resolveGroupParent(command.parentThreadId, command.threadId);
     if (Result.isFailure(resolved)) return yield* invalid(resolved.failure);
     const { parent } = resolved.success;
@@ -15976,14 +15986,22 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       projectionStore.listGroupMemberThreadIds(threadId).pipe(
         Effect.mapError((cause) => new OrchestratorProjectionError({ threadId, cause })),
         Effect.flatMap((memberIds) =>
-          memberIds.reduce((locked, memberId) => threadDispatch.withLock(memberId, locked), effect),
+          memberIds
+            .toSorted()
+            .reduce((locked, memberId) => threadDispatch.withLock(memberId, locked), effect),
         ),
       );
+    // Membership changes read the whole group, so they take the deletion permit ahead of every
+    // thread lock, as thread.delete does. Concurrent ones cannot nest a group or close a cycle.
     if (command.type === "thread.group.attach")
-      return yield* threadDispatch.withLock(
-        command.threadId,
-        withMemberLocks(dispatchWithReceiptEffect(command), command.threadId),
+      return yield* threadDispatch.withDeletionLock(
+        threadDispatch.withLock(
+          command.threadId,
+          withMemberLocks(dispatchWithReceiptEffect(command), command.threadId),
+        ),
       );
+    if (command.type === "thread.create" && command.groupParentThreadId !== undefined)
+      return yield* threadDispatch.withDeletionLock(dispatch);
     if (command.type === "thread.delete")
       return yield* threadDispatch.withDeletionLock(
         threadDispatch.withLock(
