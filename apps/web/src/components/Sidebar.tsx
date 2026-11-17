@@ -178,6 +178,7 @@ import { ProjectRowActions } from "./ProjectComboboxRow";
 import {
   buildDraftActionMenuItems,
   buildThreadActionMenuItems,
+  resolveThreadGroupMenuContext,
   threadActionRequiresOperate,
   threadGroupArchiveConfirmDetail,
   threadGroupDeleteConfirmDetail,
@@ -249,6 +250,7 @@ import {
 } from "./ProjectFavicon";
 import { deriveProviderEntriesByEnvironment } from "../providerInstances";
 import { useStableCallback } from "../hooks/useStableCallback";
+import { useShallow } from "zustand/react/shallow";
 import {
   resolveSidebarRouteReveal,
   type SidebarRouteReveal,
@@ -438,6 +440,19 @@ function resolveDraggedOrders(input: {
 
 const threadGroupExpansionKey = (parentKey: string) => `thread-group:${parentKey}`;
 
+// One callback per lead, so memoized rows keep their props across renders.
+function createGroupToggleCache(toggle: (parentKey: string) => void) {
+  const toggles = new Map<string, () => void>();
+  return (parentKey: string) => {
+    let cached = toggles.get(parentKey);
+    if (cached === undefined) {
+      cached = () => toggle(parentKey);
+      toggles.set(parentKey, cached);
+    }
+    return cached;
+  };
+}
+
 function routeThreadOnly(
   threads: readonly EnvironmentThreadShell[],
   routeThreadKey: string | null,
@@ -526,7 +541,18 @@ function useSidebarThreads(input: {
     clockKey: `${nowMinute}:${snoozeWakeClock}:${inboxReturnsVersion}`,
   });
 
-  const { activeThreads, workingThreads, snoozedThreads, settledThreads } = partition;
+  const { activeThreads, workingThreads, snoozedThreads, settledThreads, workersByParentKey } =
+    partition;
+  const { memberStateByKey } = partition;
+  const leadKeyByWorkerKey = new Map(
+    [...workersByParentKey].flatMap(([leadKey, workers]) =>
+      workers.map((worker) => [threadShellKey(worker), leadKey] as const),
+    ),
+  );
+  // An open worker is reached through its lead, so the lead's shelf and folder stay open for it.
+  const openWorkerLeadKey =
+    routeRowThreadKey === null ? null : (leadKeyByWorkerKey.get(routeRowThreadKey) ?? null);
+  const routeLeadKey = openWorkerLeadKey ?? routeRowThreadKey;
   // Folders lead with their own pins; only pins above projects stay in the Pinned section.
   const folderPinnedThreads =
     folderGroups === null
@@ -549,25 +575,23 @@ function useSidebarThreads(input: {
   const visibleSettledThreads = (() => {
     const visible = listedSettledThreads.slice(0, settledVisibleCount);
     if (
-      routeRowThreadKey !== null &&
-      !visible.some((thread) => threadShellKey(thread) === routeRowThreadKey)
+      routeLeadKey !== null &&
+      !visible.some((thread) => threadShellKey(thread) === routeLeadKey)
     ) {
-      const routeThread = settledThreads.find(
-        (thread) => threadShellKey(thread) === routeRowThreadKey,
-      );
+      const routeThread = settledThreads.find((thread) => threadShellKey(thread) === routeLeadKey);
       if (routeThread !== undefined) visible.push(routeThread);
     }
     return visible.length === settledThreads.length ? settledThreads : visible;
   })();
   const renderedSettledThreads = settledShelfExpanded
     ? visibleSettledThreads
-    : routeThreadOnly(visibleSettledThreads, routeRowThreadKey);
+    : routeThreadOnly(visibleSettledThreads, routeLeadKey);
   const visibleSnoozedThreads = snoozedShelfExpanded
     ? snoozedThreads
-    : routeThreadOnly(snoozedThreads, routeRowThreadKey);
+    : routeThreadOnly(snoozedThreads, routeLeadKey);
   const visibleWorkingThreads = workingShelfExpanded
     ? workingThreads
-    : routeThreadOnly(workingThreads, routeRowThreadKey);
+    : routeThreadOnly(workingThreads, routeLeadKey);
   const projectFolders =
     folderGroups === null
       ? null
@@ -583,21 +607,26 @@ function useSidebarThreads(input: {
           return {
             group: folder.group,
             collapsed,
-            // A closed folder still shows the open thread, and hints at the rest.
-            threads: collapsed
-              ? routeThreadOnly(folder.threads, routeRowThreadKey)
-              : folder.threads,
+            // A closed folder still shows the open thread, and hints at the rest, groups' workers included.
+            threads: collapsed ? routeThreadOnly(folder.threads, routeLeadKey) : folder.threads,
             hiddenThreads: collapsed
-              ? folder.threads.filter((thread) => threadShellKey(thread) !== routeRowThreadKey)
+              ? folder.threads.flatMap((thread) =>
+                  threadShellKey(thread) === routeLeadKey
+                    ? []
+                    : [thread, ...(workersByParentKey.get(threadShellKey(thread)) ?? [])],
+                )
               : EMPTY_THREADS,
           };
         });
-  const { workersByParentKey, memberStateByKey } = partition;
   const groupLayoutByParentKey = new Map<
     string,
     {
       readonly workers: readonly EnvironmentThreadShell[];
-      readonly overflow: ReadonlyArray<{ readonly kind: "settled" | "snoozed"; count: number }>;
+      readonly overflow: ReadonlyArray<{
+        readonly kind: "settled" | "snoozed";
+        readonly count: number;
+        readonly expanded: boolean;
+      }>;
     }
   >();
   for (const [parentKey, workers] of workersByParentKey) {
@@ -605,8 +634,12 @@ function useSidebarThreads(input: {
       workers,
       (worker) => memberStateByKey.get(threadShellKey(worker)) ?? "live",
     );
-    const settledOpen = openGroupOverflow.has(`${parentKey}\0settled`);
-    const snoozedOpen = openGroupOverflow.has(`${parentKey}\0snoozed`);
+    const opensFor = (kind: "settled" | "snoozed", overflow: readonly EnvironmentThreadShell[]) =>
+      openGroupOverflow.has(`${parentKey}\0${kind}`) ||
+      (parentKey === openWorkerLeadKey &&
+        overflow.some((worker) => threadShellKey(worker) === routeRowThreadKey));
+    const settledOpen = opensFor("settled", parts.settledOverflow);
+    const snoozedOpen = opensFor("snoozed", parts.snoozedOverflow);
     const shown = new Set([
       ...parts.inline,
       ...(settledOpen ? parts.settledOverflow : []),
@@ -615,17 +648,31 @@ function useSidebarThreads(input: {
     groupLayoutByParentKey.set(parentKey, {
       workers: workers.filter((worker) => shown.has(worker)),
       overflow: [
-        ...(parts.settledOverflow.length > 0 && !settledOpen
-          ? [{ kind: "settled" as const, count: parts.settledOverflow.length }]
+        ...(parts.settledOverflow.length > 0
+          ? [
+              {
+                kind: "settled" as const,
+                count: parts.settledOverflow.length,
+                expanded: settledOpen,
+              },
+            ]
           : []),
-        ...(parts.snoozedOverflow.length > 0 && !snoozedOpen
-          ? [{ kind: "snoozed" as const, count: parts.snoozedOverflow.length }]
+        ...(parts.snoozedOverflow.length > 0
+          ? [
+              {
+                kind: "snoozed" as const,
+                count: parts.snoozedOverflow.length,
+                expanded: snoozedOpen,
+              },
+            ]
           : []),
       ],
     });
   }
+  // An open worker keeps its group expanded without changing the stored choice.
   const isGroupExpanded = (parentKey: string) =>
-    projectExpandedById[threadGroupExpansionKey(parentKey)] ?? true;
+    parentKey === openWorkerLeadKey ||
+    (projectExpandedById[threadGroupExpansionKey(parentKey)] ?? true);
   // Expanded workers follow their parent so keyboard traversal and jump hints reach them.
   const withGroupWorkers = (list: readonly EnvironmentThreadShell[]) =>
     workersByParentKey.size === 0
@@ -687,9 +734,20 @@ function useSidebarThreads(input: {
     groupLayoutByParentKey,
     isGroupExpanded,
     toggleGroup: (parentKey: string) =>
-      setProjectExpanded(threadGroupExpansionKey(parentKey), !isGroupExpanded(parentKey)),
+      setProjectExpanded(
+        threadGroupExpansionKey(parentKey),
+        !(projectExpandedById[threadGroupExpansionKey(parentKey)] ?? true),
+      ),
     expandGroupOverflow: (parentKey: string, kind: "settled" | "snoozed") =>
       setOpenGroupOverflow((current) => new Set(current).add(`${parentKey}\0${kind}`)),
+    collapseGroupOverflow: (parentKey: string, kind: "settled" | "snoozed") =>
+      setOpenGroupOverflow((current) => {
+        const next = new Set(current);
+        next.delete(`${parentKey}\0${kind}`);
+        return next;
+      }),
+    leadKeyByWorkerKey,
+    routeLeadKey,
     projectFolders,
     toggleProjectFolder: (group: SidebarProjectSnapshot) => {
       const keys = sidebarFolderExpansionKeys(group);
@@ -1065,7 +1123,6 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
   const router = useRouter();
   const { isMobile, setOpenMobile } = useSidebar();
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
-  const localLastVisitedAtById = useUiStateStore((state) => state.threadLastVisitedAtById);
   const confirmThreadDelete = useClientSettings((s) => s.confirmThreadDelete);
   const confirmThreadArchive = useClientSettings((s) => s.confirmThreadArchive);
   const timestampFormat = useClientSettings((s) => s.timestampFormat);
@@ -1508,6 +1565,9 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     isGroupExpanded,
     toggleGroup,
     expandGroupOverflow,
+    collapseGroupOverflow,
+    leadKeyByWorkerKey,
+    routeLeadKey,
     workersByParentKey,
     memberStateByKey,
     projectFolders,
@@ -1542,6 +1602,22 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     keepEmptyFolders: (group) =>
       scopedProjectGroups.length > 0 || (group.pinned && !group.archived),
   });
+  // Only collapsed groups draw a summary dot, so only their workers' visits are subscribed to.
+  const collapsedGroupWorkerKeys = [...workersByParentKey].flatMap(([leadKey, workers]) =>
+    isGroupExpanded(leadKey) ? [] : workers.map(threadShellKey),
+  );
+  const collapsedGroupVisitedAtById = useUiStateStore(
+    useShallow((state) =>
+      Object.fromEntries(
+        collapsedGroupWorkerKeys.flatMap((key) => {
+          const visitedAt = state.threadLastVisitedAtById[key];
+          return visitedAt === undefined ? [] : [[key, visitedAt] as const];
+        }),
+      ),
+    ),
+  );
+  const toggleGroupStable = useStableCallback(toggleGroup);
+  const [toggleGroupFor] = useState(() => createGroupToggleCache(toggleGroupStable));
 
   // Ranked across environments as the palette ranks them, so one
   // environment's list does not sit above another's better matches; rows
@@ -1780,13 +1856,17 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
   const planForwardNavigation = (
     threadKey: string,
     coParkingKeys?: ReadonlySet<string>,
+    // A group's open member counts as the parked thread.
+    groupKeys?: readonly string[],
   ): (() => void) | null => {
-    if (readRouteThreadKey(router) !== threadKey) return null;
-    const shell = threadByKeyRef.current.get(threadKey);
+    const routeKey = readRouteThreadKey(router);
+    const openKey = routeKey !== null && groupKeys?.includes(routeKey) ? routeKey : threadKey;
+    if (routeKey !== openKey) return null;
+    const shell = threadByKeyRef.current.get(openKey);
     const orderedKeys = orderedThreadKeysRef.current;
     const settledKeys = settledThreadKeysRef.current;
     const snoozedKeys = snoozedThreadKeysRef.current;
-    const currentIndex = orderedKeys.indexOf(threadKey);
+    const currentIndex = orderedKeys.indexOf(openKey);
     const nextCardKey =
       currentIndex === -1
         ? null
@@ -1801,10 +1881,83 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
         : () => void router.navigate({ to: "/" });
   };
 
+  const reportGroupFailure = (title: string, result: AtomCommandResult<unknown, unknown>) => {
+    if (result._tag === "Success" || isAtomCommandInterrupted(result)) return;
+    const error = squashAtomCommandFailure(result);
+    toastManager.add(
+      stackedThreadToast({
+        type: "error",
+        title,
+        description: error instanceof Error ? error.message : "An error occurred.",
+      }),
+    );
+  };
+  const groupMemberKeys = (leadKey: string) => [
+    leadKey,
+    ...(workersByParentKey.get(leadKey) ?? []).map(threadShellKey),
+  ];
+  const shouldAdvanceAfterGroupPark = (
+    action: "settle" | "snooze",
+    memberKeys: readonly string[],
+  ) => {
+    const routeKey = readRouteThreadKey(router);
+    if (routeKey === null || !memberKeys.includes(routeKey)) return false;
+    const routeRef = parseScopedThreadKey(routeKey);
+    return shouldNavigateAfterThreadPark({
+      threadKey: routeKey,
+      currentThreadKey: routeKey,
+      action,
+      now: new Date().toISOString(),
+      thread: routeRef === null ? null : readThreadShell(routeRef),
+    });
+  };
+  // Parks a lead's whole group with the single-thread path's double-run guard and forward navigation.
+  const parkGroup = async (
+    leadRef: ScopedThreadRef,
+    action: "settle" | "snooze",
+    run: () => Promise<AtomCommandResult<unknown, unknown>>,
+    coParkingKeys?: ReadonlySet<string>,
+  ) => {
+    const leadKey = scopedThreadKey(leadRef);
+    const inFlight =
+      action === "settle" ? settlingThreadKeysRef.current : snoozingThreadKeysRef.current;
+    if (inFlight.has(leadKey)) return;
+    inFlight.add(leadKey);
+    const memberKeys = groupMemberKeys(leadKey);
+    const navigateAfterPark = planForwardNavigation(
+      leadKey,
+      new Set([...memberKeys, ...(coParkingKeys ?? [])]),
+      memberKeys,
+    );
+    const result = await run();
+    inFlight.delete(leadKey);
+    reportGroupFailure(
+      action === "settle" ? "Failed to settle group" : "Failed to snooze group",
+      result,
+    );
+    if (result._tag === "Success" && shouldAdvanceAfterGroupPark(action, memberKeys)) {
+      navigateAfterPark?.();
+    }
+  };
+  const attemptSettleGroup = (
+    leadRef: ScopedThreadRef,
+    finishedOnly: boolean,
+    coParkingKeys?: ReadonlySet<string>,
+  ) =>
+    parkGroup(leadRef, "settle", () => settleThreadGroup(leadRef, { finishedOnly }), coParkingKeys);
+  const attemptSnoozeGroup = (
+    leadRef: ScopedThreadRef,
+    preset: Pick<SnoozePreset, "snoozedUntil">,
+  ) => parkGroup(leadRef, "snooze", () => snoozeThreadGroup(leadRef, preset.snoozedUntil));
+
   const attemptSettle = (
     threadRef: ScopedThreadRef,
     opts: { coSettlingKeys?: ReadonlySet<string> } = {},
   ) => {
+    if (workersByParentKey.has(scopedThreadKey(threadRef))) {
+      void attemptSettleGroup(threadRef, false, opts.coSettlingKeys);
+      return;
+    }
     void (async () => {
       const threadKey = scopedThreadKey(threadRef);
       if (settlingThreadKeysRef.current.has(threadKey)) return;
@@ -1845,32 +1998,18 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     for (const threadKey of threadKeys) {
       const thread = threadByKeyRef.current.get(threadKey);
       if (!thread || thread.settledOverride === "settled") continue;
+      // A worker whose lead settles in this batch is settled with its group.
+      const leadKey = leadKeyByWorkerKey.get(threadKey);
+      if (
+        leadKey !== undefined &&
+        coSettlingKeys.has(leadKey) &&
+        threadByKeyRef.current.get(leadKey)?.settledOverride !== "settled"
+      )
+        continue;
       attemptSettle(scopeThreadRef(thread.environmentId, thread.id), { coSettlingKeys });
     }
   };
-  const reportGroupFailure = (title: string, result: AtomCommandResult<unknown, unknown>) => {
-    if (result._tag === "Success" || isAtomCommandInterrupted(result)) return;
-    const error = squashAtomCommandFailure(result);
-    toastManager.add(
-      stackedThreadToast({
-        type: "error",
-        title,
-        description: error instanceof Error ? error.message : "An error occurred.",
-      }),
-    );
-  };
-  const attemptSettleGroup = async (parentRef: ScopedThreadRef, finishedOnly: boolean) =>
-    reportGroupFailure(
-      "Failed to settle group",
-      await settleThreadGroup(parentRef, { finishedOnly }),
-    );
-  const settleFromRow = useStableCallback((threadRef: ScopedThreadRef) => {
-    if (workersByParentKey.has(scopedThreadKey(threadRef))) {
-      void attemptSettleGroup(threadRef, false);
-    } else {
-      attemptSettle(threadRef);
-    }
-  });
+  const settleFromRow = useStableCallback((threadRef: ScopedThreadRef) => attemptSettle(threadRef));
   const attemptUnsettle = (threadRef: ScopedThreadRef) => {
     void (async () => {
       const result = await unsettleThread(threadRef);
@@ -2031,6 +2170,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
         const thread = threadByKeyRef.current.get(key);
         return (
           thread !== undefined &&
+          !leadKeyByWorkerKey.has(key) &&
           sectionByThreadKeyRef.current.get(key) === originSection &&
           serverConfigs.has(thread.environmentId)
         );
@@ -2268,7 +2408,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     ...(draggedActiveOrder === undefined ? {} : { activeOrder: draggedActiveOrder }),
     settledExpanded: settledShelfExpanded,
     settledVisibleCount,
-    routeThreadKey: routeRowThreadKey,
+    routeThreadKey: routeLeadKey,
     snoozedThreadCount: snoozedThreads.length,
   });
   const draggedThreadKey = dragState?.activeKey;
@@ -2389,8 +2529,28 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
       };
       switch (plan.kind) {
         case "settle": {
+          const groupKeys = workersByParentKey.has(activeKey)
+            ? groupMemberKeys(activeKey)
+            : undefined;
           settlingThreadKeysRef.current.add(activeKey);
-          const navigateAfterSettle = planForwardNavigation(activeKey);
+          const navigateAfterSettle = planForwardNavigation(
+            activeKey,
+            groupKeys && new Set(groupKeys),
+            groupKeys,
+          );
+          if (groupKeys !== undefined) {
+            const settled = await run(
+              settleThreadGroup(threadRef, { finishedOnly: false }),
+              "Failed to settle group",
+            ).finally(() => settlingThreadKeysRef.current.delete(activeKey));
+            // Declining the working-threads prompt leaves the lead where it was.
+            if (settled && readThreadShell(threadRef)?.settledOverride !== "settled") {
+              setOptimisticDrop((current) => (current === drop ? null : current));
+            }
+            if (settled && shouldAdvanceAfterGroupPark("settle", groupKeys))
+              navigateAfterSettle?.();
+            return;
+          }
           const settled = await run(settleThread(threadRef), "Failed to settle thread").finally(
             () => settlingThreadKeysRef.current.delete(activeKey),
           );
@@ -2485,6 +2645,10 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
       preset: Pick<SnoozePreset, "snoozedUntil">,
       opts: { coSnoozingKeys?: ReadonlySet<string> } = {},
     ) => {
+      if (workersByParentKey.has(scopedThreadKey(threadRef))) {
+        void attemptSnoozeGroup(threadRef, preset);
+        return;
+      }
       void (async () => {
         const outcome = await performSnooze(threadRef, preset, opts);
         if (outcome.status === "failure") {
@@ -2828,8 +2992,10 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
           serverConfigs.get(thread.environmentId)?.environment.capabilities
             .threadAutoSettleOptOut === true;
         const isRegeneratingTitle = thread.titleRegeneration != null;
-        const isSettled = settledThreadKeysRef.current.has(threadKey);
-        const isSnoozed = snoozedThreadKeysRef.current.has(threadKey);
+        // A lead's group can sit in another section, so the menu reads the thread's own state.
+        const isSnoozed =
+          configLoaded && effectiveSnoozed(thread, { now: new Date().toISOString() });
+        const isSettled = configLoaded && !isSnoozed && thread.settledOverride === "settled";
         const isPinned = thread.pinnedAt != null;
         const snoozePresets = resolveSnoozePresets(
           new Date(),
@@ -2844,32 +3010,11 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                 projectRef.projectId === thread.projectId,
             ),
           ) ?? null;
-        const groupWorkers = workersByParentKey.get(threadKey) ?? [];
-        const groupRole = memberStateByKey.has(threadKey)
-          ? "worker"
-          : groupWorkers.length > 0
-            ? "parent"
-            : "none";
-        const workerKeys = new Set(groupWorkers.map(threadShellKey));
-        const attachCandidates = listedThreads
-          .filter(
-            (candidate) =>
-              candidate.environmentId === thread.environmentId &&
-              candidate.archivedAt == null &&
-              threadShellKey(candidate) !== threadKey &&
-              !workerKeys.has(threadShellKey(candidate)),
-          )
-          .toSorted(
-            (left, right) =>
-              Number(right.projectId === thread.projectId) -
-              Number(left.projectId === thread.projectId),
-          )
-          .slice(0, 20)
-          .map((candidate) => ({
-            key: threadShellKey(candidate),
-            title: candidate.title,
-            ref: scopeThreadRef(candidate.environmentId, candidate.id),
-          }));
+        const {
+          group,
+          workers: groupWorkers,
+          attachTargets,
+        } = resolveThreadGroupMenuContext(listedThreads, thread);
         const clicked = await settlePromise(() =>
           api.contextMenu.show(
             buildThreadActionMenuItems({
@@ -2877,10 +3022,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                 threadRef.environmentId,
                 AuthOrchestrationOperateScope,
               ),
-              group: {
-                role: groupRole,
-                attachCandidates: attachCandidates.map(({ key, title }) => ({ key, title })),
-              },
+              group,
               branch: thread.branch ?? null,
               // An archived project is not a filter choice.
               projectFilter:
@@ -2928,18 +3070,12 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                   thread.environmentId,
                 );
           if (!preset) return;
-          if (groupRole === "parent") {
-            reportGroupFailure(
-              "Failed to snooze group",
-              await snoozeThreadGroup(threadRef, preset.snoozedUntil),
-            );
-          } else {
-            attemptSnooze(threadRef, preset);
-          }
+          if (group.role === "parent") await attemptSnoozeGroup(threadRef, preset);
+          else attemptSnooze(threadRef, preset);
           return;
         }
         if (clicked.value.startsWith("attach-to-thread:")) {
-          const target = attachCandidates.find(
+          const target = attachTargets.find(
             (candidate) => `attach-to-thread:${candidate.key}` === clicked.value,
           );
           if (target) {
@@ -2995,7 +3131,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
             return;
           }
           case "settle":
-            if (groupRole === "parent") await attemptSettleGroup(threadRef, false);
+            if (group.role === "parent") await attemptSettleGroup(threadRef, false);
             else attemptSettle(threadRef);
             return;
           case "unsettle":
@@ -3654,11 +3790,21 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                         const workerState = parent ? memberStateByKey.get(threadKey) : undefined;
                         const groupWorkers = parent ? undefined : workersByParentKey.get(threadKey);
                         const groupExpanded = groupWorkers ? isGroupExpanded(threadKey) : false;
+                        // A lead's group can sit in another section; its own actions follow its own state.
+                        const leadOwnState: ThreadGroupMemberState | undefined =
+                          groupWorkers === undefined || !serverConfigs.has(thread.environmentId)
+                            ? undefined
+                            : effectiveSnoozed(thread, { now: snoozeNow })
+                              ? "snoozed"
+                              : thread.settledOverride === "settled"
+                                ? "settled"
+                                : "live";
+                        const ownState = workerState ?? leadOwnState;
                         // A worker acts on its own state, but looks like its parent's row.
                         const stateSection =
-                          workerState === "snoozed"
+                          ownState === "snoozed"
                             ? "snoozed"
-                            : workerState === "settled"
+                            : ownState === "settled"
                               ? "settled"
                               : parent
                                 ? "active"
@@ -3686,12 +3832,14 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                             thread={thread}
                             variant={rowVariant}
                             navigationParent={
-                              folderRow ??
-                              (section === "working" ||
-                              section === "snoozed" ||
-                              section === "settled"
-                                ? `shelf:${section}`
-                                : undefined)
+                              parent
+                                ? scopedThreadKey(scopeThreadRef(parent.environmentId, parent.id))
+                                : (folderRow ??
+                                  (section === "working" ||
+                                  section === "snoozed" ||
+                                  section === "settled"
+                                    ? `shelf:${section}`
+                                    : undefined))
                             }
                             variantAction={
                               stateSection === "snoozed"
@@ -3713,7 +3861,12 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                                     groupRole: "parent" as const,
                                     groupWorkerCount: groupWorkers.length,
                                     groupExpanded,
-                                    onToggleGroup: () => toggleGroup(threadKey),
+                                    onToggleGroup: toggleGroupFor(threadKey),
+                                    ...(leadOwnState !== undefined &&
+                                    leadOwnState !== "live" &&
+                                    leadOwnState !== section
+                                      ? { leadState: leadOwnState }
+                                      : {}),
                                     groupDot: groupExpanded
                                       ? null
                                       : resolveSidebarFolderDot(
@@ -3721,7 +3874,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                                             ...worker,
                                             lastVisitedAt: resolveThreadLastVisitedAt(
                                               worker.lastVisitedAt,
-                                              localLastVisitedAtById[threadShellKey(worker)],
+                                              collapsedGroupVisitedAtById[threadShellKey(worker)],
                                             ),
                                           })),
                                         ),
@@ -3823,6 +3976,8 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                                 kind={overflow.kind}
                                 count={overflow.count}
                                 onExpand={() => expandGroupOverflow(threadKey, overflow.kind)}
+                                expanded={overflow.expanded}
+                                onCollapse={() => collapseGroupOverflow(threadKey, overflow.kind)}
                               />
                             ))}
                           </>
@@ -3832,7 +3987,9 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                             {row}
                             {layout === undefined ? null : (
                               <SidebarThreadGroup
-                                expanded={isGroupExpanded(threadKey)}
+                                expanded={
+                                  isGroupExpanded(threadKey) && dragState?.activeKey !== threadKey
+                                }
                                 trunkX={inFolder ? 21 : 12}
                                 branchEndX={inFolder ? 48 : 29}
                                 trunkTopOffset={8}
