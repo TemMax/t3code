@@ -158,7 +158,7 @@ describe("thread groups", () => {
     confirm.mockResolvedValue(false);
     await useThreadActions().settleThreadGroup(ref("parent"), { finishedOnly: false });
     expect(confirm).toHaveBeenCalledExactlyOnceWith(
-      "1 threads in this group are still working.\nSettle the whole group anyway?",
+      "1 thread in this group is still working.\nSettle the whole group anyway?",
     );
     expect(commands.settle).not.toHaveBeenCalled();
     expect(useThreadUndoNotice.getState().notice).toBeNull();
@@ -167,7 +167,7 @@ describe("thread groups", () => {
   it("group settle undo restores every thread", async () => {
     await useThreadActions().settleThreadGroup(ref("parent"), { finishedOnly: true });
     const notice = useThreadUndoNotice.getState().notice;
-    expect(notice).toMatchObject({ action: "Settled", count: 1 });
+    expect(notice).toMatchObject({ action: "Settled", count: 2 });
     await notice!.undo();
     expect(
       commands.unsettle.mock.calls.map(([call]) => call.input.threadId as string).toSorted(),

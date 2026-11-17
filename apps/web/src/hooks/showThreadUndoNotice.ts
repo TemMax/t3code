@@ -18,6 +18,8 @@ type UndoOptions = {
   failureTitle: string;
   claim: ReturnType<typeof ThreadUndo.begin>;
   commit?: () => void;
+  /** Threads this one undo restores, when it covers several (a whole group). */
+  count?: number;
 };
 
 type UndoNotice = {
@@ -92,7 +94,7 @@ function refreshNotice() {
   }
   setNotice({
     action: latest.action,
-    count: group.length,
+    count: group.reduce((total, entry) => total + (entry.count ?? 1), 0),
     undo: async () => {
       const current = group.filter((entry) => liveUndos.includes(entry) && entry.claim.isCurrent());
       liveUndos = liveUndos.filter((entry) => !group.includes(entry));
@@ -101,7 +103,7 @@ function refreshNotice() {
       refreshNotice();
       let undone = 0;
       await Promise.all(
-        current.map(async ({ undo, failureTitle }) => {
+        current.map(async ({ undo, failureTitle, count = 1 }) => {
           const reportFailure = (error: unknown) => {
             toastManager.add(
               stackedThreadToast({
@@ -113,7 +115,7 @@ function refreshNotice() {
           };
           try {
             const result = await undo();
-            if (result._tag === "Success") undone++;
+            if (result._tag === "Success") undone += count;
             else if (!isAtomCommandInterrupted(result)) {
               reportFailure(squashAtomCommandFailure(result));
             }

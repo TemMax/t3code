@@ -1081,6 +1081,7 @@ export function useThreadActions() {
     showThreadUndoNotice({
       action: input.action,
       claim,
+      count: input.restores.length,
       undo: async () => {
         const results = await Promise.all(
           claim
@@ -1108,7 +1109,7 @@ export function useThreadActions() {
       if (localApi) {
         const confirmation = await settlePromise(() =>
           localApi.dialogs.confirm(
-            `${working.length} threads in this group are still working.\nSettle the whole group anyway?`,
+            `${working.length === 1 ? "1 thread in this group is" : `${working.length} threads in this group are`} still working.\nSettle the whole group anyway?`,
           ),
         );
         if (confirmation._tag === "Failure") return confirmation;
