@@ -188,6 +188,92 @@ it.effect("attach rejects self, subagent and missing parent", () =>
   }).pipe(Effect.provide(layerTest)),
 );
 
+it.effect("attach to a worker of an archived lead joins that lead", () =>
+  Effect.gen(function* () {
+    const { orchestrator, threadId, create, attach, group } = yield* harness;
+    yield* create("p");
+    yield* create("w");
+    yield* create("x");
+    yield* attach("w", threadId("p"));
+    yield* orchestrator.dispatch({
+      type: "thread.archive",
+      commandId: CommandId.make("archive-p"),
+      threadId: threadId("p"),
+    });
+    yield* attach("x", threadId("w"));
+    assert.equal((yield* group("x")).parent, threadId("p"));
+  }).pipe(Effect.provide(layerTest)),
+);
+
+it.effect("attach to a worker whose lead is deleted makes the worker the parent", () =>
+  Effect.gen(function* () {
+    const { orchestrator, projections, eventSink, threadId, create, attach, group } =
+      yield* harness;
+    yield* create("p");
+    yield* create("w");
+    yield* create("x");
+    yield* orchestrator.dispatch({
+      type: "thread.delete",
+      commandId: CommandId.make("delete-p"),
+      threadId: threadId("p"),
+    });
+    // Deleting a lead detaches its workers; a stale membership still has to resolve safely.
+    const worker = yield* projections.getThread(threadId("w"));
+    yield* eventSink.write({
+      events: [
+        {
+          id: EventId.make("event:groups-w-stale-membership"),
+          type: "thread.metadata-updated",
+          threadId: worker.id,
+          occurredAt: worker.updatedAt,
+          payload: { ...worker, groupParentThreadId: threadId("p"), groupOrderKey: "n" },
+        },
+      ],
+    });
+    yield* attach("x", threadId("w"));
+    assert.equal((yield* group("x")).parent, threadId("w"));
+  }).pipe(Effect.provide(layerTest)),
+);
+
+it.effect("attach rejects an invalid order key", () =>
+  Effect.gen(function* () {
+    const { orchestrator, threadId, create, attach, group } = yield* harness;
+    yield* create("p");
+    yield* create("w");
+    const before = yield* orchestrator.getThreadEventSequence(threadId("w"));
+    const outcomes = [
+      yield* Effect.result(attach("w", threadId("p"), "A")),
+      yield* Effect.result(attach("w", threadId("p"), "a")),
+    ];
+    assert.ok(outcomes.every(Result.isFailure));
+    assert.equal(yield* orchestrator.getThreadEventSequence(threadId("w")), before);
+    assert.deepEqual(yield* group("w"), { parent: null, orderKey: null, launchedBy: null });
+  }).pipe(Effect.provide(layerTest)),
+);
+
+it.effect("reorder rejects an invalid order key", () =>
+  Effect.gen(function* () {
+    const { orchestrator, threadId, create, attach, group } = yield* harness;
+    yield* create("p");
+    yield* create("w");
+    yield* attach("w", threadId("p"), "n");
+    const before = yield* orchestrator.getThreadEventSequence(threadId("w"));
+    const reorder = (orderKey: string) =>
+      Effect.result(
+        orchestrator.dispatch({
+          type: "thread.group.reorder",
+          commandId: CommandId.make(`reorder-w-${orderKey}`),
+          threadId: threadId("w"),
+          orderKey,
+        }),
+      );
+    assert.ok(Result.isFailure(yield* reorder("A")));
+    assert.ok(Result.isFailure(yield* reorder("a")));
+    assert.equal(yield* orchestrator.getThreadEventSequence(threadId("w")), before);
+    assert.equal((yield* group("w")).orderKey, "n");
+  }).pipe(Effect.provide(layerTest)),
+);
+
 it.effect("detach clears membership; detaching a non-member is a no-op", () =>
   Effect.gen(function* () {
     const { threadId, create, attach, detach, group, eventTypes } = yield* harness;
