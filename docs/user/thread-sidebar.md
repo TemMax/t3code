@@ -167,6 +167,22 @@ can drag a thread onto the composer to mention it, but not within the sidebar, a
 section is off. The choice syncs through your servers, so
 the mobile app groups the same way; on mobile it is under **Settings → Labs → Project folders**.
 
+## Thread groups
+
+Threads an agent starts from a thread join that thread's group automatically. The group
+sits under its parent in the sidebar, and you can collapse it. Settled and snoozed members
+stay in place, dimmed.
+
+To group threads yourself, right-click a thread and choose **Attach to thread**, then pick
+the parent. Choose **Detach from group** to take it out. Groups are one level deep: a thread
+in a group cannot have a group of its own.
+
+**Settle** and **Snooze** on the parent apply to the whole group. Choose **Only finished
+threads** to leave members that are still working alone.
+
+Archiving the parent shows its threads separately until you unarchive it. Deleting the parent
+leaves them as regular threads.
+
 ## Live activity summary
 
 While a thread works, its sidebar row can show a phase, such as Implementing, and a few words about
