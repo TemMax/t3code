@@ -1,0 +1,106 @@
+import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
+
+import { observeResize } from "~/lib/observeResize";
+import { Collapsible, CollapsiblePanel } from "../ui/collapsible";
+
+const CURVE_RADIUS = 8;
+
+export interface SidebarThreadGroupProps {
+  readonly expanded: boolean;
+  readonly trunkX: number;
+  readonly branchEndX: number;
+  readonly trunkTopOffset: number;
+  readonly children: ReactNode;
+}
+
+function measureAnchorCentres(container: HTMLElement): number[] {
+  const top = container.getBoundingClientRect().top;
+  return Array.from(container.querySelectorAll("[data-thread-group-anchor]"), (anchor) => {
+    const box = anchor.getBoundingClientRect();
+    return box.top - top + box.height / 2;
+  });
+}
+
+function buildTreePath(
+  centres: readonly number[],
+  trunkX: number,
+  branchEndX: number,
+  trunkTopOffset: number,
+): string {
+  const last = centres.at(-1);
+  if (last === undefined) return "";
+  const segments = [
+    `M ${trunkX} ${-trunkTopOffset} V ${last - CURVE_RADIUS} Q ${trunkX} ${last} ${trunkX + CURVE_RADIUS} ${last} H ${branchEndX}`,
+  ];
+  for (const centre of centres.slice(0, -1)) {
+    segments.push(
+      `M ${trunkX} ${centre - CURVE_RADIUS} Q ${trunkX} ${centre} ${trunkX + CURVE_RADIUS} ${centre} H ${branchEndX}`,
+    );
+  }
+  return segments.join(" ");
+}
+
+export function SidebarThreadGroup(props: SidebarThreadGroupProps) {
+  const { expanded, trunkX, branchEndX, trunkTopOffset, children } = props;
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [centres, setCentres] = useState<readonly number[]>([]);
+
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- anchor centres exist only in the laid-out DOM, so the tree path is measured after layout and whenever the container resizes
+  useLayoutEffect(() => {
+    const container = containerRef.current;
+    if (!container || !expanded) return;
+    const update = () => {
+      const next = measureAnchorCentres(container);
+      setCentres((previous) =>
+        previous.length === next.length && previous.every((value, index) => value === next[index])
+          ? previous
+          : next,
+      );
+    };
+    update();
+    return observeResize(container, update);
+  }, [expanded]);
+
+  const path = expanded ? buildTreePath(centres, trunkX, branchEndX, trunkTopOffset) : "";
+
+  return (
+    <Collapsible open={expanded}>
+      <div ref={containerRef} className="relative">
+        {path ? (
+          <svg
+            aria-hidden="true"
+            className="pointer-events-none absolute top-0 left-0 size-full overflow-visible"
+            fill="none"
+          >
+            <path
+              d={path}
+              className="stroke-muted-foreground/50"
+              strokeWidth={1.5}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
+        ) : null}
+        <CollapsiblePanel>{children}</CollapsiblePanel>
+      </div>
+    </Collapsible>
+  );
+}
+
+export function SidebarThreadGroupOverflowRow(props: {
+  kind: "settled" | "snoozed";
+  count: number;
+  onExpand: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      className="block w-full cursor-pointer px-2 py-1 text-left text-xs text-muted-foreground hover:text-foreground"
+      onClick={props.onExpand}
+    >
+      <span data-thread-group-anchor>
+        +{props.count} {props.kind}
+      </span>
+    </button>
+  );
+}
