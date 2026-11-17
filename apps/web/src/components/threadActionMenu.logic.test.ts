@@ -1,7 +1,10 @@
+import { EnvironmentId, ProjectId, ThreadId } from "@t3tools/contracts";
+import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
   buildThreadActionMenuItems,
+  resolveThreadGroupMenuContext,
   threadGroupArchiveConfirmDetail,
   threadGroupDeleteConfirmDetail,
   type ThreadActionMenuState,
@@ -103,17 +106,25 @@ describe("buildThreadActionMenuItems", () => {
     expect(ids).not.toContain("pin-project");
     expect(ids).not.toContain("unpin");
     expect(ids).not.toContain("attach-to-thread");
+    expect(
+      buildThreadActionMenuItems({
+        ...baseState,
+        isPinned: true,
+        group: { role: "worker", attachCandidates: [] },
+      }).map((item) => item.id),
+    ).toContain("unpin");
     expect(ids.indexOf("detach-from-group")).toBe(ids.indexOf("settle") - 1);
     expect(items.find((item) => item.id === "detach-from-group")?.label).toBe("Detach from group");
     expect(
       buildThreadActionMenuItems({
         ...baseState,
         isPinned: true,
+        isPinnedInProject: true,
         group: { role: "worker", attachCandidates: [] },
       })
         .map((item) => item.id)
         .filter((id) => id.includes("pin")),
-    ).toEqual([]);
+    ).toEqual(["unpin"]);
   });
 
   it("parent menu offers settle group with only-finished", () => {
@@ -168,5 +179,104 @@ describe("buildThreadActionMenuItems", () => {
     expect(threadGroupDeleteConfirmDetail(2)).toBe(
       "Its 2 group threads will stay as regular threads.",
     );
+  });
+});
+
+describe("resolveThreadGroupMenuContext", () => {
+  const environmentId = EnvironmentId.make("env");
+  const shell = (
+    id: string,
+    overrides: Partial<{
+      projectId: string;
+      updatedAt: string;
+      archivedAt: string | null;
+      groupParentThreadId: string;
+      environmentId: string;
+    }> = {},
+  ) =>
+    ({
+      id: ThreadId.make(id),
+      environmentId: EnvironmentId.make(overrides.environmentId ?? "env"),
+      projectId: ProjectId.make(overrides.projectId ?? "p1"),
+      title: `Title ${id}`,
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: overrides.updatedAt ?? "2026-01-01T00:00:00.000Z",
+      archivedAt: overrides.archivedAt ?? null,
+      groupParentThreadId: overrides.groupParentThreadId
+        ? ThreadId.make(overrides.groupParentThreadId)
+        : null,
+      groupOrderKey: null,
+    }) as unknown as EnvironmentThreadShell;
+  const keys = (context: ReturnType<typeof resolveThreadGroupMenuContext>) =>
+    context.attachTargets.map((target) => target.key);
+
+  it("describes a lead, its workers, and candidates without its own workers", () => {
+    const lead = shell("lead");
+    const worker = shell("w1", { groupParentThreadId: "lead" });
+    const other = shell("other");
+    const context = resolveThreadGroupMenuContext([lead, worker, other], lead);
+    expect(context.group.role).toBe("parent");
+    expect(context.workers).toEqual([worker]);
+    expect(context.group.attachCandidates).toEqual([{ key: "env:other", title: "Title other" }]);
+    expect(context.attachTargets).toEqual([
+      { key: "env:other", title: "Title other", ref: { environmentId, threadId: "other" } },
+    ]);
+  });
+
+  it("marks a worker without workers of its own", () => {
+    const lead = shell("lead");
+    const worker = shell("w1", { groupParentThreadId: "lead" });
+    const context = resolveThreadGroupMenuContext([lead, worker], worker);
+    expect(context.group.role).toBe("worker");
+    expect(context.workers).toEqual([]);
+  });
+
+  it("treats an ungrouped thread as standalone and skips archived or foreign-environment threads", () => {
+    const thread = shell("solo");
+    const context = resolveThreadGroupMenuContext(
+      [
+        thread,
+        shell("archived", { archivedAt: "2026-02-01T00:00:00.000Z" }),
+        shell("foreign", { environmentId: "other-env" }),
+        shell("ok"),
+      ],
+      thread,
+    );
+    expect(context.group.role).toBe("none");
+    expect(context.workers).toEqual([]);
+    expect(keys(context)).toEqual(["env:ok"]);
+  });
+
+  it("lists the same project first, newest activity first within each tier", () => {
+    const thread = shell("me");
+    const context = resolveThreadGroupMenuContext(
+      [
+        thread,
+        shell("foreign-new", { projectId: "p2", updatedAt: "2026-03-03T00:00:00.000Z" }),
+        shell("same-old", { updatedAt: "2026-01-02T00:00:00.000Z" }),
+        shell("foreign-old", { projectId: "p2", updatedAt: "2026-01-01T00:00:00.000Z" }),
+        shell("same-new", { updatedAt: "2026-02-02T00:00:00.000Z" }),
+      ],
+      thread,
+    );
+    expect(keys(context)).toEqual([
+      "env:same-new",
+      "env:same-old",
+      "env:foreign-new",
+      "env:foreign-old",
+    ]);
+  });
+
+  it("caps candidates at 30 after ordering", () => {
+    const thread = shell("me");
+    const many = Array.from({ length: 40 }, (_, index) =>
+      shell(`t${index}`, {
+        updatedAt: `2026-01-01T00:00:${String(index).padStart(2, "0")}.000Z`,
+      }),
+    );
+    const context = resolveThreadGroupMenuContext([thread, ...many], thread);
+    expect(context.attachTargets).toHaveLength(30);
+    expect(keys(context)[0]).toBe("env:t39");
+    expect(keys(context).at(-1)).toBe("env:t10");
   });
 });
