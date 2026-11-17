@@ -1,5 +1,6 @@
 import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 
+import { cn } from "~/lib/utils";
 import { observeResize } from "~/lib/observeResize";
 import { Collapsible, CollapsiblePanel } from "../ui/collapsible";
 
@@ -103,12 +104,17 @@ export function SidebarThreadGroupOverflowRow(props: {
   onExpand: () => void;
   expanded?: boolean;
   onCollapse?: () => void;
+  /** Folder rows draw the branch further right, so the label starts where worker titles do. */
+  inFolder?: boolean;
 }) {
   const showingLess = props.expanded === true;
   return (
     <button
       type="button"
-      className="block w-full cursor-pointer px-2 py-1 text-left text-xs text-muted-foreground hover:text-foreground"
+      className={cn(
+        "block w-full cursor-pointer py-1 pe-2 text-left text-xs text-muted-foreground hover:text-foreground",
+        props.inFolder ? "ps-15" : "ps-2.5",
+      )}
       onClick={showingLess ? props.onCollapse : props.onExpand}
     >
       {showingLess ? (

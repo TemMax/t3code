@@ -3978,6 +3978,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                                 onExpand={() => expandGroupOverflow(threadKey, overflow.kind)}
                                 expanded={overflow.expanded}
                                 onCollapse={() => collapseGroupOverflow(threadKey, overflow.kind)}
+                                inFolder={inFolder}
                               />
                             ))}
                           </>
