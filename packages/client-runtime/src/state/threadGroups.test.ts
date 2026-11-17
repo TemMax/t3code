@@ -56,6 +56,26 @@ describe("threadGroups", () => {
     expect(workersByParentKey.size).toBe(0);
   });
 
+  it("cycles, chains and workers-of-workers keep every thread visible as a root", () => {
+    const a = thread("a", { groupParentThreadId: ThreadId.make("b") });
+    const b = thread("b", { groupParentThreadId: ThreadId.make("a") });
+    const c = thread("c", { groupParentThreadId: b.id });
+    const d = thread("d", { groupParentThreadId: c.id });
+    const cycle = splitThreadGroups([a, b]);
+    expect(cycle.roots).toEqual([a, b]);
+    expect(cycle.workersByParentKey.size).toBe(0);
+    const chain = splitThreadGroups([a, b, c, d]);
+    expect(chain.roots).toEqual([a, b, c, d]);
+    expect(chain.workersByParentKey.size).toBe(0);
+    const lead = thread("lead");
+    const worker = thread("worker", { groupParentThreadId: lead.id });
+    const nested = thread("nested", { groupParentThreadId: worker.id });
+    const nestedSplit = splitThreadGroups([lead, worker, nested]);
+    expect(nestedSplit.roots).toEqual([lead, nested]);
+    expect(nestedSplit.workersByParentKey.get(keyA("lead"))).toEqual([worker]);
+    expect(resolveThreadGroupFor([lead, worker, nested], envA, nested.id)).toBeNull();
+  });
+
   it("resolveThreadGroupFor finds the group from a worker and from the parent", () => {
     const parent = thread("p");
     const worker = thread("w", { groupParentThreadId: parent.id });
