@@ -1,4 +1,5 @@
 import type { EnvironmentServerConfig } from "@t3tools/client-runtime/connection";
+import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
 import { EnvironmentId, ProjectId, ThreadId } from "@t3tools/contracts";
 import { describe, expect, it, vi } from "vite-plus/test";
@@ -61,11 +62,15 @@ function shell(
   };
 }
 
-function mountGroup(threads: readonly EnvironmentThreadShell[]) {
+function mountGroup(threads: readonly EnvironmentThreadShell[], openThreadId?: string) {
   vi.mocked(useNowMinute).mockReturnValue("2026-01-01T00:00");
   vi.mocked(useProjects).mockReturnValue([project]);
   vi.mocked(useQuietThreadShells).mockReturnValue(threads);
-  vi.mocked(useThreadRouteTarget).mockReturnValue({ kind: "none" } as never);
+  vi.mocked(useThreadRouteTarget).mockReturnValue(
+    openThreadId === undefined
+      ? ({ kind: "none" } as never)
+      : { kind: "server", threadRef: scopeThreadRef(environmentId, ThreadId.make(openThreadId)) },
+  );
   vi.mocked(useServerConfigs).mockReturnValue(
     new Map([
       [
@@ -158,5 +163,59 @@ describe("sidebar thread groups", () => {
     await expect
       .element(screen.getByRole("button", { name: "Expand group" }))
       .toHaveTextContent("1");
+  });
+
+  it("a settled lead with a live worker offers Un-settle", async () => {
+    await using screen = await render(
+      mountGroup([
+        shell("lead", "Lead thread", { settled: true }),
+        shell("worker", "Worker thread", { worker: true }),
+      ]),
+    );
+
+    await expect.element(screen.getByText("Lead thread").first()).toBeVisible();
+    expect(lastRowProps("lead")).toMatchObject({
+      variantAction: "unsettle",
+      leadState: "settled",
+    });
+  });
+
+  it("an open worker inside a collapsed group stays visible", async () => {
+    using stack = new DisposableStack();
+    useUiStateStore.getState().setProjectExpanded("thread-group:local:lead", false);
+    stack.defer(() =>
+      useUiStateStore.getState().setProjectExpanded("thread-group:local:lead", true),
+    );
+    await using screen = await render(
+      mountGroup(
+        [shell("lead", "Lead thread"), shell("worker", "Worker thread", { worker: true })],
+        "worker",
+      ),
+    );
+
+    await expect.element(screen.getByText("Worker thread").first()).toBeVisible();
+    expect(lastRowProps("lead")).toMatchObject({ groupExpanded: true });
+  });
+
+  it("a lead in the Settled shelf can expand its group", async () => {
+    using stack = new DisposableStack();
+    stack.defer(() =>
+      useUiStateStore.getState().setProjectExpanded("thread-group:local:lead", true),
+    );
+    await using screen = await render(
+      mountGroup(
+        [
+          shell("lead", "Lead thread", { settled: true }),
+          shell("worker", "Worker thread", { worker: true, settled: true }),
+        ],
+        "lead",
+      ),
+    );
+
+    expect(lastRowProps("lead")).toMatchObject({ variant: "slim", groupRole: "parent" });
+    await userEvent.click(screen.getByRole("button", { name: "Collapse group" }));
+    await expect.element(screen.getByText("Worker thread").first()).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Expand group" }));
+    await expect.element(screen.getByText("Worker thread").first()).toBeVisible();
   });
 });
