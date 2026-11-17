@@ -1078,10 +1078,12 @@ export function useThreadActions() {
   }) => {
     if (input.restores.length === 0) return;
     const claim = combineUndoClaims(input.restores.map((restore) => restore.claim));
+    let restored = 0;
     showThreadUndoNotice({
       action: input.action,
       claim,
-      count: input.restores.length,
+      count: () => claim.restorableIndexes().length,
+      restoredCount: () => restored,
       undo: async () => {
         const results = await Promise.all(
           claim
@@ -1089,6 +1091,7 @@ export function useThreadActions() {
             .map((index) => input.restores[index]!)
             .map(({ target, plan }) => runUndoPlan(target, plan)),
         );
+        restored = results.filter((result) => result._tag === "Success").length;
         return results.find((result) => result._tag !== "Success") ?? results[0]!;
       },
       failureTitle: input.failureTitle,
@@ -1104,6 +1107,7 @@ export function useThreadActions() {
     const members = opts.finishedOnly
       ? unsettledWorkers.filter((worker) => !isThreadInFlight(worker))
       : unsettledWorkers;
+    const settlesParent = !(opts.finishedOnly && parentShell && isThreadInFlight(parentShell));
     if (!opts.finishedOnly && working.length > 0) {
       const localApi = readLocalApi();
       if (localApi) {
@@ -1116,11 +1120,12 @@ export function useThreadActions() {
         if (!confirmation.value) return AsyncResult.success(undefined);
       }
     }
-    const outcomes = await Promise.all(
-      [parent, ...members.map((member) => scopeThreadRef(member.environmentId, member.id))].map(
-        performSettle,
-      ),
-    );
+    const targets = [
+      ...(settlesParent ? [parent] : []),
+      ...members.map((member) => scopeThreadRef(member.environmentId, member.id)),
+    ];
+    if (targets.length === 0) return AsyncResult.success(undefined);
+    const outcomes = await Promise.all(targets.map(performSettle));
     showGroupUndoNotice({
       action: "Settled",
       failureTitle: "Failed to undo settle",
@@ -1132,10 +1137,12 @@ export function useThreadActions() {
   const snoozeThreadGroup = async (parent: ScopedThreadRef, snoozedUntil: string) => {
     const { workers } = resolveGroupMembers(parent);
     const nowIso = new Date().toISOString();
-    const members = workers.filter(
+    const candidates = workers.filter(
       (worker) =>
         worker.settledOverride !== "settled" && !effectiveSnoozed(worker, { now: nowIso }),
     );
+    const members = candidates.filter((worker) => canSnooze(worker, { now: nowIso }));
+    const skipped = candidates.length - members.length;
     const outcomes = await Promise.all(
       [parent, ...members.map((member) => scopeThreadRef(member.environmentId, member.id))].map(
         (target) => performSnooze(target, snoozedUntil),
@@ -1146,6 +1153,13 @@ export function useThreadActions() {
       failureTitle: "Failed to wake thread",
       restores: outcomes.flatMap(({ restore }) => (restore ? [restore] : [])),
     });
+    if (skipped > 0) {
+      toastManager.add({
+        type: "warning",
+        title: `${skipped} ${skipped === 1 ? "thread" : "threads"} could not be snoozed`,
+        description: "They stay active until their pending request is resolved.",
+      });
+    }
     return outcomes.find(({ result }) => result._tag !== "Success")?.result ?? outcomes[0]!.result;
   };
 

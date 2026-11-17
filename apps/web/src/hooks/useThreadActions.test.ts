@@ -154,6 +154,13 @@ describe("thread groups", () => {
     expect(settledIds()).toEqual(["busy", "done", "parent"]);
   });
 
+  it("finishedOnly leaves a running lead alone and settles only finished workers", async () => {
+    shells.list[0] = shell("parent", { runtime: { status: "running" } });
+    await useThreadActions().settleThreadGroup(ref("parent"), { finishedOnly: true });
+    expect(settledIds()).toEqual(["done"]);
+    expect(confirm).not.toHaveBeenCalled();
+  });
+
   it("settleThreadGroup asks before settling working members", async () => {
     confirm.mockResolvedValue(false);
     await useThreadActions().settleThreadGroup(ref("parent"), { finishedOnly: false });
@@ -187,6 +194,22 @@ describe("thread groups", () => {
     ).toEqual(["busy", "done", "parent"]);
     await useThreadUndoNotice.getState().notice!.undo();
     expect(commands.unsnooze).toHaveBeenCalledTimes(3);
+  });
+
+  it("snoozeThreadGroup keeps members that cannot snooze live and still snoozes the rest", async () => {
+    const add = vi.spyOn(toastManager, "add").mockReturnValue("skipped-toast");
+    shells.list.push(shell("asking", { groupParentThreadId: "parent", hasPendingApprovals: true }));
+    const result = await useThreadActions().snoozeThreadGroup(
+      ref("parent"),
+      "2099-01-01T09:00:00.000Z",
+    );
+    expect(result._tag).toBe("Success");
+    expect(
+      commands.snooze.mock.calls.map(([call]) => call.input.threadId as string).toSorted(),
+    ).toEqual(["busy", "done", "parent"]);
+    expect(add).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ type: "warning", title: "1 thread could not be snoozed" }),
+    );
   });
 
   it("attaches and detaches through the group commands", async () => {
