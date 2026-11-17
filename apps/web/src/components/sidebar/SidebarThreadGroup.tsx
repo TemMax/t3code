@@ -48,9 +48,15 @@ export function SidebarThreadGroup(props: SidebarThreadGroupProps) {
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- anchor centres exist only in the laid-out DOM, so the tree path is measured after layout and whenever the container resizes
   useLayoutEffect(() => {
     const container = containerRef.current;
-    if (!container || !expanded) return;
+    if (!container) return;
     const update = () => {
-      const next = measureAnchorCentres(container);
+      // A collapsing group keeps its path until the panel has shut, so workers never slide away without their line.
+      const next = expanded
+        ? measureAnchorCentres(container)
+        : container.getBoundingClientRect().height === 0
+          ? []
+          : null;
+      if (next === null) return;
       setCentres((previous) =>
         previous.length === next.length && previous.every((value, index) => value === next[index])
           ? previous
@@ -61,25 +67,29 @@ export function SidebarThreadGroup(props: SidebarThreadGroupProps) {
     return observeResize(container, update);
   }, [expanded]);
 
-  const path = expanded ? buildTreePath(centres, trunkX, branchEndX, trunkTopOffset) : "";
+  const path = buildTreePath(centres, trunkX, branchEndX, trunkTopOffset);
 
   return (
     <Collapsible open={expanded}>
       <div ref={containerRef} className="relative">
         {path ? (
-          <svg
+          // Clipped to the panel's current height, so a growing group never draws past its last row.
+          <div
             aria-hidden="true"
-            className="pointer-events-none absolute top-0 left-0 size-full overflow-visible"
-            fill="none"
+            className="pointer-events-none absolute inset-x-0 bottom-0 overflow-hidden"
+            style={{ top: -trunkTopOffset }}
           >
-            <path
-              d={path}
-              className="stroke-muted-foreground/50"
-              strokeWidth={1.5}
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-          </svg>
+            <svg className="size-full" fill="none">
+              <path
+                d={path}
+                transform={`translate(0 ${trunkTopOffset})`}
+                className="stroke-muted-foreground/50"
+                strokeWidth={1.5}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+          </div>
         ) : null}
         <CollapsiblePanel>{children}</CollapsiblePanel>
       </div>
@@ -91,16 +101,23 @@ export function SidebarThreadGroupOverflowRow(props: {
   kind: "settled" | "snoozed";
   count: number;
   onExpand: () => void;
+  expanded?: boolean;
+  onCollapse?: () => void;
 }) {
+  const showingLess = props.expanded === true;
   return (
     <button
       type="button"
       className="block w-full cursor-pointer px-2 py-1 text-left text-xs text-muted-foreground hover:text-foreground"
-      onClick={props.onExpand}
+      onClick={showingLess ? props.onCollapse : props.onExpand}
     >
-      <span data-thread-group-anchor>
-        +{props.count} {props.kind}
-      </span>
+      {showingLess ? (
+        "Show less"
+      ) : (
+        <span data-thread-group-anchor>
+          +{props.count} {props.kind}
+        </span>
+      )}
     </button>
   );
 }
