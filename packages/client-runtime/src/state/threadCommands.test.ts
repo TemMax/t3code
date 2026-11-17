@@ -462,6 +462,38 @@ describe("remote thread lifecycle commands", () => {
     }),
   );
 
+  it.effect("attachToGroup to a worker lands under its lead and carries the thread's workers", () =>
+    Effect.gen(function* () {
+      const h = yield* makeHarness();
+      const shell = (id: string, parent: string | null) => ({
+        ...SNAPSHOT.threads[0]!,
+        id: ThreadId.make(id),
+        groupParentThreadId: parent === null ? null : ThreadId.make(parent),
+      });
+      h.registry.set(h.snapshotAtom(ENVIRONMENT_ID), {
+        ...SNAPSHOT,
+        threads: [
+          shell("lead", null),
+          shell("worker", "lead"),
+          shell("moved", null),
+          shell("moved-worker", "moved"),
+        ],
+      });
+      const result = h.commands.attachToGroup.run(h.registry, {
+        environmentId: ENVIRONMENT_ID,
+        input: { threadId: ThreadId.make("moved"), parentThreadId: ThreadId.make("worker") },
+      });
+      const parents = Object.fromEntries(
+        (h.registry.get(h.visibleAtom)?.threads ?? []).map((t) => [t.id, t.groupParentThreadId]),
+      );
+      expect(parents).toMatchObject({ moved: "lead", "moved-worker": "lead", worker: "lead" });
+      const request = yield* Queue.take(h.requests);
+      expect(request.command).toMatchObject({ parentThreadId: "worker" });
+      yield* Deferred.succeed(request.reply, { sequence: 2 });
+      expect((yield* Effect.promise(() => result))._tag).toBe("Success");
+    }),
+  );
+
   it.effect("detachFromGroup clears the group fields", () =>
     Effect.gen(function* () {
       const h = yield* makeHarness();

@@ -42,10 +42,17 @@ export function splitThreadGroups<T extends ThreadGroupCandidate>(
   const known = new Set(threads.map((thread) => keyOf(thread.environmentId, thread.id)));
   const roots: T[] = [];
   const grouped = new Map<string, T[]>();
+  const parentKeyOf = (thread: T) =>
+    thread.groupParentThreadId ? keyOf(thread.environmentId, thread.groupParentThreadId) : null;
+  const byKey = new Map(threads.map((thread) => [keyOf(thread.environmentId, thread.id), thread]));
+  const isRoot = (thread: T) => {
+    const parentKey = parentKeyOf(thread);
+    return parentKey === null || !known.has(parentKey);
+  };
   for (const thread of threads) {
-    const parentId = thread.groupParentThreadId;
-    const parentKey = parentId ? keyOf(thread.environmentId, parentId) : null;
-    if (parentKey === null || !known.has(parentKey)) {
+    const parentKey = parentKeyOf(thread);
+    const parent = parentKey === null ? undefined : byKey.get(parentKey);
+    if (parentKey === null || !parent || !isRoot(parent)) {
       roots.push(thread);
       continue;
     }
@@ -71,7 +78,10 @@ export function resolveThreadGroupFor<T extends ThreadGroupCandidate>(
   const self = find(threadId);
   if (!self) return null;
   const parent = self.groupParentThreadId ? find(self.groupParentThreadId) : undefined;
-  const root = parent ?? self;
+  const root =
+    parent && workersByParentKey.get(keyOf(environmentId, parent.id))?.includes(self)
+      ? parent
+      : self;
   const workers = workersByParentKey.get(keyOf(environmentId, root.id));
   return workers && workers.length > 0 ? { parent: root, workers } : null;
 }
