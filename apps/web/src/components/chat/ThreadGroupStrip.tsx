@@ -4,16 +4,14 @@ import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import { useNavigate } from "@tanstack/react-router";
 
 import { cn } from "../../lib/utils";
-import { useThreadShells } from "../../state/entities";
+import { useQuietThreadShells } from "../../state/entities";
 import { buildThreadRouteParams } from "../../threadRoutes";
 import { resolveThreadStatusPill } from "../Sidebar.logic";
-
-const FADE_MASK = "linear-gradient(to right, black calc(100% - 2rem), transparent)";
 
 export function ThreadGroupStrip(props: { environmentId: EnvironmentId; threadId: ThreadId }) {
   const { environmentId, threadId } = props;
   const navigate = useNavigate();
-  const shells = useThreadShells();
+  const shells = useQuietThreadShells();
   const group = resolveThreadGroupFor(shells, environmentId, threadId);
   if (!group) return null;
 
@@ -25,8 +23,7 @@ export function ThreadGroupStrip(props: { environmentId: EnvironmentId; threadId
   return (
     <nav
       aria-label="Thread group"
-      className="flex min-w-0 shrink-0 items-center gap-1.5 overflow-hidden border-b border-border px-3 py-1.5 sm:px-5"
-      style={{ maskImage: FADE_MASK, WebkitMaskImage: FADE_MASK }}
+      className="flex min-w-0 shrink-0 items-center gap-1.5 overflow-x-auto border-b border-border px-3 py-1.5 [-webkit-mask-image:linear-gradient(to_right,black_calc(100%-2rem),transparent)] [mask-image:linear-gradient(to_right,black_calc(100%-2rem),transparent)] [scrollbar-width:none] sm:px-5 [&::-webkit-scrollbar]:hidden"
     >
       {members.map(({ shell, suffix }) => {
         const current = shell.id === threadId;

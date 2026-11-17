@@ -691,6 +691,8 @@ type SidebarThreadRowProps = {
   readonly groupDot?: ProjectFolderDot | null | undefined;
   readonly onToggleGroup?: (() => void) | undefined;
   readonly groupMemberState?: "live" | "snoozed" | "settled" | undefined;
+  // A lead whose own state differs from its group's section; card and folder rows only.
+  readonly leadState?: "settled" | "snoozed" | null | undefined;
   readonly hideProjectLine?: boolean | undefined;
 };
 
@@ -1081,7 +1083,8 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
   const isGroupWorker = props.groupRole === "worker";
   const hideCardProjectLine = isGroupWorker && props.hideProjectLine === true;
   const isGroupParent = props.groupRole === "parent" && props.onToggleGroup !== undefined;
-  const memberState = isGroupWorker ? props.groupMemberState : undefined;
+  const leadState = props.groupRole === "parent" && variant !== "slim" ? props.leadState : null;
+  const memberState = isGroupWorker ? props.groupMemberState : (leadState ?? undefined);
   const groupExpanded = props.groupExpanded === true;
   const groupDot = groupExpanded ? null : (props.groupDot ?? null);
   const groupWorkerCount = props.groupWorkerCount ?? 0;
@@ -1283,8 +1286,8 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     ) : null;
   const diff = latestRunDiff(thread);
   // Only the trailing icons would remain, so the row moves them to the title line instead.
-  const cardGroupToggle =
-    isGroupParent && variant === "card" ? (
+  const groupToggle =
+    isGroupParent && (variant === "card" || variant === "slim") ? (
       <button
         type="button"
         aria-label={groupToggleLabel}
@@ -1299,7 +1302,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
       </button>
     ) : null;
   const metaLineEmpty =
-    cardGroupToggle === null &&
+    groupToggle === null &&
     !checkoutThread.branch &&
     !showsScratchMachine &&
     prBadge === null &&
@@ -1334,7 +1337,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
           <span className="text-diff-deletion-foreground">−{formatDiffCount(diff.deletions)}</span>
         </span>
       ) : null}
-      {cardGroupToggle}
+      {groupToggle}
       <span
         aria-hidden
         className="pointer-events-none ml-auto inline-flex shrink-0 items-center gap-1"
@@ -1372,6 +1375,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
         {multiline ? titleLineIcons : null}
         {pinIndicator}
         {multiline ? null : terminalStatusIcon}
+        {variant === "slim" ? groupToggle : null}
       </>
     );
     return (
@@ -1397,6 +1401,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                 data-sidebar-parent={props.navigationParent}
                 aria-label={accessibility.label}
                 aria-current={accessibility.current}
+                aria-expanded={isGroupParent ? groupExpanded : undefined}
                 data-testid={inFolder ? "sidebar-row-folder" : "sidebar-row-slim"}
                 aria-busy={isRegeneratingTitle || undefined}
                 className={cn(
@@ -1652,6 +1657,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
               data-sidebar-parent={props.navigationParent}
               aria-label={accessibility.label}
               aria-current={accessibility.current}
+              aria-expanded={isGroupParent ? groupExpanded : undefined}
               data-testid="sidebar-row-card"
               aria-busy={isRegeneratingTitle || undefined}
               className={rowSurfaceClassName}
