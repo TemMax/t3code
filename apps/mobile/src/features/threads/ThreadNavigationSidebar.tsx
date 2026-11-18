@@ -531,6 +531,8 @@ function ThreadNavigationSidebarPane(props: ThreadNavigationSidebarProps) {
           />
         );
       }
+      case "v2-group-overflow":
+        return null;
       case "v2-working-shelf":
         return (
           <ThreadListV2WorkingShelfHeader
