@@ -2355,6 +2355,8 @@ effectIt.effect(
         );
       }
       yield* start();
+      // The sixth change did not fit, so the next turn still lists it.
+      yield* start();
 
       expect(harness.startTurn.mock.calls.map(([turn]) => turn.message.text)).toEqual([
         withInlineContext(workerGroupSummary("working"), "Next step"),
@@ -2366,6 +2368,7 @@ effectIt.effect(
           ),
           "Next step",
         ),
+        withInlineContext(workerBoardSummary('"Note 0" by Other'), "Next step"),
       ]);
     }).pipe(Effect.provide(harness.layer));
   },

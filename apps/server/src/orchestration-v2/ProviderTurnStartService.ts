@@ -275,7 +275,16 @@ export const layer: Layer.Layer<
           delivered: {
             // Once accepted, the listed changes are known, so an unchanged next turn matches this.
             fingerprint: groupTurnSummary({ ...members, boardChanges: [] }).fingerprint,
-            boardSeen: new Map(topics.map((topic) => [topic.id, topic.updatedAt])),
+            // Changes past the listed few stay unseen, so a later turn lists them.
+            boardSeen: new Map(
+              topics.flatMap((topic) => {
+                if (changed.includes(topic) || delivered === undefined) {
+                  return [[topic.id, topic.updatedAt] as const];
+                }
+                const seen = delivered.boardSeen.get(topic.id);
+                return seen === undefined ? [] : [[topic.id, seen] as const];
+              }),
+            ),
           },
         };
       },
