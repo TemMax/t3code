@@ -117,6 +117,7 @@ function existingThreadIdsForCommand(
     // while a thread is open, so keeping them off the import path matters.
     case "thread.visit":
     case "thread.mark-unread":
+    case "thread.board.visit":
       return [];
     case "thread.fork":
       return [command.sourceThreadId];

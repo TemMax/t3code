@@ -7,6 +7,7 @@ import {
   ProviderInstanceId,
   ThreadId,
 } from "@t3tools/contracts";
+import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as TestClock from "effect/testing/TestClock";
@@ -213,10 +214,13 @@ it.effect("a detached worker's topic is frozen until the lead claims it", () =>
     );
     assert.equal(
       yield* refusal(write("lead", "API shape", "Use offsets.")),
-      'Topic "API shape" belongs to w; send it a message instead.',
+      'Topic "API shape" is frozen because its author left the group; claim it first.',
     );
 
     yield* claim("lead", topic.id);
+    const [justClaimed] = yield* topics("lead");
+    assert.equal(justClaimed?.lastEditorThreadId, threadId("lead"));
+    assert.equal(justClaimed?.editCount, 1);
     yield* write("lead", "API shape", "Use offsets.");
     const [claimed] = (yield* board("lead")).topics;
     assert.equal(claimed?.authorThreadId, threadId("lead"));
@@ -259,7 +263,7 @@ it.effect("the author removes its topic, and the lead removes a frozen one", () 
 
 it.effect("board visits only move the lead's watermark forward", () =>
   Effect.gen(function* () {
-    const { threadId, visit, board, group } = yield* harness;
+    const { eventSink, threadId, visit, board, group } = yield* harness;
     yield* group;
     const first = yield* visit("lead", "2026-11-18T10:05:00.000Z");
     assert.deepEqual(
@@ -271,6 +275,19 @@ it.effect("board visits only move the lead's watermark forward", () =>
     assert.equal((yield* board("w")).viewedAt, "2026-11-18T10:05:00.000Z");
     // A worker reads the same board, so its visit moves the lead's watermark.
     yield* visit("w", "2026-11-18T10:10:00.000Z");
+    assert.equal((yield* board("lead")).viewedAt, "2026-11-18T10:10:00.000Z");
+    // Two members' visits can commit out of order; the older one never wins.
+    yield* eventSink.write({
+      events: [
+        {
+          id: EventId.make("event:board-late-visit"),
+          type: "thread.board-visit-recorded",
+          threadId: threadId("lead"),
+          occurredAt: DateTime.makeUnsafe("2026-11-18T10:11:00.000Z"),
+          payload: { boardViewedAt: "2026-11-18T10:07:00.000Z" },
+        },
+      ],
+    });
     assert.equal((yield* board("lead")).viewedAt, "2026-11-18T10:10:00.000Z");
   }).pipe(Effect.provide(layerTest)),
 );
@@ -342,5 +359,49 @@ it.effect("deleting the lead removes its board", () =>
     const empty = { leadThreadId: null, viewedAt: null, topics: [] };
     assert.deepEqual(yield* board("w"), empty);
     assert.deepEqual(yield* board("lead"), empty);
+  }).pipe(Effect.provide(layerTest)),
+);
+
+it.effect("a lead that joins another group brings its board along", () =>
+  Effect.gen(function* () {
+    const { threadId, create, attach, write, board, topics, shell, group } = yield* harness;
+    yield* group;
+    yield* create("other");
+    yield* create("y");
+    yield* attach("y", "other");
+    yield* write("w", "API shape", "Use cursor pagination.");
+    yield* write("lead", "Plan", "Ship the board.");
+    yield* write("y", "plan", "Ship the strip.");
+
+    yield* attach("lead", "other");
+    assert.deepEqual(yield* topics("lead"), []);
+    assert.equal((yield* shell("lead")).boardTopicCount, 0);
+    assert.deepEqual(
+      (yield* board("w")).topics
+        .map((topic) => `${topic.title} by ${topic.authorThreadId}`)
+        .toSorted(),
+      [
+        `API shape by ${threadId("w")}`,
+        `Plan (lead) by ${threadId("lead")}`,
+        `plan by ${threadId("y")}`,
+      ],
+    );
+    assert.equal((yield* shell("other")).boardTopicCount, 3);
+  }).pipe(Effect.provide(layerTest)),
+);
+
+it.effect("a board holds at most 50 topics", () =>
+  Effect.gen(function* () {
+    const { write, topics, refusal, group } = yield* harness;
+    yield* group;
+    for (let index = 0; index < 50; index += 1) {
+      yield* write("w", `Topic ${index}`, "State.");
+    }
+    assert.equal(
+      yield* refusal(write("x", "One more", "State.")),
+      "The board already has 50 topics; update or remove one first.",
+    );
+    yield* write("w", "Topic 0", "Updated state.");
+    assert.equal((yield* topics("lead")).length, 50);
   }).pipe(Effect.provide(layerTest)),
 );

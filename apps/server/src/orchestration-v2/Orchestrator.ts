@@ -668,6 +668,23 @@ const nextGroupOrderKey = (previous: string | null, next: string | null): string
 // pinOrderKeyBetween rejects a bound that is not a valid pin order key.
 const isValidGroupOrderKey = (key: string): boolean => pinOrderKeyBetween(key, null) !== null;
 
+const MAX_BOARD_TOPICS = 50;
+
+/** A topic moving to another lead's board keeps its title unless that board already uses it. */
+const movedBoardTopicTitle = (
+  title: string,
+  fromLeadTitle: string,
+  takenTitleKeys: ReadonlySet<string>,
+): string => {
+  if (!takenTitleKeys.has(boardTopicTitleKey(title))) return title;
+  const from = fromLeadTitle.trim().slice(0, 60) || "moved";
+  for (let attempt = 1; ; attempt += 1) {
+    const suffix = ` (${from}${attempt === 1 ? "" : ` ${attempt}`})`;
+    const candidate = `${title.slice(0, 200 - suffix.length).trimEnd()}${suffix}`;
+    if (!takenTitleKeys.has(boardTopicTitleKey(candidate))) return candidate;
+  }
+};
+
 function commandThreadId(command: OrchestrationV2ServerCommand): ThreadId {
   switch (command.type) {
     case "thread.create":
@@ -4281,6 +4298,44 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         now,
       );
     }
+
+    // Its board goes along too, or its topics would hide under a lead nobody resolves to.
+    const listTopics = (leadId: ThreadId) =>
+      projectionStore
+        .listBoardTopics(leadId)
+        .pipe(
+          Effect.mapError((cause) => new OrchestratorProjectionError({ threadId: leadId, cause })),
+        );
+    const moving = yield* listTopics(thread.id);
+    if (moving.length === 0) return;
+    const takenTitleKeys = new Set(
+      (yield* listTopics(parent.id)).map((topic) => boardTopicTitleKey(topic.title)),
+    );
+    const movedAt = DateTime.formatIso(now);
+    for (const topic of moving) {
+      const title = movedBoardTopicTitle(topic.title, thread.title, takenTitleKeys);
+      takenTitleKeys.add(boardTopicTitleKey(title));
+      yield* emit(
+        events,
+        command,
+      )({
+        type: "board.topic-removed",
+        threadId: thread.id,
+        providerInstanceId: thread.providerInstanceId,
+        occurredAt: now,
+        payload: { topicId: topic.id },
+      });
+      yield* emit(
+        events,
+        command,
+      )({
+        type: "board.topic-updated",
+        threadId: parent.id,
+        providerInstanceId: parent.providerInstanceId,
+        occurredAt: now,
+        payload: { ...topic, leadThreadId: parent.id, title, updatedAt: movedAt },
+      });
+    }
   });
 
   const dispatchThreadBoard = Effect.fn("orchestrationV2.dispatch.threadBoard")(function* (
@@ -4354,6 +4409,11 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       const titleKey = boardTopicTitleKey(command.title);
       const existing = board.topics.find((topic) => boardTopicTitleKey(topic.title) === titleKey);
       if (existing === undefined) {
+        if (board.topics.length >= MAX_BOARD_TOPICS) {
+          return yield* invalid(
+            `The board already has ${MAX_BOARD_TOPICS} topics; update or remove one first.`,
+          );
+        }
         yield* emitTopic({
           id: `board-topic:${command.commandId}`,
           leadThreadId: board.lead.id,
@@ -4368,15 +4428,17 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         });
         return;
       }
+      if (!board.authorInGroup(existing)) {
+        return yield* invalid(
+          thread.id === board.lead.id
+            ? `Topic "${existing.title}" is frozen because its author left the group; claim it first.`
+            : `Topic "${existing.title}" is frozen because its author left the group.`,
+        );
+      }
       if (existing.authorThreadId !== thread.id) {
         const author = yield* findThread(existing.authorThreadId);
         return yield* invalid(
           `Topic "${existing.title}" belongs to ${author?.title ?? existing.authorThreadId}; send it a message instead.`,
-        );
-      }
-      if (!board.authorInGroup(existing)) {
-        return yield* invalid(
-          `Topic "${existing.title}" is frozen because its author left the group.`,
         );
       }
       yield* emitTopic({
@@ -4414,7 +4476,12 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     if (!isLead || authorInGroup) {
       return yield* invalid("Only the group lead can claim a topic whose author left the group.");
     }
-    yield* emitTopic({ ...topic, authorThreadId: board.lead.id, updatedAt });
+    yield* emitTopic({
+      ...topic,
+      authorThreadId: board.lead.id,
+      lastEditorThreadId: board.lead.id,
+      updatedAt,
+    });
   });
 
   // Recheck under the lock after reading the host. Record the watch first so wake events carry it.

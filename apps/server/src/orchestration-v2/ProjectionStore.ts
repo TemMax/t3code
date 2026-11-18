@@ -2355,7 +2355,12 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
         '$.boardUpdatedAt',
         COALESCE(${change.updatedAt ?? null}, json_extract(payload_json, '$.boardUpdatedAt')),
         '$.boardViewedAt',
-        COALESCE(${change.viewedAt ?? null}, json_extract(payload_json, '$.boardViewedAt'))
+        -- Forward only: two members can record visits concurrently. ISO strings sort by time.
+        COALESCE(
+          MAX(${change.viewedAt ?? null}, json_extract(payload_json, '$.boardViewedAt')),
+          ${change.viewedAt ?? null},
+          json_extract(payload_json, '$.boardViewedAt')
+        )
       )
       WHERE thread_id = ${leadThreadId}
     `;
