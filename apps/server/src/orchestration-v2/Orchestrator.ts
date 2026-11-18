@@ -1,4 +1,6 @@
 import type {
+  OrchestrationV2BoardTopic,
+  OrchestrationV2RpcSchemas,
   OrchestrationV2ThreadLinkMetadata,
   GuestShareId,
   OrchestrationV2SearchThreadInput,
@@ -166,6 +168,7 @@ import {
 } from "./DispatchModeLimit.ts";
 import {
   applyToProjection,
+  boardTopicTitleKey,
   emptyProjection,
   threadShellFromProjection,
   ProjectionStoreV2,
@@ -464,6 +467,10 @@ export interface OrchestratorV2Shape {
   readonly listGroupMemberThreadIds: (
     parentThreadId: ThreadId,
   ) => Effect.Effect<ReadonlyArray<ThreadId>, OrchestratorV2Error>;
+  /** The board of the thread's group, empty when the thread is in no group. */
+  readonly getThreadBoard: (input: {
+    readonly threadId: ThreadId;
+  }) => Effect.Effect<OrchestrationV2ThreadBoard, OrchestratorV2Error>;
   readonly getThreadProjection: (
     threadId: ThreadId,
   ) => Effect.Effect<OrchestrationV2ThreadProjection, OrchestratorV2Error>;
@@ -550,6 +557,15 @@ export interface OrchestratorV2Shape {
   }) => Stream.Stream<OrchestrationV2StoredEvent, OrchestratorV2Error>;
   readonly streamDomainEvents: Stream.Stream<OrchestrationV2DomainEvent, OrchestratorV2Error>;
 }
+
+export type OrchestrationV2ThreadBoard =
+  typeof OrchestrationV2RpcSchemas.getThreadBoard.output.Type;
+
+const emptyThreadBoard: OrchestrationV2ThreadBoard = {
+  leadThreadId: null,
+  viewedAt: null,
+  topics: [],
+};
 
 export class OrchestratorV2 extends Context.Service<OrchestratorV2, OrchestratorV2Shape>()(
   "t3/orchestration-v2/Orchestrator/OrchestratorV2",
@@ -2000,6 +2016,38 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         ),
       ),
   );
+
+  /**
+   * The lead is the thread's group parent, or the thread itself. A topic's author is in the
+   * group while it is the lead or a live thread whose group parent is the lead.
+   */
+  const resolveBoard = Effect.fn("Orchestrator.resolveBoard")(function* (
+    thread: OrchestrationV2AppThread,
+  ) {
+    const leadId = thread.groupParentThreadId ?? thread.id;
+    const lead = leadId === thread.id ? thread : yield* findThread(leadId);
+    if (lead === null || lead.deletedAt !== null) return null;
+    const memberIds = new Set(
+      yield* projectionStore
+        .listGroupMemberThreadIds(lead.id)
+        .pipe(
+          Effect.mapError((cause) => new OrchestratorProjectionError({ threadId: lead.id, cause })),
+        ),
+    );
+    const topics = yield* projectionStore
+      .listBoardTopics(lead.id)
+      .pipe(
+        Effect.mapError((cause) => new OrchestratorProjectionError({ threadId: lead.id, cause })),
+      );
+    return {
+      lead,
+      topics,
+      inGroup: (threadId: ThreadId) =>
+        threadId === lead.id ? memberIds.size > 0 : memberIds.has(threadId),
+      authorInGroup: (topic: OrchestrationV2BoardTopic) =>
+        topic.authorThreadId === lead.id || memberIds.has(topic.authorThreadId),
+    };
+  });
 
   /** Groups are one level deep: a worker's group is its parent's. */
   const resolveGroupParent = Effect.fn("Orchestrator.resolveGroupParent")(function* (
@@ -4233,6 +4281,140 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         now,
       );
     }
+  });
+
+  const dispatchThreadBoard = Effect.fn("orchestrationV2.dispatch.threadBoard")(function* (
+    command: Extract<
+      OrchestrationV2ServerCommand,
+      {
+        readonly type:
+          | "thread.board.write"
+          | "thread.board.remove"
+          | "thread.board.claim"
+          | "thread.board.visit";
+      }
+    >,
+    events: Ref.Ref<Array<OrchestrationV2DomainEvent>>,
+  ) {
+    const invalid = (cause: string) =>
+      new OrchestratorDispatchError({
+        commandId: command.commandId,
+        commandType: command.type,
+        cause,
+      });
+    const thread = yield* projectionStore
+      .getThread(command.threadId)
+      .pipe(
+        Effect.mapError(
+          (cause) => new OrchestratorProjectionError({ threadId: command.threadId, cause }),
+        ),
+      );
+    if (thread.deletedAt !== null) return yield* invalid(`Thread ${command.threadId} is deleted.`);
+    const board = yield* resolveBoard(thread);
+    const now = yield* DateTime.now;
+    const emitBoardEvent = emit(events, command);
+
+    if (command.type === "thread.board.visit") {
+      const viewedAt = DateTime.make(command.viewedAt);
+      if (Option.isNone(viewedAt)) {
+        return yield* invalid(`Board visit time ${command.viewedAt} is not a valid timestamp.`);
+      }
+      if (board === null) return;
+      const previous = Option.fromNullishOr(board.lead.boardViewedAt).pipe(
+        Option.flatMap(DateTime.make),
+      );
+      if (Option.isSome(previous) && !DateTime.isGreaterThan(viewedAt.value, previous.value)) {
+        return;
+      }
+      // Like thread.visit, a read receipt: it never moves the lead's updatedAt.
+      yield* emitBoardEvent({
+        type: "thread.board-visit-recorded",
+        threadId: board.lead.id,
+        providerInstanceId: board.lead.providerInstanceId,
+        occurredAt: now,
+        payload: { boardViewedAt: DateTime.formatIso(viewedAt.value) },
+      });
+      return;
+    }
+
+    const emitTopic = (topic: OrchestrationV2BoardTopic) =>
+      emitBoardEvent({
+        type: "board.topic-updated",
+        threadId: topic.leadThreadId,
+        providerInstanceId: board?.lead.providerInstanceId,
+        occurredAt: now,
+        payload: topic,
+      });
+    const updatedAt = DateTime.formatIso(now);
+
+    if (command.type === "thread.board.write") {
+      if (board === null || !board.inGroup(thread.id)) {
+        return yield* invalid("Only a thread in a group can write to its board.");
+      }
+      const titleKey = boardTopicTitleKey(command.title);
+      const existing = board.topics.find((topic) => boardTopicTitleKey(topic.title) === titleKey);
+      if (existing === undefined) {
+        yield* emitTopic({
+          id: `board-topic:${command.commandId}`,
+          leadThreadId: board.lead.id,
+          title: command.title,
+          text: command.text,
+          authorThreadId: thread.id,
+          lastEditorThreadId: thread.id,
+          editCount: 1,
+          orderKey: updatedAt,
+          createdAt: updatedAt,
+          updatedAt,
+        });
+        return;
+      }
+      if (existing.authorThreadId !== thread.id) {
+        const author = yield* findThread(existing.authorThreadId);
+        return yield* invalid(
+          `Topic "${existing.title}" belongs to ${author?.title ?? existing.authorThreadId}; send it a message instead.`,
+        );
+      }
+      if (!board.authorInGroup(existing)) {
+        return yield* invalid(
+          `Topic "${existing.title}" is frozen because its author left the group.`,
+        );
+      }
+      yield* emitTopic({
+        ...existing,
+        title: command.title,
+        text: command.text,
+        lastEditorThreadId: thread.id,
+        editCount: existing.editCount + 1,
+        updatedAt,
+      });
+      return;
+    }
+
+    const topic = board?.topics.find((candidate) => candidate.id === command.topicId);
+    if (board === null || topic === undefined) {
+      return yield* invalid(`Topic ${command.topicId} is not on this thread's board.`);
+    }
+    const authorInGroup = board.authorInGroup(topic);
+    const isLead = thread.id === board.lead.id;
+
+    if (command.type === "thread.board.remove") {
+      if (!(authorInGroup ? topic.authorThreadId === thread.id : isLead)) {
+        return yield* invalid("Only the topic's author can remove it.");
+      }
+      yield* emitBoardEvent({
+        type: "board.topic-removed",
+        threadId: board.lead.id,
+        providerInstanceId: board.lead.providerInstanceId,
+        occurredAt: now,
+        payload: { topicId: topic.id },
+      });
+      return;
+    }
+
+    if (!isLead || authorInGroup) {
+      return yield* invalid("Only the group lead can claim a topic whose author left the group.");
+    }
+    yield* emitTopic({ ...topic, authorThreadId: board.lead.id, updatedAt });
   });
 
   // Recheck under the lock after reading the host. Record the watch first so wake events carry it.
@@ -15747,11 +15929,8 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       case "thread.board.remove":
       case "thread.board.claim":
       case "thread.board.visit":
-        return yield* new OrchestratorDispatchError({
-          commandId: command.commandId,
-          commandType: command.type,
-          cause: "The group board is not available yet.",
-        });
+        yield* dispatchThreadBoard(command, events);
+        break;
       default:
         return yield* dispatchUnsupported(command);
     }
@@ -15874,6 +16053,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           command.type === "thread.background-work.settle" ||
           // A stale visit changes no read state.
           command.type === "thread.visit" ||
+          command.type === "thread.board.visit" ||
           // A read can answer a watch again before a push's reopen lands; nothing is left to clear.
           command.type === "thread.pull-request-watch.checks-reopen" ||
           command.type === "thread.interrupt.unresponsive" ||
@@ -16140,6 +16320,13 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         ),
       );
     if (command.type === "thread.create" && command.groupParentThreadId !== undefined)
+      return yield* threadDispatch.withDeletionLock(dispatch);
+    // Members of one group hold different thread locks, so board edits serialize on the permit.
+    if (
+      command.type === "thread.board.write" ||
+      command.type === "thread.board.remove" ||
+      command.type === "thread.board.claim"
+    )
       return yield* threadDispatch.withDeletionLock(dispatch);
     if (command.type === "thread.delete")
       return yield* threadDispatch.withDeletionLock(
@@ -16769,6 +16956,20 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           );
       },
     ),
+    getThreadBoard: Effect.fn("OrchestratorV2.getThreadBoard")(function* ({ threadId }) {
+      const thread = yield* findThread(threadId);
+      if (thread === null || thread.deletedAt !== null) return emptyThreadBoard;
+      const board = yield* resolveBoard(thread);
+      if (board === null || !board.inGroup(thread.id)) return emptyThreadBoard;
+      return {
+        leadThreadId: board.lead.id,
+        viewedAt: board.lead.boardViewedAt ?? null,
+        topics: board.topics.map((topic) => ({
+          ...topic,
+          authorInGroup: board.authorInGroup(topic),
+        })),
+      };
+    }),
     getThreadProjection: Effect.fn("OrchestratorV2.getThreadProjection")(function (threadId) {
       return projectionStore
         .getThreadProjection(threadId)

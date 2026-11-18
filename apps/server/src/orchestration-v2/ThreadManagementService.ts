@@ -452,6 +452,7 @@ export interface ThreadManagementServiceShape {
   >;
   readonly getThreadShell: Orchestrator.OrchestratorV2["Service"]["getThreadShell"];
   readonly listGroupMemberThreadIds: Orchestrator.OrchestratorV2["Service"]["listGroupMemberThreadIds"];
+  readonly getThreadBoard: Orchestrator.OrchestratorV2["Service"]["getThreadBoard"];
   readonly listAppOwnedChildThreadIds: Orchestrator.OrchestratorV2["Service"]["listAppOwnedChildThreadIds"];
   readonly getThreadLinkMetadata: Orchestrator.OrchestratorV2["Service"]["getThreadLinkMetadata"];
   readonly getThreadTitles: Orchestrator.OrchestratorV2["Service"]["getThreadTitles"];
@@ -1779,6 +1780,7 @@ const make = Effect.gen(function* () {
     readShellSnapshot: orchestrator.readShellSnapshot,
     getThreadShell: orchestrator.getThreadShell,
     listGroupMemberThreadIds: orchestrator.listGroupMemberThreadIds,
+    getThreadBoard: orchestrator.getThreadBoard,
     listAppOwnedChildThreadIds: Effect.fn("ThreadManagementService.listAppOwnedChildThreadIds")(
       function (threadId) {
         return ensureProjectionTranscript(threadId).pipe(
