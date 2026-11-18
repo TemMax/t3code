@@ -448,3 +448,58 @@ it.effect("does not report twice for one run", () =>
     assert.lengthOf(yield* reports(thread("lead")), 1);
   }).pipe(Effect.provide(layerReactorTest)),
 );
+
+it.effect("reports a failed worker whose next message is held in the queue", () =>
+  Effect.gen(function* () {
+    const { orchestrator, projections, reactor, thread, create, startTurn, endTurn, reports } =
+      yield* harness;
+    yield* create("lead");
+    yield* create("worker", thread("lead"));
+    const run = yield* startTurn(thread("worker"), "Build it");
+    yield* orchestrator.dispatch({
+      type: "message.dispatch",
+      createdBy: "user",
+      creationSource: "web",
+      commandId: CommandId.make("command:group-report:queue-next"),
+      threadId: thread("worker"),
+      messageId: MessageId.make("message:group-report:queue-next"),
+      text: "Then test it",
+      attachments: [],
+      dispatchMode: { type: "queue_after_active" },
+    });
+    const { runs } = yield* projections.getThreadRecords(thread("worker"), ["runs"]);
+    const queued = runs.find((candidate) => candidate.status === "queued")!;
+    const now = yield* DateTime.now;
+    // After a provider failure the queue is held until the user resumes it.
+    const held = {
+      id: EventId.make("event:group-report:held"),
+      type: "run.updated",
+      threadId: queued.threadId,
+      runId: queued.id,
+      occurredAt: now,
+      payload: { ...queued, queueHeld: true },
+    } satisfies OrchestrationV2DomainEvent;
+    yield* reactor.handle(yield* endTurn(run, "failed", "The provider failed.", [held]));
+    const [report] = yield* reports(thread("lead"));
+    assert.equal(report?.notification?.outcome, "failed");
+  }).pipe(Effect.provide(layerReactorTest)),
+);
+
+it.effect("reports a worker's success after its failed run is retried", () =>
+  Effect.gen(function* () {
+    const { reactor, thread, create, startTurn, endTurn, reports } = yield* harness;
+    yield* create("lead");
+    yield* create("worker", thread("lead"));
+    const run = yield* startTurn(thread("worker"), "Build it");
+    const failed = yield* endTurn(run, "failed");
+    yield* reactor.handle(failed);
+    // A workspace-preparation retry runs the same run id again.
+    yield* reactor.handle(
+      yield* endTurn({ ...run, startedAt: failed.payload.startedAt }, "waiting", "Built."),
+    );
+    assert.deepEqual(
+      (yield* reports(thread("lead"))).map((report) => report.notification?.outcome),
+      ["failed", "completed"],
+    );
+  }).pipe(Effect.provide(layerReactorTest)),
+);

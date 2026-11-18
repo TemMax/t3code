@@ -30,6 +30,15 @@ const REPORT_CHARACTER_LIMIT = 2_000;
 const STOPPED_RUN_STATUSES: ReadonlySet<string> = new Set(["waiting", "completed", "failed"]);
 const BUSY_RUN_STATUSES = ["queued", "preparing", "starting", "running"] as const;
 
+// A queue held after a failure waits for the user, so it neither keeps the worker busy nor goes unreported.
+const isHeldQueuedRun = (run: {
+  readonly status: string;
+  readonly queueHeld?: boolean | undefined;
+}) => run.status === "queued" && run.queueHeld === true;
+const triggersReport = (event: OrchestrationV2DomainEvent) =>
+  event.type === "run.updated" &&
+  (STOPPED_RUN_STATUSES.has(event.payload.status) || isHeldQueuedRun(event.payload));
+
 const make = Effect.gen(function* () {
   const engine = yield* Orchestrator.OrchestratorV2;
   const projections = yield* ProjectionStore.ProjectionStoreV2;
@@ -37,28 +46,34 @@ const make = Effect.gen(function* () {
   // Runs for every domain event; most events return before any read.
   const handle: GroupReportReactor["Service"]["handle"] = Effect.fnUntraced(
     function* (event) {
-      if (event.type !== "run.updated" || !STOPPED_RUN_STATUSES.has(event.payload.status)) return;
+      if (event.type !== "run.updated" || !triggersReport(event)) return;
+      const shell = yield* projections.getThreadRecords(event.threadId, []);
+      if (shell.thread.groupParentThreadId == null) return;
       const worker = yield* projections.getThreadRecords(
         event.threadId,
         ["runs", "runtimeRequests", "subagents", "providerThreads"],
         {
-          runStatuses: BUSY_RUN_STATUSES,
+          // Failed runs too: behind a held queue the latest run is queued, not the failed one.
+          runStatuses: [...BUSY_RUN_STATUSES, "failed"],
           includeLatestRun: true,
           runtimeRequestStatuses: ["pending"],
           omitSettledSubagents: true,
         },
       );
       const leadId = worker.thread.groupParentThreadId;
-      const run = worker.runs.toSorted((a, b) => b.ordinal - a.ordinal)[0];
+      const run = worker.runs
+        .filter((candidate) => candidate.status !== "queued")
+        .toSorted((a, b) => b.ordinal - a.ordinal)[0];
       if (
         leadId == null ||
         worker.thread.deletedAt !== null ||
         run === undefined ||
-        run.id !== event.payload.id ||
+        (!isHeldQueuedRun(event.payload) && run.id !== event.payload.id) ||
         !STOPPED_RUN_STATUSES.has(run.status) ||
         worker.runs.some(
           (other) =>
             other.id !== run.id &&
+            !isHeldQueuedRun(other) &&
             (BUSY_RUN_STATUSES as ReadonlyArray<string>).includes(other.status),
         ) ||
         worker.runtimeRequests.some((request) => request.status === "pending")
@@ -75,8 +90,14 @@ const make = Effect.gen(function* () {
           return;
         }
       }
-      const lead = yield* projections.getThreadRecords(leadId, []);
-      if (lead.thread.archivedAt !== null || lead.thread.deletedAt !== null) return;
+      const lead = yield* projections.getThreadRecords(leadId, []).pipe(
+        Effect.catchTags({
+          ProjectionStoreThreadNotFoundError: () => Effect.undefined,
+        }),
+      );
+      if (lead === undefined || lead.thread.archivedAt !== null || lead.thread.deletedAt !== null) {
+        return;
+      }
 
       const { messages } = yield* projections.getThreadRecords(event.threadId, ["messages"], {
         messageRoles: ["assistant"],
@@ -97,7 +118,8 @@ const make = Effect.gen(function* () {
           ? `${reply.slice(0, REPORT_CHARACTER_LIMIT)}…\nRead the rest with t3_thread_read.`
           : reply,
       ].join("\n");
-      const key = `group-report:${worker.thread.id}:${run.id}`;
+      // A workspace-preparation retry reruns the same run id, so its new outcome needs its own key.
+      const key = `group-report:${worker.thread.id}:${run.id}:${failed ? "failed" : "finished"}`;
       yield* engine.dispatch({
         type: "message.dispatch",
         commandId: CommandId.make(`server:${key}`),
@@ -133,9 +155,7 @@ const make = Effect.gen(function* () {
       const workerReactions = yield* KeyedLock.makeRunner<ThreadId>();
       yield* forkParked(
         Stream.runForEach(engine.streamDomainEvents, (event) =>
-          event.type === "run.updated" && STOPPED_RUN_STATUSES.has(event.payload.status)
-            ? workerReactions.run(event.threadId, handle(event))
-            : Effect.void,
+          triggersReport(event) ? workerReactions.run(event.threadId, handle(event)) : Effect.void,
         ).pipe(
           Effect.catchCause((cause) =>
             Effect.logWarning("group report event stream failed", { cause }),
