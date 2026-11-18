@@ -538,6 +538,11 @@ function ThreadRouteContent(
       : scopeThreadRef(delegatedFrom.environmentId, delegatedFrom.threadId);
   // The title it had at delegation, until this client sees the parent itself.
   const delegatedFromThread = useThreadShell(delegatedFromRef);
+  const groupLead = useThreadShell(
+    selectedThread?.groupParentThreadId
+      ? scopeThreadRef(selectedThread.environmentId, selectedThread.groupParentThreadId)
+      : null,
+  );
   const selectedThreadActivity =
     selectedThread === null
       ? null
@@ -554,6 +559,7 @@ function ThreadRouteContent(
       : selectedThread?.linkOrigin
         ? `From ${selectedThread.linkOrigin.label}`
         : null,
+    groupLead ? `in ${groupLead.title}` : null,
   ]
     .filter(Boolean)
     .join(" · ");
