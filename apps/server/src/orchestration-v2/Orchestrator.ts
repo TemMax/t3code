@@ -678,6 +678,10 @@ function commandThreadId(command: OrchestrationV2ServerCommand): ThreadId {
     case "thread.active.reorder":
     case "thread.tag.set":
     case "thread.visit":
+    case "thread.board.write":
+    case "thread.board.remove":
+    case "thread.board.claim":
+    case "thread.board.visit":
     case "thread.mark-unread":
     case "thread.metadata.update":
     case "thread.pull-request.link":
@@ -15739,6 +15743,15 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       case "link_request.record":
         yield* dispatchLinkRequestRecord(command, events, effects);
         break;
+      case "thread.board.write":
+      case "thread.board.remove":
+      case "thread.board.claim":
+      case "thread.board.visit":
+        return yield* new OrchestratorDispatchError({
+          commandId: command.commandId,
+          commandType: command.type,
+          cause: "The group board is not available yet.",
+        });
       default:
         return yield* dispatchUnsupported(command);
     }

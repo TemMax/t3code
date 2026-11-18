@@ -978,6 +978,10 @@ export function applyToProjection(
         ...projection,
         thread: applyOrchestrationV2ThreadVisit(projection.thread, event.payload),
       };
+    case "board.topic-updated":
+    case "board.topic-removed":
+    case "thread.board-visit-recorded":
+      return projection;
     case "run.created":
     case "run.updated":
       return withLocalVisibleTurnItems({
@@ -2356,6 +2360,11 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
               });
               break;
             }
+            // Returning also skips the thread activity bump below.
+            case "board.topic-updated":
+            case "board.topic-removed":
+            case "thread.board-visit-recorded":
+              return;
             case "thread.created":
             case "thread.archived":
             case "thread.unarchived":
