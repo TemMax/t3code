@@ -45,7 +45,14 @@ import { canSnooze } from "@t3tools/client-runtime/state/thread-settled";
 import { threadChipCopyTarget } from "@t3tools/client-runtime/thread-reference";
 import type { MenuAction } from "@react-native-menu/menu";
 import { memo, useCallback, useMemo, useState, type ComponentProps, type ReactNode } from "react";
-import { Platform, Pressable, Text as RNText, useWindowDimensions, View } from "react-native";
+import {
+  type AccessibilityActionEvent,
+  Platform,
+  Pressable,
+  Text as RNText,
+  useWindowDimensions,
+  View,
+} from "react-native";
 import type { SwipeableMethods } from "react-native-gesture-handler/ReanimatedSwipeable";
 import Reanimated, { ReduceMotion, useAnimatedStyle, withTiming } from "react-native-reanimated";
 
@@ -1159,6 +1166,11 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
     ],
     [prBadgeLabel, showsWoke, leadGroup],
   );
+  const handleRowAccessibilityAction = (event: AccessibilityActionEvent) => {
+    if (event.nativeEvent.actionName === "openPullRequests") handleOpenPullRequests();
+    if (event.nativeEvent.actionName === "dismissWoke") handleAcknowledgeWoke();
+    if (event.nativeEvent.actionName === "toggleGroup") handleToggleGroup();
+  };
 
   const handleDelete = useCallback(() => onDeleteThread(thread), [onDeleteThread, thread]);
   const handleRename = useCallback(() => onRenameThread(thread), [onRenameThread, thread]);
@@ -2059,11 +2071,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
         accessibilityRole="button"
         accessibilityState={{ selected }}
         accessibilityActions={rowAccessibilityActions}
-        onAccessibilityAction={(event) => {
-          if (event.nativeEvent.actionName === "openPullRequests") handleOpenPullRequests();
-          if (event.nativeEvent.actionName === "dismissWoke") handleAcknowledgeWoke();
-          if (event.nativeEvent.actionName === "toggleGroup") handleToggleGroup();
-        }}
+        onAccessibilityAction={handleRowAccessibilityAction}
         onPress={() => {
           close();
           selectThread();
@@ -2105,6 +2113,8 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
         accessibilityLabel={rowAccessibilityLabel}
         accessibilityRole="button"
         accessibilityState={{ selected }}
+        accessibilityActions={rowAccessibilityActions}
+        onAccessibilityAction={handleRowAccessibilityAction}
         className={rowAppearance.className}
         onPress={() => {
           close();
