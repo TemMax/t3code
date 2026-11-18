@@ -2093,8 +2093,16 @@ export const layerWsRpc = (
                 }),
             ),
           ),
-        [ORCHESTRATION_V2_WS_METHODS.getThreadBoard]: (_input) =>
-          Effect.succeed({ leadThreadId: null, viewedAt: null, topics: [] }),
+        [ORCHESTRATION_V2_WS_METHODS.getThreadBoard]: (input) =>
+          threadManagement.getThreadBoard(input).pipe(
+            Effect.mapError(
+              (cause) =>
+                new OrchestrationV2GetShellSnapshotError({
+                  message: "Failed to load the thread board",
+                  cause,
+                }),
+            ),
+          ),
         [ORCHESTRATION_V2_WS_METHODS.getThreadTitles]: (input) =>
           threadManagement.getThreadTitles(input.threadIds).pipe(
             Effect.mapError(
