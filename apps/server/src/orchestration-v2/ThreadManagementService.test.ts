@@ -1106,7 +1106,7 @@ const sendInGroup = (input: {
         getThreadRecords: (request) =>
           Effect.succeed({
             thread: {
-              ...shell(request.threadId),
+              ...shell(request),
               archivedAt: null,
               worktreePath: null,
               modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "test" },
