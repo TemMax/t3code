@@ -551,6 +551,8 @@ function ThreadRouteContent(
           status: resolveThreadListV2Status(selectedThread),
         });
   const baseHeaderSubtitle = [
+    // First, so a phone-width header truncates the project and environment instead of the lead.
+    groupLead ? `in ${groupLead.title}` : null,
     selectedThreadProject?.title ?? null,
     selectedEnvironmentConnection?.environmentLabel ?? null,
     // A linked environment's delegated task names its parent; other linked work its origin.
@@ -559,7 +561,6 @@ function ThreadRouteContent(
       : selectedThread?.linkOrigin
         ? `From ${selectedThread.linkOrigin.label}`
         : null,
-    groupLead ? `in ${groupLead.title}` : null,
   ]
     .filter(Boolean)
     .join(" · ");
