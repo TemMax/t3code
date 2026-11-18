@@ -416,36 +416,34 @@ export const layer = McpToolAccess.toLayer(ThreadToolkit, {
   ),
   t3_thread_board: McpToolAccess.either(
     (input) => input.action === "read",
-    McpToolAccess.reads(() =>
+    McpToolAccess.readsAsCaller(() =>
       readBoard().pipe(Effect.map(({ leadThreadId, topics }) => ({ leadThreadId, topics }))),
     ),
-    McpToolAccess.writesThreads(
-      () => [],
-      (input) =>
-        Effect.gen(function* () {
-          const { threads, caller } = yield* readBoard();
-          const common = { commandId: yield* newCommandId(), threadId: caller.id };
-          let command: OrchestrationV2Command;
-          let matches: (topic: { id: string; title: string }) => boolean;
-          if (input.action === "write") {
-            const title = yield* required(input.title, "title");
-            const text = yield* required(input.text, "text");
-            command = { ...common, type: "thread.board.write", title, text };
-            matches = (topic) => boardTopicTitleKey(topic.title) === boardTopicTitleKey(title);
-          } else {
-            const topicId = yield* required(input.topicId, "topicId");
-            command = {
-              ...common,
-              type: input.action === "claim" ? "thread.board.claim" : "thread.board.remove",
-              topicId,
-            };
-            matches = (topic) => topic.id === topicId;
-          }
-          yield* threads.dispatch(command).pipe(Effect.mapError(boardRefusal));
-          if (input.action === "remove") return { removed: true as const };
-          const { topics } = yield* readBoard();
-          return topics.find(matches) ?? (yield* unavailable());
-        }),
+    McpToolAccess.actsAsCaller((input) =>
+      Effect.gen(function* () {
+        const { threads, caller } = yield* readBoard();
+        const common = { commandId: yield* newCommandId(), threadId: caller.id };
+        let command: OrchestrationV2Command;
+        let matches: (topic: { id: string; title: string }) => boolean;
+        if (input.action === "write") {
+          const title = yield* required(input.title, "title");
+          const text = yield* required(input.text, "text");
+          command = { ...common, type: "thread.board.write", title, text };
+          matches = (topic) => boardTopicTitleKey(topic.title) === boardTopicTitleKey(title);
+        } else {
+          const topicId = yield* required(input.topicId, "topicId");
+          command = {
+            ...common,
+            type: input.action === "claim" ? "thread.board.claim" : "thread.board.remove",
+            topicId,
+          };
+          matches = (topic) => topic.id === topicId;
+        }
+        yield* threads.dispatch(command).pipe(Effect.mapError(boardRefusal));
+        if (input.action === "remove") return { removed: true as const };
+        const { topics } = yield* readBoard();
+        return topics.find(matches) ?? (yield* unavailable());
+      }),
     ),
   ),
   t3_thread_organize: writesThread((input) =>

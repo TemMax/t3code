@@ -24,7 +24,7 @@ import {
 } from "@t3tools/contracts";
 import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as Schema from "effect/Schema";
-import { Tool, Toolkit } from "effect/ai";
+import { McpSchema, Tool, Toolkit } from "effect/ai";
 
 import * as ThreadSearch from "../../../orchestration-v2/ThreadSearch.ts";
 import * as ScheduledTaskService from "../../../scheduledTasks/ScheduledTaskService.ts";
@@ -82,7 +82,6 @@ const ThreadBoardTool = Tool.make("t3_thread_board", {
   description:
     "Read or write your group's board: one topic per title, current state not a log. Only a topic's author edits or removes it; the lead may remove or claim a topic whose author left.",
   parameters: Schema.Struct({
-    environmentId: OrchestratorMcpEnvironmentTarget,
     action: Schema.Literals(["read", "write", "remove", "claim"]),
     title: Schema.optional(OrchestrationV2BoardTopic.fields.title),
     text: Schema.optional(OrchestrationV2BoardTopic.fields.text),
@@ -102,7 +101,8 @@ const ThreadBoardTool = Tool.make("t3_thread_board", {
   ],
 })
   .annotate(Tool.Title, "Group board")
-  .annotate(Tool.Destructive, true);
+  .annotate(Tool.Destructive, true)
+  .annotate(McpSchema.EnabledWhen, McpInvocationContext.hiddenFromOutsideClients);
 
 const commandTool = {
   success: OrchestrationV2DispatchCommandResult,
