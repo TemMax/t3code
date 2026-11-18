@@ -1143,13 +1143,20 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
       input: { threadId: thread.id, visitedAt: props.wokeAt },
     });
   }, [props.wokeAt, thread.environmentId, thread.id, visitThread]);
+  const handleToggleGroup = useCallback(
+    () => onToggleGroup?.(`${thread.environmentId}:${thread.id}`),
+    [onToggleGroup, thread.environmentId, thread.id],
+  );
   // VoiceOver cannot focus buttons inside the accessible row.
   const rowAccessibilityActions = useMemo(
     () => [
       ...(prBadgeLabel ? [{ name: "openPullRequests", label: prBadgeLabel }] : []),
       ...(showsWoke ? [{ name: "dismissWoke", label: "Dismiss Woke notification" }] : []),
+      ...(leadGroup
+        ? [{ name: "toggleGroup", label: leadGroup.collapsed ? "Expand group" : "Collapse group" }]
+        : []),
     ],
-    [prBadgeLabel, showsWoke],
+    [prBadgeLabel, showsWoke, leadGroup],
   );
 
   const handleDelete = useCallback(() => onDeleteThread(thread), [onDeleteThread, thread]);
@@ -1187,10 +1194,6 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
   const handleMoveUp = useCallback(() => onMoveThread?.(thread, "up"), [onMoveThread, thread]);
   const handleMoveDown = useCallback(() => onMoveThread?.(thread, "down"), [onMoveThread, thread]);
   const handleArchive = useCallback(() => onArchiveThread(thread), [onArchiveThread, thread]);
-  const handleToggleGroup = useCallback(
-    () => onToggleGroup?.(`${thread.environmentId}:${thread.id}`),
-    [onToggleGroup, thread.environmentId, thread.id],
-  );
   const isWorker = workerGroup !== null;
   const groupMenuItems = useMemo<MenuAction[]>(
     () =>
@@ -2055,6 +2058,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
         onAccessibilityAction={(event) => {
           if (event.nativeEvent.actionName === "openPullRequests") handleOpenPullRequests();
           if (event.nativeEvent.actionName === "dismissWoke") handleAcknowledgeWoke();
+          if (event.nativeEvent.actionName === "toggleGroup") handleToggleGroup();
         }}
         onPress={() => {
           close();
@@ -2071,7 +2075,18 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
           <View>
             <View className={THREAD_LIST_V2_ROW_CONTENT_CLASS_NAME}>{fadedCardContent}</View>
             {hasTrailingDivider ? (
-              <View className="h-px bg-border-subtle" style={{ marginLeft: 20 + contentIndent }} />
+              <View
+                className="h-px bg-border-subtle"
+                // An open lead's divider starts past the tree trunk, in line with its workers'.
+                style={{
+                  marginLeft:
+                    20 +
+                    contentIndent +
+                    (leadGroup && !leadGroup.collapsed && leadGroup.workerCount > 0
+                      ? THREAD_GROUP_INDENT
+                      : 0),
+                }}
+              />
             ) : null}
             {treeLine}
           </View>
