@@ -64,25 +64,20 @@ export function ThreadBoardSheet({ route }: StaticScreenProps<BoardTarget>) {
     if (opened?.leadThreadId != null) markViewed(opened.leadThreadId);
   }, [opened]);
 
-  const leadThreadId = board?.leadThreadId ?? null;
-  const boardUpdatedAt =
-    leadThreadId === null
-      ? null
-      : (shells.find(
-          (shell) => shell.environmentId === target.environmentId && shell.id === leadThreadId,
-        )?.boardUpdatedAt ?? null);
+  const shellOf = (threadId: ThreadId) =>
+    shells.find((shell) => shell.environmentId === target.environmentId && shell.id === threadId);
+  const leadThreadId =
+    board?.leadThreadId ?? shellOf(target.threadId)?.groupParentThreadId ?? target.threadId;
+  const boardUpdatedAt = shellOf(leadThreadId)?.boardUpdatedAt ?? null;
   const refreshBoard = query.refresh;
-  const lastRefreshedFor = useRef<string | null | undefined>(undefined);
+  // Taken at mount, before the read, so a post that lands during the read still refreshes.
+  const lastRefreshedFor = useRef(boardUpdatedAt);
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- refetches the server read when an agent posts, which only the shell reports
   useEffect(() => {
-    if (leadThreadId === null) return;
-    if (lastRefreshedFor.current === undefined || lastRefreshedFor.current === boardUpdatedAt) {
-      lastRefreshedFor.current = boardUpdatedAt;
-      return;
-    }
+    if (lastRefreshedFor.current === boardUpdatedAt) return;
     lastRefreshedFor.current = boardUpdatedAt;
     refreshBoard();
-  }, [boardUpdatedAt, leadThreadId, refreshBoard]);
+  }, [boardUpdatedAt, refreshBoard]);
 
   const openLink = (href: string) => {
     const link = resolveMarkdownLinkPresentation(href);
