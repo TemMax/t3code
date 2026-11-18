@@ -1,7 +1,8 @@
 import { useAtomValue } from "@effect/atom-react";
 import { resolveThreadGroupFor } from "@t3tools/client-runtime/state/thread-groups";
 import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
-import { Platform, Pressable, ScrollView, View } from "react-native";
+import { useRef } from "react";
+import { Platform, Pressable, ScrollView, View, type ScrollViewInstance } from "react-native";
 
 import { AppText as Text } from "../../components/ui/AppText";
 import { SymbolView } from "../../components/ui/AppSymbol";
@@ -31,6 +32,7 @@ export function ThreadGroupStrip(props: {
 }) {
   const shells = useAtomValue(steadyNavigationThreadShellsAtom);
   const openLinkedThread = useOpenLinkedThread();
+  const scrollRef = useRef<ScrollViewInstance>(null);
   const group = resolveThreadGroupFor(shells, props.environmentId, props.threadId);
   if (group === null) return null;
   const members = [
@@ -46,7 +48,12 @@ export function ThreadGroupStrip(props: {
     >
       <SymbolView name="person.2" size={12} tintColorClassName="accent-foreground-muted" />
       <Text className="text-xs text-foreground-muted">Group</Text>
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} className="flex-1">
+      <ScrollView
+        ref={scrollRef}
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        className="flex-1"
+      >
         <View className="flex-row gap-1 pr-4">
           {members.map(({ shell, lead }) => {
             const current = shell.id === props.threadId;
@@ -54,7 +61,8 @@ export function ThreadGroupStrip(props: {
             const needsInput = status === "approval" || status === "input";
             return (
               <Pressable
-                key={shell.id}
+                // The current chip remounts when it changes, so its layout scrolls it into view.
+                key={`${shell.id}:${current}`}
                 accessibilityRole="button"
                 accessibilityState={{ selected: current }}
                 accessibilityLabel={`Open ${shell.title}${lead ? ", lead" : ""}${needsInput ? ", needs input" : ""}`}
@@ -63,6 +71,15 @@ export function ThreadGroupStrip(props: {
                   "max-w-48 flex-row items-center gap-1.5 rounded-full px-2.5 py-1",
                   current ? "border border-foreground-muted bg-subtle" : "bg-subtle",
                 )}
+                onLayout={
+                  current
+                    ? (event) =>
+                        scrollRef.current?.scrollTo({
+                          x: Math.max(0, event.nativeEvent.layout.x - 16),
+                          animated: false,
+                        })
+                    : undefined
+                }
                 onPress={() =>
                   openLinkedThread({ environmentId: shell.environmentId, threadId: shell.id })
                 }
