@@ -414,6 +414,7 @@ export function useThreadListActions(): {
     showThreadUndoNotice({
       action,
       claim,
+      count: () => claim.restorableIndexes().length,
       undo: async () => {
         try {
           await Promise.all(

@@ -195,7 +195,11 @@ vi.mock("../../state/threads", () => ({
 
 import { appAtomRegistry } from "../../state/atom-registry";
 import { composerDraftsAtom } from "../../state/use-composer-drafts";
-import { dismissThreadUndoNotice, readThreadUndoNotice } from "./thread-undo-notice";
+import {
+  dismissThreadUndoNotice,
+  readThreadUndoNotice,
+  threadUndoNoticeMessage,
+} from "./thread-undo-notice";
 import { useThreadListActions } from "./useThreadListActions";
 
 const primaryEnvironmentId = EnvironmentId.make("primary");
@@ -612,7 +616,7 @@ describe("thread action undo", () => {
       ["settle", "lead"],
       ["settle", "worker"],
     ]);
-    expect(readThreadUndoNotice()?.action).toBe("Settled");
+    expect(threadUndoNoticeMessage(readThreadUndoNotice()!)).toBe("Settled 2 threads");
 
     await readThreadUndoNotice()!.undo();
     expect(state.requests.slice(2).map(({ action, input }) => [action, input.threadId])).toEqual([
