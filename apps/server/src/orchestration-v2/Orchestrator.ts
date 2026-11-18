@@ -460,6 +460,10 @@ export interface OrchestratorV2Shape {
   readonly listAppOwnedChildThreadIds: (
     threadId: ThreadId,
   ) => Effect.Effect<ReadonlyArray<ThreadId>, OrchestratorV2Error>;
+  /** Worker ids of this lead, unordered, archived included. */
+  readonly listGroupMemberThreadIds: (
+    parentThreadId: ThreadId,
+  ) => Effect.Effect<ReadonlyArray<ThreadId>, OrchestratorV2Error>;
   readonly getThreadProjection: (
     threadId: ThreadId,
   ) => Effect.Effect<OrchestrationV2ThreadProjection, OrchestratorV2Error>;
@@ -16617,6 +16621,17 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         return projectionStore
           .listAppOwnedChildThreadIds(threadId)
           .pipe(Effect.mapError((cause) => new OrchestratorProjectionError({ threadId, cause })));
+      },
+    ),
+    listGroupMemberThreadIds: Effect.fn("OrchestratorV2.listGroupMemberThreadIds")(
+      function (parentThreadId) {
+        return projectionStore
+          .listGroupMemberThreadIds(parentThreadId)
+          .pipe(
+            Effect.mapError(
+              (cause) => new OrchestratorProjectionError({ threadId: parentThreadId, cause }),
+            ),
+          );
       },
     ),
     getThreadProjection: Effect.fn("OrchestratorV2.getThreadProjection")(function (threadId) {
