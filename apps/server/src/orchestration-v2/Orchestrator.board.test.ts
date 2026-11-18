@@ -372,6 +372,7 @@ it.effect("a lead that joins another group brings its board along", () =>
     yield* write("w", "API shape", "Use cursor pagination.");
     yield* write("lead", "Plan", "Ship the board.");
     yield* write("y", "plan", "Ship the strip.");
+    yield* write("y", "plan (LEAD)", "Taken too.");
 
     yield* attach("lead", "other");
     assert.deepEqual(yield* topics("lead"), []);
@@ -382,11 +383,12 @@ it.effect("a lead that joins another group brings its board along", () =>
         .toSorted(),
       [
         `API shape by ${threadId("w")}`,
-        `Plan (lead) by ${threadId("lead")}`,
+        `Plan (lead 2) by ${threadId("lead")}`,
+        `plan (LEAD) by ${threadId("y")}`,
         `plan by ${threadId("y")}`,
       ],
     );
-    assert.equal((yield* shell("other")).boardTopicCount, 3);
+    assert.equal((yield* shell("other")).boardTopicCount, 4);
   }).pipe(Effect.provide(layerTest)),
 );
 

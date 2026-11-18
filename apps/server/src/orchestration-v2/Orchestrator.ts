@@ -677,10 +677,13 @@ const movedBoardTopicTitle = (
   takenTitleKeys: ReadonlySet<string>,
 ): string => {
   if (!takenTitleKeys.has(boardTopicTitleKey(title))) return title;
-  const from = fromLeadTitle.trim().slice(0, 60) || "moved";
+  // Never split a surrogate pair when cutting.
+  const cut = (text: string, length: number) =>
+    text.slice(0, length).replace(/[\uD800-\uDBFF]$/, "");
+  const from = cut(fromLeadTitle.trim(), 60) || "moved";
   for (let attempt = 1; ; attempt += 1) {
     const suffix = ` (${from}${attempt === 1 ? "" : ` ${attempt}`})`;
-    const candidate = `${title.slice(0, 200 - suffix.length).trimEnd()}${suffix}`;
+    const candidate = `${cut(title, 200 - suffix.length).trimEnd()}${suffix}`;
     if (!takenTitleKeys.has(boardTopicTitleKey(candidate))) return candidate;
   }
 };
