@@ -573,6 +573,7 @@ export function HomeScreen(props: HomeScreenProps) {
         />
       );
     }
+    if (item.type === "v2-group-overflow") return null;
     const thread = item.item.thread;
     return (
       <ThreadListV2Row
