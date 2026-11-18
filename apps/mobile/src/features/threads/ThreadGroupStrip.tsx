@@ -15,12 +15,16 @@ function statusDotClass(status: ThreadListV2Status) {
   switch (status) {
     case "approval":
     case "input":
+    case "request":
       return "bg-warning-foreground";
     case "working":
       return "bg-adaptive-sky-600-400";
     case "failed":
+    case "limited":
       return "bg-danger-foreground";
-    default:
+    case "waiting":
+      return "bg-foreground-muted";
+    case "ready":
       return "bg-adaptive-emerald-600-400";
   }
 }
@@ -58,7 +62,7 @@ export function ThreadGroupStrip(props: {
           {members.map(({ shell, lead }) => {
             const current = shell.id === props.threadId;
             const status = resolveThreadListV2Status(shell);
-            const needsInput = status === "approval" || status === "input";
+            const needsInput = status === "approval" || status === "input" || status === "request";
             return (
               <Pressable
                 // The current chip remounts when it changes, so its layout scrolls it into view.
