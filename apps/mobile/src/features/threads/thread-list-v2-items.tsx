@@ -1208,7 +1208,9 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
   );
   const canSettleGroup = hasWorkers && onSettleGroup !== undefined;
 
-  const canUnsettle = variant === "slim";
+  // A group's section follows its liveliest member, so a settled member can be a card.
+  const ownSettled = (leadGroup?.ownState ?? workerGroup?.memberState) === "settled";
+  const canUnsettle = variant === "slim" || ownSettled;
   // The gate's only time-dependent edge is the queued-turn grace window, so its
   // expiry is known without a clock: evaluate at the message's own timestamp.
   // A gate held by runtime status has no expiry, and no clock tick opens it.
@@ -1220,6 +1222,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
   const snoozeGateNow = new Date(snoozeGateNowMs).toISOString();
   const swipeActions = resolveThreadListV2SwipeActions({
     variant,
+    settled: ownSettled,
     settlementSupported: props.settlementSupported,
     snoozeSupported: props.snoozeSupported,
     snoozable: canSnooze(thread, { now: snoozeGateNow }),

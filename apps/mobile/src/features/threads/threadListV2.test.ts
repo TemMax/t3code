@@ -309,6 +309,18 @@ describe("resolveThreadListV2SwipeActions", () => {
     });
     expect(layout.snoozedCount).toBe(1);
   });
+
+  it("offers un-settle for a settled group member shown as a card", () => {
+    expect(
+      resolveThreadListV2SwipeActions({
+        variant: "card",
+        settlementSupported: true,
+        snoozeSupported: true,
+        snoozable: true,
+        settled: true,
+      }).primary,
+    ).toBe("unsettle");
+  });
 });
 
 describe("search lists ranked matches", () => {
