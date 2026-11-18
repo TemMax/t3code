@@ -1,7 +1,7 @@
 import { useAtomValue } from "@effect/atom-react";
 import { useNavigation, type StaticScreenProps } from "@react-navigation/native";
 import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
-import { useEffect, useEffectEvent, useState } from "react";
+import { useEffect, useEffectEvent, useRef, useState } from "react";
 import { Platform, ScrollView, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -63,6 +63,26 @@ export function ThreadBoardSheet({ route }: StaticScreenProps<BoardTarget>) {
   useEffect(() => {
     if (opened?.leadThreadId != null) markViewed(opened.leadThreadId);
   }, [opened]);
+
+  const leadThreadId = board?.leadThreadId ?? null;
+  const boardUpdatedAt =
+    leadThreadId === null
+      ? null
+      : (shells.find(
+          (shell) => shell.environmentId === target.environmentId && shell.id === leadThreadId,
+        )?.boardUpdatedAt ?? null);
+  const refreshBoard = query.refresh;
+  const lastRefreshedFor = useRef<string | null | undefined>(undefined);
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- refetches the server read when an agent posts, which only the shell reports
+  useEffect(() => {
+    if (leadThreadId === null) return;
+    if (lastRefreshedFor.current === undefined || lastRefreshedFor.current === boardUpdatedAt) {
+      lastRefreshedFor.current = boardUpdatedAt;
+      return;
+    }
+    lastRefreshedFor.current = boardUpdatedAt;
+    refreshBoard();
+  }, [boardUpdatedAt, leadThreadId, refreshBoard]);
 
   const openLink = (href: string) => {
     const link = resolveMarkdownLinkPresentation(href);
