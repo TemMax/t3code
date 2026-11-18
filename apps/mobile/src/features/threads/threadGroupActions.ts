@@ -65,5 +65,5 @@ export function groupLeadArchiveDetail(workerCount: number): string {
 }
 
 export function groupLeadDeleteDetail(workerCount: number): string {
-  return `${threadsOfGroup(workerCount)} will stay and become ordinary threads.`;
+  return `${threadsOfGroup(workerCount)} will stay and become ${workerCount === 1 ? "an ordinary thread" : "ordinary threads"}.`;
 }

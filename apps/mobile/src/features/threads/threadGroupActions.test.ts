@@ -100,7 +100,7 @@ describe("group lead copy", () => {
       "3 threads of this group will be shown separately while it is archived.",
     );
     expect(groupLeadDeleteDetail(1)).toBe(
-      "1 thread of this group will stay and become ordinary threads.",
+      "1 thread of this group will stay and become an ordinary thread.",
     );
     expect(groupLeadDeleteDetail(3)).toBe(
       "3 threads of this group will stay and become ordinary threads.",
