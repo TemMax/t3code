@@ -348,6 +348,28 @@ describe("search lists ranked matches", () => {
     ]);
     expect([...layout.contentOnlyThreadKeys]).toEqual([matchKey("mentioned")]);
   });
+
+  it("keeps each match's group role while the list is flat", () => {
+    const lead = makeThread({ id: ThreadId.make("lead"), title: "Deploy plan" });
+    const layout = buildThreadListV2Items({
+      threads: [
+        lead,
+        makeThread({
+          id: ThreadId.make("worker"),
+          title: "Deploy step",
+          groupParentThreadId: lead.id,
+        }),
+        makeThread({ id: ThreadId.make("solo"), title: "Deploy notes" }),
+      ],
+      environmentId: null,
+      searchQuery: "deploy",
+      threadGroups: { collapsedKeys: new Set(), openOverflowKeys: new Set() },
+      now: NOW,
+    });
+    expect(
+      Object.fromEntries(layout.items.map((item) => [item.thread.id, item.groupRole ?? null])),
+    ).toEqual({ lead: "lead", worker: "worker", solo: null });
+  });
 });
 
 describe("getThreadListV2OrderedSection", () => {

@@ -551,6 +551,7 @@ function ThreadNavigationSidebarPane(props: ThreadNavigationSidebarProps) {
             onSetThreadAutoSettle={setThreadAutoSettle}
             onMoveThread={moveThread}
             group={item.item.group}
+            groupRole={item.item.groupRole}
             onToggleGroup={toggleGroup}
             onAttachThread={setAttachingThread}
             onDetachThread={detachThread}

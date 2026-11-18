@@ -1020,6 +1020,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
   readonly searchQuery?: string;
   readonly simultaneousSwipeGesture?: ComponentProps<typeof ThreadSwipeable>["simultaneousWith"];
   readonly group?: ThreadListV2Item["group"];
+  readonly groupRole?: ThreadListV2Item["groupRole"];
   readonly onToggleGroup?: (leadKey: string) => void;
   /** Opens the picker that attaches the thread to a group. */
   readonly onAttachThread?: (thread: EnvironmentThreadShell) => void;
@@ -1044,7 +1045,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
   const { group, onToggleGroup, onAttachThread, onDetachThread, onSettleGroup } = props;
   const leadGroup = group?.role === "lead" ? group : null;
   const workerGroup = group?.role === "worker" ? group : null;
-  const hasWorkers = leadGroup !== null;
+  const hasWorkers = leadGroup !== null || props.groupRole === "lead";
   const {
     thread,
     variant,
@@ -1194,7 +1195,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
   const handleMoveUp = useCallback(() => onMoveThread?.(thread, "up"), [onMoveThread, thread]);
   const handleMoveDown = useCallback(() => onMoveThread?.(thread, "down"), [onMoveThread, thread]);
   const handleArchive = useCallback(() => onArchiveThread(thread), [onArchiveThread, thread]);
-  const isWorker = workerGroup !== null;
+  const isWorker = workerGroup !== null || props.groupRole === "worker";
   const groupMenuItems = useMemo<MenuAction[]>(
     () =>
       isWorker

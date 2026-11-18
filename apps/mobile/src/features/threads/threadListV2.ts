@@ -462,6 +462,8 @@ export interface ThreadListV2Item {
   readonly isLast: boolean;
   /** Listed under its project's folder header, so the row leaves out the project name. */
   readonly inFolder?: boolean;
+  /** Search lists threads flat; the row's menu still needs the thread's group role. */
+  readonly groupRole?: "lead" | "worker";
   readonly group?:
     | {
         readonly role: "lead";
@@ -666,6 +668,7 @@ export function threadListV2ListItemsAreEqual(
         previous.item.pinned === item.item.pinned &&
         previous.item.wokeAt === item.item.wokeAt &&
         previous.item.inFolder === item.item.inFolder &&
+        previous.item.groupRole === item.item.groupRole &&
         threadGroupsAreEqual(previous.item.group, item.item.group) &&
         previous.snoozeWakeLabelText === item.snoozeWakeLabelText &&
         previous.timeLabel === item.timeLabel &&
@@ -1112,9 +1115,18 @@ export function buildThreadListV2Items(input: {
       return thread ? [thread] : [];
     });
     const results = [...rankedMatches, ...contentOnly];
+    const searchGroups = splitThreadGroups(listedThreads);
+    const searchRoots = new Set(searchGroups.roots);
+    const groupRoleOf = (thread: EnvironmentThreadShell) =>
+      !searchRoots.has(thread)
+        ? ("worker" as const)
+        : searchGroups.workersByParentKey.has(`${thread.environmentId}:${thread.id}`)
+          ? ("lead" as const)
+          : null;
     return {
       items: results.map((thread, index) => ({
         thread,
+        ...(groupRoleOf(thread) ? { groupRole: groupRoleOf(thread)! } : {}),
         variant: slim.has(thread) ? "slim" : "card",
         snoozed: snoozedThreads.has(thread),
         pinned: pinnedThreads.has(thread),

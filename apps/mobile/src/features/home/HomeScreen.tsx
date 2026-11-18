@@ -680,6 +680,7 @@ export function HomeScreen(props: HomeScreenProps) {
         onSetThreadAutoSettle={handleSetThreadAutoSettle}
         onMoveThread={handleMoveThread}
         group={item.item.group}
+        groupRole={item.item.groupRole}
         onToggleGroup={toggleGroup}
         onAttachThread={setAttachThread}
         onDetachThread={handleDetachThread}
