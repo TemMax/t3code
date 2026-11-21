@@ -18,6 +18,7 @@ import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import type * as PlatformError from "effect/PlatformError";
 import * as PubSub from "effect/PubSub";
@@ -36,6 +37,8 @@ import {
 import * as ServerConfig from "../config.ts";
 
 const CONSUMED_FILE_NAME = "consumed.json";
+const RESERVED_ENTRY_ID = "consumed";
+const CONSUMED_MAX_RESULTS = 50;
 const ENTRY_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
 
 const ConsumedRecord = Schema.Struct({
@@ -49,15 +52,28 @@ type ConsumedRecord = typeof ConsumedRecord.Type;
 const ConsumedFileJson = Schema.fromJsonString(
   Schema.Struct({ version: Schema.Literal(1), consumed: Schema.Array(ConsumedRecord) }),
 );
-const EntryFileJson = Schema.fromJsonString(PromptStashEntry);
-const decodeEntryFileExit = Schema.decodeUnknownExit(EntryFileJson);
-const encodeEntryFile = Schema.encodeEffect(EntryFileJson);
+/** `receivedAt` is server time, so eviction order does not trust client clocks. */
+const EntryFileV2 = Schema.Struct({
+  version: Schema.Literal(2),
+  receivedAt: Schema.Number,
+  entry: PromptStashEntry,
+});
+// Version 1 files are the bare entry.
+const decodeEntryFileExit = Schema.decodeUnknownExit(
+  Schema.fromJsonString(Schema.Union([EntryFileV2, PromptStashEntry])),
+);
+const encodeEntryFile = Schema.encodeEffect(Schema.fromJsonString(EntryFileV2));
 const decodeConsumedFileExit = Schema.decodeUnknownExit(ConsumedFileJson);
 const encodeConsumedFile = Schema.encodeEffect(ConsumedFileJson);
 
+interface StoredEntry {
+  readonly entry: PromptStashEntry;
+  readonly receivedAt: number;
+}
+
 interface StoredStash {
   readonly seq: number;
-  readonly entries: ReadonlyMap<string, PromptStashEntry>;
+  readonly entries: ReadonlyMap<string, StoredEntry>;
   readonly consumed: ReadonlyMap<string, ConsumedRecord>;
 }
 
@@ -74,11 +90,42 @@ const toSummary = ({ records: _records, ...summary }: PromptStashEntry): PromptS
 const newestFirst = (a: PromptStashSummary, b: PromptStashSummary) =>
   a.createdAt === b.createdAt ? (a.id < b.id ? 1 : -1) : a.createdAt < b.createdAt ? 1 : -1;
 
+const oldestReceivedFirst = (a: StoredEntry, b: StoredEntry) =>
+  a.receivedAt !== b.receivedAt
+    ? a.receivedAt - b.receivedAt
+    : a.entry.id < b.entry.id
+      ? -1
+      : a.entry.id > b.entry.id
+        ? 1
+        : 0;
+
 const storageError = (error: { readonly message: string }) =>
   new PromptStashError({ reason: "storage", detail: error.message });
 
 const pruneConsumed = (consumed: ReadonlyMap<string, ConsumedRecord>, nowMs: number) =>
   new Map([...consumed].filter(([, record]) => nowMs - record.at <= PROMPT_STASH_CONSUMED_TTL_MS));
+
+/** Older records keep their id, which still answers `already-taken`, and drop the stored result. */
+const boundConsumedResults = (consumed: ReadonlyMap<string, ConsumedRecord>) => {
+  const kept = new Set(
+    [...consumed.values()]
+      .toReversed()
+      .filter((record) => record.result !== undefined)
+      .toSorted((a, b) => b.at - a.at)
+      .slice(0, CONSUMED_MAX_RESULTS),
+  );
+  return new Map(
+    [...consumed].map(([entryId, record]) => {
+      if (record.result === undefined || kept.has(record)) return [entryId, record];
+      const { result: _result, ...withoutResult } = record;
+      return [entryId, withoutResult];
+    }),
+  );
+};
+
+/** The id an attachment gets under another segment, as `planAttachmentRelabel` names it. */
+const relabeledId = (attachmentId: string, from: string, to: string) =>
+  `${to}-${attachmentId.slice(from.length + 1)}`.toLowerCase();
 
 export class PromptStash extends Context.Service<
   PromptStash,
@@ -110,9 +157,31 @@ const make = Effect.gen(function* () {
       Effect.mapError(storageError),
     );
 
+  /** A file already under the target id counts as moved, so a retry after a crash finds it. */
+  const planRelabel = (
+    attachmentId: string,
+    from: "pending" | "stash",
+    to: "pending" | "stash",
+  ) => {
+    const plan = planAttachmentRelabel({ attachmentsDir, attachmentId, from, to });
+    if (plan.ok) return plan;
+    if (parseThreadSegmentFromAttachmentId(attachmentId) !== from) return undefined;
+    const finalId = relabeledId(attachmentId, from, to);
+    const moved = planAttachmentRelabel({
+      attachmentsDir,
+      attachmentId: finalId,
+      from: to,
+      to: from,
+    });
+    return moved.ok
+      ? { finalId, currentPath: moved.finalPath, finalPath: moved.currentPath }
+      : undefined;
+  };
+
   /**
    * Renames the attachment and its `.txt` sidecar; a missing file yields `undefined`.
    * `touchedAtMs` restarts the pending sweep's 24-hour clock, which ages each file by its own mtime.
+   * It is set before the rename, which keeps mtime, so the sweep never sees a stale pending file.
    */
   const relabel = Effect.fn("PromptStash.relabel")(function* (
     attachmentId: string,
@@ -120,18 +189,18 @@ const make = Effect.gen(function* () {
     to: "pending" | "stash",
     touchedAtMs?: number,
   ) {
-    const plan = planAttachmentRelabel({ attachmentsDir, attachmentId, from, to });
-    if (!plan.ok) return undefined;
-    const paths = [[plan.currentPath, plan.finalPath] as const];
-    if (yield* fs.exists(`${plan.currentPath}.txt`)) {
-      paths.push([`${plan.currentPath}.txt`, `${plan.finalPath}.txt`]);
-    }
-    for (const [currentPath, finalPath] of paths) {
-      yield* fs.rename(currentPath, finalPath);
+    const plan = planRelabel(attachmentId, from, to);
+    if (plan === undefined) return undefined;
+    for (const [currentPath, finalPath] of [
+      [plan.currentPath, plan.finalPath],
+      [`${plan.currentPath}.txt`, `${plan.finalPath}.txt`],
+    ] as const) {
+      if (!(yield* fs.exists(currentPath))) continue;
       // Node takes seconds.
       if (touchedAtMs !== undefined) {
-        yield* fs.utimes(finalPath, touchedAtMs / 1000, touchedAtMs / 1000);
+        yield* fs.utimes(currentPath, touchedAtMs / 1000, touchedAtMs / 1000);
       }
+      yield* fs.rename(currentPath, finalPath);
     }
     return plan;
   });
@@ -156,37 +225,77 @@ const make = Effect.gen(function* () {
       Effect.flatMap((contents) => writeAtomically(consumedPath, contents)),
     );
 
-  const loadEntries = Effect.gen(function* () {
+  /**
+   * `complete` is false when the directory or any entry file could not be read or decoded.
+   * An entry already in `consumed` is a take that died before deleting it; the delete finishes here.
+   */
+  const loadEntries = Effect.fn("PromptStash.loadEntries")(function* (
+    consumed: ReadonlyMap<string, ConsumedRecord>,
+  ) {
+    const entries = new Map<string, StoredEntry>();
     const names = yield* fs.readDirectory(promptStashDir).pipe(
-      Effect.catchIf(
-        (error) => error.reason._tag === "NotFound",
-        () => Effect.succeed([]),
+      Effect.catch((error) =>
+        error.reason._tag === "NotFound"
+          ? Effect.succeed([])
+          : Effect.logWarning("could not read prompt stash directory", {
+              path: promptStashDir,
+              detail: error.message,
+            }).pipe(Effect.as(undefined)),
       ),
     );
-    const entries = new Map<string, PromptStashEntry>();
+    if (names === undefined) return { entries, complete: false };
+    let complete = true;
     for (const name of names) {
       if (!name.endsWith(".json") || name === CONSUMED_FILE_NAME) continue;
       const filePath = path.join(promptStashDir, name);
-      const raw = yield* fs.readFileString(filePath).pipe(
-        Effect.catch((error) =>
-          Effect.logWarning("ignoring unreadable prompt stash entry", {
-            path: filePath,
-            detail: error.message,
-          }).pipe(Effect.as(undefined)),
-        ),
+      const warnUnreadable = Effect.catch((error: PlatformError.PlatformError) =>
+        Effect.logWarning("ignoring unreadable prompt stash entry", {
+          path: filePath,
+          detail: error.message,
+        }).pipe(Effect.as(undefined)),
       );
-      if (raw === undefined) continue;
+      const raw = yield* fs.readFileString(filePath).pipe(warnUnreadable);
+      if (raw === undefined) {
+        complete = false;
+        continue;
+      }
       const decoded = decodeEntryFileExit(raw);
-      if (decoded._tag === "Failure" || `${decoded.value.id}.json` !== name) {
+      const file = decoded._tag === "Success" ? decoded.value : undefined;
+      const entry = file !== undefined && "entry" in file ? file.entry : file;
+      if (file === undefined || entry === undefined || `${entry.id}.json` !== name) {
         yield* Effect.logWarning("ignoring invalid prompt stash entry", {
           path: filePath,
           detail: decoded._tag === "Failure" ? Cause.pretty(decoded.cause) : "id mismatch",
         });
+        complete = false;
         continue;
       }
-      entries.set(decoded.value.id, decoded.value);
+      if (consumed.has(entry.id)) {
+        yield* fs.remove(filePath, { force: true }).pipe(
+          Effect.catch((error) =>
+            Effect.logWarning("could not remove a taken prompt stash entry", {
+              path: filePath,
+              detail: error.message,
+            }),
+          ),
+        );
+        continue;
+      }
+      if ("receivedAt" in file) {
+        entries.set(entry.id, { entry, receivedAt: file.receivedAt });
+        continue;
+      }
+      const info = yield* fs.stat(filePath).pipe(warnUnreadable);
+      if (info === undefined) {
+        complete = false;
+        continue;
+      }
+      entries.set(entry.id, {
+        entry,
+        receivedAt: Option.getOrUndefined(info.mtime)?.getTime() ?? 0,
+      });
     }
-    return entries;
+    return { entries, complete };
   });
 
   const loadConsumed = Effect.gen(function* () {
@@ -219,9 +328,11 @@ const make = Effect.gen(function* () {
    * Finishes renames a put or take left half-done when the process died before its entry file
    * changed: a stored entry gets its `stash-*` files back, and `stash-*` files no entry owns
    * return to `pending-*` so the client's retried put finds them and the pending sweep owns them.
+   * Unless every entry loaded, no `stash-*` file is known to be unowned, so all of them stay.
    */
   const repairStashFiles = Effect.fn("PromptStash.repairStashFiles")(function* (
-    entries: ReadonlyMap<string, PromptStashEntry>,
+    entries: ReadonlyMap<string, StoredEntry>,
+    complete: boolean,
   ) {
     const nowMs = yield* Clock.currentTimeMillis;
     const warnOnFailure = (message: string, attachmentId: string) =>
@@ -230,7 +341,7 @@ const make = Effect.gen(function* () {
       );
 
     const referenced = new Set<string>();
-    for (const entry of entries.values()) {
+    for (const { entry } of entries.values()) {
       for (const { attachmentId } of entry.attachments) {
         referenced.add(attachmentId.toLowerCase());
         if (
@@ -244,6 +355,11 @@ const make = Effect.gen(function* () {
           warnOnFailure("could not restore stash attachment", attachmentId),
         );
       }
+    }
+    if (!complete) {
+      return yield* Effect.logWarning(
+        "keeping unreferenced stash attachments because a prompt stash entry did not load",
+      );
     }
 
     const names = yield* fs
@@ -279,20 +395,13 @@ const make = Effect.gen(function* () {
     }
   });
 
-  const initialEntries = yield* loadEntries.pipe(
-    Effect.catch((error) =>
-      Effect.logWarning("could not read prompt stash directory", {
-        path: promptStashDir,
-        detail: error.message,
-      }).pipe(Effect.as(new Map<string, PromptStashEntry>())),
-    ),
-  );
   const initialConsumed = yield* loadConsumed;
-  yield* repairStashFiles(initialEntries);
+  const initial = yield* loadEntries(initialConsumed);
+  yield* repairStashFiles(initial.entries, initial.complete);
 
   const stored = yield* Ref.make<StoredStash>({
     seq: 0,
-    entries: initialEntries,
+    entries: initial.entries,
     consumed: initialConsumed,
   });
   const changes = yield* PubSub.unbounded<StashChange>();
@@ -316,70 +425,106 @@ const make = Effect.gen(function* () {
         detail: `The entry is larger than ${PROMPT_STASH_MAX_ENTRY_JSON_BYTES} bytes.`,
       });
     }
-    if (!ENTRY_ID_PATTERN.test(entry.id)) {
+    if (!ENTRY_ID_PATTERN.test(entry.id) || entry.id.toLowerCase() === RESERVED_ENTRY_ID) {
       return yield* new PromptStashError({ reason: "storage", detail: "Invalid entry id." });
     }
     const current = yield* Ref.get(stored);
-    const existing = current.entries.get(entry.id);
-    if (existing !== undefined) return { summary: toSummary(existing), evictedIds: [] };
-    if (current.consumed.has(entry.id)) {
+    // Entry files are named by id and macOS file names ignore case.
+    const sameId = (id: string) => id.toLowerCase() === entry.id.toLowerCase();
+    const existing = [...current.entries.values()].find((candidate) => sameId(candidate.entry.id));
+    if (existing !== undefined) return { summary: toSummary(existing.entry), evictedIds: [] };
+    if ([...current.consumed.keys()].some(sameId)) {
       return yield* new PromptStashError({
         reason: "already-taken",
         detail: `Entry ${entry.id} was already taken or removed.`,
       });
     }
 
-    const attachments: Array<PromptStashEntry["attachments"][number]> = [];
-    const droppedImageNames = [...entry.droppedImageNames];
-    const droppedFileNames = [...entry.droppedFileNames];
-    for (const attachment of entry.attachments) {
-      const plan = yield* relabel(attachment.attachmentId, "pending", STASH_ATTACHMENT_SEGMENT);
-      if (plan !== undefined) {
-        attachments.push({ ...attachment, attachmentId: plan.finalId });
-      } else if (attachment.type === "image") {
-        droppedImageNames.push(attachment.name);
-      } else {
-        droppedFileNames.push(attachment.name);
+    const receivedAt = yield* Clock.currentTimeMillis;
+    let entryWriteStarted = false;
+    return yield* Effect.gen(function* () {
+      const attachments: Array<PromptStashEntry["attachments"][number]> = [];
+      const droppedImageNames = [...entry.droppedImageNames];
+      const droppedFileNames = [...entry.droppedFileNames];
+      for (const attachment of entry.attachments) {
+        const plan = yield* relabel(attachment.attachmentId, "pending", STASH_ATTACHMENT_SEGMENT);
+        if (plan !== undefined) {
+          attachments.push({ ...attachment, attachmentId: plan.finalId });
+        } else if (attachment.type === "image") {
+          droppedImageNames.push(attachment.name);
+        } else {
+          droppedFileNames.push(attachment.name);
+        }
       }
-    }
-    const storedEntry: PromptStashEntry = {
-      ...entry,
-      attachments,
-      droppedImageNames,
-      droppedFileNames,
-    };
-    yield* writeAtomically(
-      entryPath(storedEntry.id),
-      yield* encodeEntryFile(storedEntry).pipe(Effect.mapError(storageError)),
-    );
+      const storedEntry: PromptStashEntry = {
+        ...entry,
+        attachments,
+        droppedImageNames,
+        droppedFileNames,
+      };
+      const contents = yield* encodeEntryFile({ version: 2, receivedAt, entry: storedEntry }).pipe(
+        Effect.mapError(storageError),
+      );
+      entryWriteStarted = true;
+      yield* writeAtomically(entryPath(storedEntry.id), contents);
 
-    const entries = new Map(current.entries).set(storedEntry.id, storedEntry);
-    const evicted = [...entries.values()]
-      .map(toSummary)
-      .toSorted(newestFirst)
-      .slice(PROMPT_STASH_MAX_ENTRIES)
-      .map((summary) => entries.get(summary.id)!);
-    let consumed = current.consumed;
-    if (evicted.length > 0) {
-      const nowMs = yield* Clock.currentTimeMillis;
-      const nextConsumed = pruneConsumed(consumed, nowMs);
-      for (const evictedEntry of evicted) {
-        yield* removeAttachmentFiles(evictedEntry);
-        yield* fs.remove(entryPath(evictedEntry.id), { force: true });
-        entries.delete(evictedEntry.id);
-        nextConsumed.set(evictedEntry.id, { entryId: evictedEntry.id, at: nowMs });
+      const entries = new Map(current.entries).set(storedEntry.id, {
+        entry: storedEntry,
+        receivedAt,
+      });
+      const evicted = [...entries.values()]
+        .filter((candidate) => candidate.entry.id !== storedEntry.id)
+        .toSorted(oldestReceivedFirst)
+        .slice(0, Math.max(0, entries.size - PROMPT_STASH_MAX_ENTRIES))
+        .map((candidate) => candidate.entry);
+      let consumed = current.consumed;
+      if (evicted.length > 0) {
+        const nowMs = yield* Clock.currentTimeMillis;
+        const nextConsumed = pruneConsumed(consumed, nowMs);
+        for (const evictedEntry of evicted) {
+          yield* removeAttachmentFiles(evictedEntry);
+          yield* fs.remove(entryPath(evictedEntry.id), { force: true });
+          entries.delete(evictedEntry.id);
+          nextConsumed.set(evictedEntry.id, { entryId: evictedEntry.id, at: nowMs });
+        }
+        yield* writeConsumed(nextConsumed);
+        consumed = nextConsumed;
       }
-      yield* writeConsumed(nextConsumed);
-      consumed = nextConsumed;
-    }
 
-    const summary = toSummary(storedEntry);
-    const evictedIds = evicted.map((evictedEntry) => evictedEntry.id);
-    yield* commit(
-      { entries, consumed },
-      { upserted: entries.has(summary.id) ? [summary] : [], removedIds: evictedIds },
-    );
-    return { summary, evictedIds };
+      const summary = toSummary(storedEntry);
+      const evictedIds = evicted.map((evictedEntry) => evictedEntry.id);
+      yield* commit({ entries, consumed }, { upserted: [summary], removedIds: evictedIds });
+      return { summary, evictedIds };
+    }).pipe(Effect.onError(() => rollbackPut(entry, entryWriteStarted)));
+  });
+
+  /** The client keeps a failed put locally, so its files must be live `pending-*` files again. */
+  const rollbackPut = Effect.fn("PromptStash.rollbackPut")(function* (
+    entry: PromptStashPutInput,
+    entryWriteStarted: boolean,
+  ) {
+    if (entryWriteStarted) {
+      yield* fs.remove(entryPath(entry.id), { force: true }).pipe(
+        Effect.catch((error) =>
+          Effect.logWarning("could not remove a failed prompt stash entry", {
+            entryId: entry.id,
+            detail: error.message,
+          }),
+        ),
+      );
+    }
+    for (const { attachmentId } of entry.attachments) {
+      if (parseThreadSegmentFromAttachmentId(attachmentId) !== "pending") continue;
+      const stashId = relabeledId(attachmentId, "pending", STASH_ATTACHMENT_SEGMENT);
+      yield* relabel(stashId, STASH_ATTACHMENT_SEGMENT, "pending").pipe(
+        Effect.catch((error) =>
+          Effect.logWarning("could not return stash attachment to pending", {
+            attachmentId: stashId,
+            detail: error.message,
+          }),
+        ),
+      );
+    }
   });
 
   const take = Effect.fn("PromptStash.take")(function* ({
@@ -395,7 +540,7 @@ const make = Effect.gen(function* () {
         detail: `Entry ${entryId} was already taken or removed.`,
       });
     }
-    const entry = current.entries.get(entryId);
+    const entry = current.entries.get(entryId)?.entry;
     if (entry === undefined) {
       return yield* new PromptStashError({
         reason: "not-found",
@@ -421,24 +566,28 @@ const make = Effect.gen(function* () {
       attachments.push({ ...attachment, attachmentId: plan.finalId });
     }
     const result: PromptStashEntry = { ...entry, attachments, droppedImageNames, droppedFileNames };
+
+    // The result lands before the entry file goes, so a retry after a crash can return it.
+    const consumed = boundConsumedResults(
+      pruneConsumed(current.consumed, nowMs).set(entryId, {
+        entryId,
+        at: nowMs,
+        requestId,
+        result,
+      }),
+    );
+    yield* writeConsumed(consumed);
     yield* fs.remove(entryPath(entryId), { force: true });
 
     const entries = new Map(current.entries);
     entries.delete(entryId);
-    const consumed = pruneConsumed(current.consumed, nowMs).set(entryId, {
-      entryId,
-      at: nowMs,
-      requestId,
-      result,
-    });
-    yield* writeConsumed(consumed);
     yield* commit({ entries, consumed }, { upserted: [], removedIds: [entryId] });
     return result;
   });
 
   const remove = Effect.fn("PromptStash.remove")(function* ({ entryId }: PromptStashRemoveInput) {
     const current = yield* Ref.get(stored);
-    const entry = current.entries.get(entryId);
+    const entry = current.entries.get(entryId)?.entry;
     if (entry === undefined) return;
 
     yield* removeAttachmentFiles(entry);
@@ -456,7 +605,12 @@ const make = Effect.gen(function* () {
     effect: Effect.Effect<A, PromptStashError | PlatformError.PlatformError>,
   ) =>
     semaphore.withPermits(1)(
-      effect.pipe(Effect.catchTags({ PlatformError: (error) => Effect.fail(storageError(error)) })),
+      // A client disconnect interrupts its RPC handler; a half-run mutation would strand files.
+      Effect.uninterruptible(
+        effect.pipe(
+          Effect.catchTags({ PlatformError: (error) => Effect.fail(storageError(error)) }),
+        ),
+      ),
     );
 
   return {
@@ -469,7 +623,9 @@ const make = Effect.gen(function* () {
         const snapshot = yield* Ref.get(stored);
         return Stream.concat(
           Stream.make({
-            upserted: [...snapshot.entries.values()].map(toSummary).toSorted(newestFirst),
+            upserted: [...snapshot.entries.values()]
+              .map(({ entry }) => toSummary(entry))
+              .toSorted(newestFirst),
             removedIds: [],
             replace: true,
           }),
