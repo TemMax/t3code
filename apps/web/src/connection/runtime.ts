@@ -37,6 +37,7 @@ const layerProvidedClientConnection = layerSnapshotLoader.pipe(
     Connection.layerWithOptions({
       environmentThemes: true,
       clientProfile: true,
+      promptStash: true,
       usageLimitSources: true,
       usageLimitsCommand: true,
     }),

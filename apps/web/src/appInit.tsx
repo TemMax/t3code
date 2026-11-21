@@ -30,6 +30,7 @@ import { startGuideRunNotifications } from "./components/pullRequest/guide/PullR
 import { APP_BASE_NAME, APP_DISPLAY_NAME, APP_STAGE_LABEL } from "./branding";
 import { resolveServerBackedAppDisplayName, resolveWindowTitle } from "./branding.logic";
 import { preferencesSync } from "./clientProfile/preferencesSync";
+import { promptStashSync } from "./promptStash/promptStashSync";
 import { isElectron } from "./env";
 import {
   subscribeComposerDraftModelReconciliation,
@@ -277,6 +278,7 @@ export function startAppServices(): AppRouter {
   startThemeBackground();
   startBrowserChromeThemeSync(router);
   preferencesSync.start();
+  promptStashSync.start();
   startDefaultThemeAdoption();
   startModelPreferencesMigration();
   startAgentOpenedPreviews();

@@ -39,6 +39,9 @@ import {
   type OrchestrationV2StoredEvent,
   type OrchestrationV2ThreadShell,
   type OrchestrationProjectShell,
+  type AssetCreateUrlResult,
+  type PromptStashEntry,
+  type PromptStashPutResult,
   type ServerConfig,
   type ServerConfigStreamEvent,
   type ServerProvider,
@@ -91,6 +94,7 @@ import * as DocumentText from "./provider/DocumentText.ts";
 import * as DirectEndpoints from "./environment/DirectEndpoints.ts";
 import * as EnvironmentAuth from "./auth/EnvironmentAuth.ts";
 import * as ClientProfile from "./clientProfile.ts";
+import * as PromptStash from "./promptStash/PromptStash.ts";
 import * as EnvironmentTheme from "./environmentTheme.ts";
 import * as GitWorkflowService from "./git/GitWorkflowService.ts";
 import * as HostResources from "./resourceTelemetry/HostResources.ts";
@@ -840,6 +844,7 @@ const layerUnusedConfigRpcServices = Layer.mergeAll(
   Layer.mock(CodexInstallation.CodexInstallation)({ managedDirectory: "/unused" }),
   Layer.mock(DeviceService.DeviceService)({}),
   Layer.mock(ClientProfile.ClientProfile)({}),
+  Layer.mock(PromptStash.PromptStash)({}),
   Layer.mock(EnvironmentTheme.EnvironmentThemeService)({}),
   Layer.mock(GitWorkflowService.GitWorkflowService)({}),
   Layer.mock(HostResources.HostResources)({}),
@@ -1266,114 +1271,115 @@ it.effect.each([
     ),
 );
 
+// The config RPC alone, for a session with `scopes`; `streams` overrides the opt-in stream sources.
+const subscribeServerConfigAs = Effect.fnUntraced(function* (
+  scopes: ReadonlyArray<AuthEnvironmentScope>,
+  payload: { readonly clientProfile?: boolean; readonly promptStash?: boolean },
+  streams: Layer.Layer<ClientProfile.ClientProfile> | Layer.Layer<PromptStash.PromptStash>,
+) {
+  const responses = yield* Queue.unbounded<ServerConfigStreamEvent>();
+  const rpcServices = Layer.mergeAll(
+    layerUnusedConfigRpcServices,
+    streams,
+    Layer.mock(ExternalLauncher.ExternalLauncher)({
+      resolveAvailableEditors: () => Effect.succeed([]),
+      resolveFileManagerRevealKind: () => Effect.undefined,
+    }),
+    Layer.mock(ProviderRegistry.ProviderRegistry)({
+      getProviders: Effect.succeed([]),
+      streamChanges: Stream.never,
+    }),
+    Layer.mock(ProviderInstanceRegistry.ProviderInstanceRegistry)({
+      listInstances: Effect.succeed([]),
+    }),
+    Layer.mock(UsageLimitSources.UsageLimitSources)({
+      current: Effect.succeed([]),
+      streamChanges: Stream.never,
+    }),
+    Layer.mock(RemoteOpenTargets.RemoteOpenTargets)({
+      resolveTargets: () => Effect.succeed([]),
+    }),
+    Layer.mock(DirectEndpoints.DirectEndpoints)({
+      resolve: () => Effect.succeed([]),
+      resolveAvailable: () => Effect.succeed([]),
+    }),
+    Layer.mock(ManagedProjectFolders.ManagedProjectFolders)({
+      scratchRoot: Effect.succeedNone,
+      namedProjectsRoot: process.cwd(),
+    }),
+    Layer.mock(ScratchThreadPromotion.ScratchThreadPromotion)({}),
+    Layer.mock(ServerEnvironment.ServerEnvironment)({
+      getDescriptor: Effect.succeed({
+        environmentId: EnvironmentId.make("config-test"),
+        label: "Config test",
+        platform: { os: "linux", arch: "x64" },
+        serverVersion: "0.0.0",
+        capabilities: { repositoryIdentity: false },
+      }),
+    }),
+    Layer.mock(EnvironmentAuth.EnvironmentAuth)({
+      getDescriptor: () =>
+        Effect.succeed({
+          policy: "loopback-browser",
+          bootstrapMethods: [],
+          sessionMethods: ["browser-session-cookie"],
+          sessionCookieName: "config-test-session",
+        }),
+    }),
+  );
+  const server = yield* RpcServer.makeNoSerialization(RpcGroup.make(WsSubscribeServerConfigRpc), {
+    ...WS_RPC_SERVER_OPTIONS,
+    onFromServer: (response) =>
+      response._tag === "Chunk"
+        ? Effect.forEach(
+            response.values,
+            (value) => Queue.offer(responses, value as ServerConfigStreamEvent),
+            { discard: true },
+          )
+        : Effect.void,
+  }).pipe(
+    Effect.provide(
+      layerWsRpc(
+        {
+          sessionId: AuthSessionId.make("config-test"),
+          subject: "config-test",
+          method: "browser-session-cookie",
+          scopes: [...scopes],
+        },
+        {},
+        yield* ServerBrowser.ServerBrowser,
+        () => Effect.void,
+        { secretReferences: true },
+      ).pipe(Layer.provide(rpcServices)),
+    ),
+  );
+  const requestId = RpcMessage.RequestId("config");
+  yield* server.write(0, {
+    _tag: "Request",
+    id: requestId,
+    tag: WS_METHODS.subscribeServerConfig,
+    payload,
+    headers: Headers.empty,
+  });
+  const next = Effect.gen(function* () {
+    const event = yield* Queue.take(responses);
+    yield* server.write(0, { _tag: "Ack", requestId });
+    return event;
+  });
+  return { next };
+});
+
 it.effect("streams the client profile only to sessions that may write settings", () =>
   Effect.gen(function* () {
     const settings = yield* ServerSettings.ServerSettingsService;
     const entries = { theme: { value: "dark", changedAt: 5, by: "device-a" } };
-    const subscribe = Effect.fnUntraced(function* (
-      scopes: ReadonlyArray<AuthEnvironmentScope>,
-      payload: { readonly clientProfile?: boolean },
-      streamChanges: ClientProfile.ClientProfile["Service"]["streamChanges"],
-    ) {
-      const responses = yield* Queue.unbounded<ServerConfigStreamEvent>();
-      const rpcServices = Layer.mergeAll(
-        layerUnusedConfigRpcServices,
-        Layer.mock(ClientProfile.ClientProfile)({ streamChanges }),
-        Layer.mock(ExternalLauncher.ExternalLauncher)({
-          resolveAvailableEditors: () => Effect.succeed([]),
-          resolveFileManagerRevealKind: () => Effect.undefined,
-        }),
-        Layer.mock(ProviderRegistry.ProviderRegistry)({
-          getProviders: Effect.succeed([]),
-          streamChanges: Stream.never,
-        }),
-        Layer.mock(ProviderInstanceRegistry.ProviderInstanceRegistry)({
-          listInstances: Effect.succeed([]),
-        }),
-        Layer.mock(UsageLimitSources.UsageLimitSources)({
-          current: Effect.succeed([]),
-          streamChanges: Stream.never,
-        }),
-        Layer.mock(RemoteOpenTargets.RemoteOpenTargets)({
-          resolveTargets: () => Effect.succeed([]),
-        }),
-        Layer.mock(DirectEndpoints.DirectEndpoints)({
-          resolve: () => Effect.succeed([]),
-          resolveAvailable: () => Effect.succeed([]),
-        }),
-        Layer.mock(ManagedProjectFolders.ManagedProjectFolders)({
-          scratchRoot: Effect.succeedNone,
-          namedProjectsRoot: process.cwd(),
-        }),
-        Layer.mock(ScratchThreadPromotion.ScratchThreadPromotion)({}),
-        Layer.mock(ServerEnvironment.ServerEnvironment)({
-          getDescriptor: Effect.succeed({
-            environmentId: EnvironmentId.make("config-test"),
-            label: "Config test",
-            platform: { os: "linux", arch: "x64" },
-            serverVersion: "0.0.0",
-            capabilities: { repositoryIdentity: false },
-          }),
-        }),
-        Layer.mock(EnvironmentAuth.EnvironmentAuth)({
-          getDescriptor: () =>
-            Effect.succeed({
-              policy: "loopback-browser",
-              bootstrapMethods: [],
-              sessionMethods: ["browser-session-cookie"],
-              sessionCookieName: "config-test-session",
-            }),
-        }),
-      );
-      const server = yield* RpcServer.makeNoSerialization(
-        RpcGroup.make(WsSubscribeServerConfigRpc),
-        {
-          ...WS_RPC_SERVER_OPTIONS,
-          onFromServer: (response) =>
-            response._tag === "Chunk"
-              ? Effect.forEach(
-                  response.values,
-                  (value) => Queue.offer(responses, value as ServerConfigStreamEvent),
-                  { discard: true },
-                )
-              : Effect.void,
-        },
-      ).pipe(
-        Effect.provide(
-          layerWsRpc(
-            {
-              sessionId: AuthSessionId.make("config-test"),
-              subject: "config-test",
-              method: "browser-session-cookie",
-              scopes: [...scopes],
-            },
-            {},
-            yield* ServerBrowser.ServerBrowser,
-            () => Effect.void,
-            { secretReferences: true },
-          ).pipe(Layer.provide(rpcServices)),
-        ),
-      );
-      const requestId = RpcMessage.RequestId("config");
-      yield* server.write(0, {
-        _tag: "Request",
-        id: requestId,
-        tag: WS_METHODS.subscribeServerConfig,
-        payload,
-        headers: Headers.empty,
-      });
-      const next = Effect.gen(function* () {
-        const event = yield* Queue.take(responses);
-        yield* server.write(0, { _tag: "Ack", requestId });
-        return event;
-      });
-      return { next };
-    });
 
-    const writer = yield* subscribe(
+    const writer = yield* subscribeServerConfigAs(
       [AuthSettingsWriteScope],
       { clientProfile: true },
-      Stream.make({ entries, replace: true }),
+      Layer.mock(ClientProfile.ClientProfile)({
+        streamChanges: Stream.make({ entries, replace: true }),
+      }),
     );
     const writerSnapshot = yield* writer.next;
     if (writerSnapshot.type !== "snapshot") return yield* Effect.die("Missing initial snapshot");
@@ -1389,14 +1395,195 @@ it.effect("streams the client profile only to sessions that may write settings",
         return Stream.never;
       }),
     );
-    const withoutScope = yield* subscribe([], { clientProfile: true }, spy);
-    const withoutFlag = yield* subscribe([AuthSettingsWriteScope], {}, spy);
+    const spyLayer = Layer.mock(ClientProfile.ClientProfile)({ streamChanges: spy });
+    const withoutScope = yield* subscribeServerConfigAs([], { clientProfile: true }, spyLayer);
+    const withoutFlag = yield* subscribeServerConfigAs([AuthSettingsWriteScope], {}, spyLayer);
     assert.equal((yield* withoutScope.next).type, "snapshot");
     assert.equal((yield* withoutFlag.next).type, "snapshot");
     yield* settings.updateSettings({ defaultAutoPull: true });
     assert.equal((yield* withoutScope.next).type, "settingsUpdated");
     assert.equal((yield* withoutFlag.next).type, "settingsUpdated");
     assert.isFalse(subscribed);
+  }).pipe(
+    Effect.provide(
+      Layer.mergeAll(
+        Layer.fresh(layerConfigSources),
+        Layer.mock(PreviewAutomationBroker.PreviewAutomationBroker)({}),
+        Layer.mock(ServerBrowser.ServerBrowser)({}),
+      ),
+    ),
+    Effect.scoped,
+  ),
+);
+
+it.effect("streams prompt stash summaries only to operators who opt in", () =>
+  Effect.gen(function* () {
+    const settings = yield* ServerSettings.ServerSettingsService;
+    const snapshot = {
+      upserted: [
+        {
+          id: "entry-1",
+          createdAt: "2026-11-20T10:00:00.000Z",
+          prompt: "Draft",
+          attachments: [],
+          droppedImageNames: [],
+          unreadableImageNames: [],
+          droppedFileNames: [],
+        },
+      ],
+      removedIds: [],
+      replace: true,
+    };
+    const operator = yield* subscribeServerConfigAs(
+      [AuthOrchestrationOperateScope],
+      { promptStash: true },
+      Layer.mock(PromptStash.PromptStash)({ streamChanges: Stream.make(snapshot) }),
+    );
+    const operatorSnapshot = yield* operator.next;
+    if (operatorSnapshot.type !== "snapshot") return yield* Effect.die("Missing initial snapshot");
+    assert.isUndefined(operatorSnapshot.config.promptStash);
+    const stash = yield* operator.next;
+    if (stash.type !== "promptStashUpdated") return yield* Effect.die("Expected stash event");
+    assert.deepEqual(stash.payload, snapshot);
+
+    let subscribed = false;
+    const spy = Layer.mock(PromptStash.PromptStash)({
+      streamChanges: Stream.unwrap(
+        Effect.sync(() => {
+          subscribed = true;
+          return Stream.never;
+        }),
+      ),
+    });
+    const withoutScope = yield* subscribeServerConfigAs(
+      [AuthOrchestrationReadScope],
+      { promptStash: true },
+      spy,
+    );
+    const withoutFlag = yield* subscribeServerConfigAs([AuthOrchestrationOperateScope], {}, spy);
+    assert.equal((yield* withoutScope.next).type, "snapshot");
+    assert.equal((yield* withoutFlag.next).type, "snapshot");
+    yield* settings.updateSettings({ defaultAutoPull: true });
+    assert.equal((yield* withoutScope.next).type, "settingsUpdated");
+    assert.equal((yield* withoutFlag.next).type, "settingsUpdated");
+    assert.isFalse(subscribed);
+  }).pipe(
+    Effect.provide(
+      Layer.mergeAll(
+        Layer.fresh(layerConfigSources),
+        Layer.mock(PreviewAutomationBroker.PreviewAutomationBroker)({}),
+        Layer.mock(ServerBrowser.ServerBrowser)({}),
+      ),
+    ),
+    Effect.scoped,
+  ),
+);
+
+it.effect("put then take over RPC", () =>
+  Effect.gen(function* () {
+    const { attachmentsDir } = yield* ServerConfigModule.ServerConfig;
+    const fileSystem = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const uuid = "00000000-0000-4000-8000-00000000000a";
+    // A 1x1 PNG, as an upload would have stored it.
+    yield* fileSystem.writeFile(
+      path.join(attachmentsDir, `pending-${uuid}.png`),
+      Buffer.from(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
+        "base64",
+      ),
+    );
+    const exits = yield* Queue.unbounded<Exit.Exit<unknown, unknown>>();
+    const services = Layer.mergeAll(
+      layerUnusedConfigRpcServices,
+      PromptStash.layer,
+      Layer.mock(ExternalLauncher.ExternalLauncher)({}),
+      Layer.mock(ProviderRegistry.ProviderRegistry)({}),
+      Layer.mock(UsageLimitSources.UsageLimitSources)({}),
+      Layer.mock(RemoteOpenTargets.RemoteOpenTargets)({}),
+      Layer.mock(DirectEndpoints.DirectEndpoints)({}),
+      Layer.mock(ManagedProjectFolders.ManagedProjectFolders)({ namedProjectsRoot: "/unused" }),
+      Layer.mock(ScratchThreadPromotion.ScratchThreadPromotion)({}),
+      Layer.mock(ServerEnvironment.ServerEnvironment)({}),
+      Layer.mock(EnvironmentAuth.EnvironmentAuth)({}),
+    );
+    const server = yield* RpcServer.makeNoSerialization(WsRpcGroup, {
+      ...WS_RPC_SERVER_OPTIONS,
+      onFromServer: (response) =>
+        response._tag === "Exit" ? Queue.offer(exits, response.exit) : Effect.void,
+    }).pipe(
+      Effect.provide(
+        layerWsRpc(
+          {
+            sessionId: AuthSessionId.make("prompt-stash-test"),
+            subject: "prompt-stash-test",
+            method: "browser-session-cookie",
+            scopes: [AuthOrchestrationReadScope, AuthOrchestrationOperateScope],
+          },
+          {},
+          yield* ServerBrowser.ServerBrowser,
+          () => Effect.void,
+          { secretReferences: true },
+        ).pipe(
+          Layer.provide(services),
+          Layer.merge(
+            RpcAuthorization.layer([AuthOrchestrationReadScope, AuthOrchestrationOperateScope]),
+          ),
+        ),
+      ),
+    );
+    const success = Effect.gen(function* () {
+      const exit = yield* Queue.take(exits);
+      if (exit._tag !== "Success") return yield* Effect.die(Cause.pretty(exit.cause));
+      return exit.value;
+    });
+
+    const image = {
+      type: "image" as const,
+      id: "composer-image",
+      attachmentId: `pending-${uuid}`,
+      name: "shot.png",
+      mimeType: "image/png",
+      sizeBytes: 68,
+    };
+    yield* server.write(0, {
+      _tag: "Request",
+      id: RpcMessage.RequestId("put"),
+      tag: WS_METHODS.promptStashPut,
+      payload: {
+        id: "entry-1",
+        createdAt: "2026-11-20T10:00:00.000Z",
+        prompt: "Look at this",
+        attachments: [image],
+        droppedImageNames: [],
+        unreadableImageNames: [],
+        droppedFileNames: [],
+        records: [],
+      },
+      headers: Headers.empty,
+    });
+    const put = (yield* success) as PromptStashPutResult;
+    assert.deepEqual(put.summary.attachments, [{ ...image, attachmentId: `stash-${uuid}` }]);
+
+    yield* server.write(0, {
+      _tag: "Request",
+      id: RpcMessage.RequestId("url"),
+      tag: WS_METHODS.assetsCreateUrl,
+      payload: { resource: { _tag: "attachment", attachmentId: `stash-${uuid}` } },
+      headers: Headers.empty,
+    });
+    const url = (yield* success) as AssetCreateUrlResult;
+    assert.match(url.relativeUrl, /^\/api\/assets\//);
+
+    yield* server.write(0, {
+      _tag: "Request",
+      id: RpcMessage.RequestId("take"),
+      tag: WS_METHODS.promptStashTake,
+      payload: { entryId: "entry-1", requestId: "take-1" },
+      headers: Headers.empty,
+    });
+    const taken = (yield* success) as PromptStashEntry;
+    assert.deepEqual(taken.attachments, [image]);
   }).pipe(
     Effect.provide(
       Layer.mergeAll(

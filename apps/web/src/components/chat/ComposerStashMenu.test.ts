@@ -28,4 +28,28 @@ describe("stashEntrySnippet", () => {
     });
     expect(stashEntrySnippet(entry(`Summarize ${file} please`))).toBe("Summarize README.md please");
   });
+
+  it("counts a server summary's images and files", () => {
+    const attachment = (type: "image" | "file", id: string) => ({
+      type,
+      id,
+      attachmentId: `stash-${id}`,
+      name: `${id}.bin`,
+      mimeType: type === "image" ? "image/png" : "text/plain",
+      sizeBytes: 1,
+    });
+    const summary = (attachments: ReadonlyArray<ReturnType<typeof attachment>>) => ({
+      ...entry(""),
+      attachments,
+      unreadableImageNames: [],
+      droppedFileNames: [],
+    });
+    expect(stashEntrySnippet(summary([attachment("image", "a"), attachment("image", "b")]))).toBe(
+      "(2 images)",
+    );
+    expect(stashEntrySnippet(summary([attachment("file", "notes")]))).toBe("(1 file)");
+    expect(
+      stashEntrySnippet(summary([attachment("image", "a"), attachment("file", "notes")])),
+    ).toBe("(2 attachments)");
+  });
 });

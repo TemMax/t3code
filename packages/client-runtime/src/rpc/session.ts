@@ -69,6 +69,7 @@ export interface RpcSession {
 export interface RpcSessionOptions {
   readonly environmentThemes?: boolean;
   readonly clientProfile?: boolean;
+  readonly promptStash?: boolean;
   readonly usageLimitSources?: boolean;
   readonly usageLimitsCommand?: boolean;
   readonly providerCatalogsOnDemand?: boolean;
@@ -142,6 +143,19 @@ function serverConfigReplayEvents(
             payload: { entries: state.projection.config.clientProfile, replace: true },
           },
         ]),
+    ...(state.projection.config.promptStash === undefined
+      ? []
+      : [
+          {
+            version: 1 as const,
+            type: "promptStashUpdated" as const,
+            payload: {
+              upserted: state.projection.config.promptStash,
+              removedIds: [],
+              replace: true,
+            },
+          },
+        ]),
   ];
 }
 
@@ -191,6 +205,7 @@ export const make = Effect.fn("RpcSessionFactory.make")(function* (
   const serverConfigInput: ServerConfigSubscriptionInput = {
     ...(options.environmentThemes === true ? { environmentThemes: true } : {}),
     ...(options.clientProfile === true ? { clientProfile: true } : {}),
+    ...(options.promptStash === true ? { promptStash: true } : {}),
     ...(options.usageLimitSources === true ? { usageLimitSources: true } : {}),
     ...(options.usageLimitsCommand === true ? { usageLimitsCommand: true } : {}),
     ...(options.providerCatalogsOnDemand === true ? { providerCatalogsOnDemand: true } : {}),

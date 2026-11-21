@@ -1,6 +1,7 @@
 import {
   DEFAULT_SERVER_SETTINGS,
   ServerSettings,
+  type PromptStashSummary,
   type ServerConfig,
   type ServerConfigStreamEvent,
 } from "@t3tools/contracts";
@@ -120,6 +121,63 @@ describe("applyServerConfigProjection clientProfile", () => {
 
     const cleared = applyServerConfigProjection(current, update({}, true));
     expect(configOf(cleared).clientProfile).toEqual({});
+  });
+});
+
+describe("applyServerConfigProjection promptStash", () => {
+  it("applies prompt stash snapshots and deltas", () => {
+    const summary = (id: string, createdAt: string, prompt = id): PromptStashSummary => ({
+      id,
+      createdAt,
+      prompt,
+      attachments: [],
+      droppedImageNames: [],
+      unreadableImageNames: [],
+      droppedFileNames: [],
+    });
+    const update = (
+      upserted: ReadonlyArray<PromptStashSummary>,
+      removedIds: ReadonlyArray<string>,
+      replace: boolean,
+    ): ServerConfigStreamEvent => ({
+      version: 1,
+      type: "promptStashUpdated",
+      payload: { upserted, removedIds, replace },
+    });
+    const configOf = (projection: ReturnType<typeof applyServerConfigProjection>) =>
+      Option.getOrThrow(projection).config;
+    const first = summary("first", "2026-11-20T12:00:00.000Z");
+    const second = summary("second", "2026-11-20T11:00:00.000Z");
+    const third = summary("third", "2026-11-20T10:00:00.000Z");
+    const changedFirst = summary("first", "2026-11-20T12:00:00.000Z", "edited");
+
+    let current = Option.some({
+      config: {} as ServerConfig,
+      latestEvent: {} as ServerConfigStreamEvent,
+      source: "live" as const,
+    });
+    current = applyServerConfigProjection(
+      current,
+      update([first, second], [], true),
+    ) as typeof current;
+    expect(configOf(current).promptStash).toEqual([first, second]);
+
+    current = applyServerConfigProjection(
+      current,
+      update([changedFirst, third], ["second"], false),
+    ) as typeof current;
+    expect(configOf(current).promptStash).toEqual([changedFirst, third]);
+
+    const snapshot = applyServerConfigProjection(current, {
+      version: 1,
+      type: "snapshot",
+      config: {},
+    } as unknown as ServerConfigStreamEvent);
+    expect(configOf(snapshot).promptStash).toEqual([changedFirst, third]);
+    expect(withoutEnvironmentThemes(configOf(snapshot)).promptStash).toBeUndefined();
+
+    const replaced = applyServerConfigProjection(current, update([second], [], true));
+    expect(configOf(replaced).promptStash).toEqual([second]);
   });
 });
 

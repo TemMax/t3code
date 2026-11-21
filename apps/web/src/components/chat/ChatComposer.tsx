@@ -2441,7 +2441,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     })(key, event, isTaskItem);
 
   const {
-    stashQueue,
+    stashItems,
     isStashMenuOpen,
     setIsStashMenuOpen,
     stashPulseKey,
@@ -3518,7 +3518,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           ) : null}
         </ComposerBanner.Column>
         <ComposerStashBadge
-          count={stashQueue.length}
+          count={stashItems.length}
           menuOpen={isStashMenuOpen}
           pulseKey={stashPulseKey}
           onToggleMenu={toggleStashMenuStable}
@@ -3637,7 +3637,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                 <ComposerCommandMenuLayer anchor={composerMenuAnchor} canOverflowTop>
                   <ComposerStashMenu
                     composerFormRef={composerFormRef}
-                    entries={stashQueue}
+                    entries={stashItems}
                     stashShortcutLabel={shortcutLabelForCommand(keybindings, "composer.stash", {
                       context: {
                         terminalFocus: false,

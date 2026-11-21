@@ -1,6 +1,8 @@
 import {
   applyServerProviderDeltas,
+  type PromptStashSummary,
   type ServerConfig,
+  type ServerConfigPromptStashUpdatedPayload,
   type ServerConfigStreamEvent,
 } from "@t3tools/contracts";
 import * as Equal from "effect/Equal";
@@ -13,14 +15,15 @@ export interface ServerConfigProjection {
 }
 
 /**
- * Published themes, usage-limit sources and the client profile are current
+ * Published themes, usage-limit sources, the client profile and the prompt stash are current
  * machine state, so a cache could restore a set the machine no longer reports.
  */
 export function withoutEnvironmentThemes(config: ServerConfig): ServerConfig {
   if (
     config.environmentThemes === undefined &&
     config.usageLimitSources === undefined &&
-    config.clientProfile === undefined
+    config.clientProfile === undefined &&
+    config.promptStash === undefined
   ) {
     return config;
   }
@@ -28,6 +31,7 @@ export function withoutEnvironmentThemes(config: ServerConfig): ServerConfig {
     environmentThemes: _themes,
     usageLimitSources: _sources,
     clientProfile: _profile,
+    promptStash: _stash,
     ...rest
   } = config;
   return rest;
@@ -119,6 +123,7 @@ export function applyServerConfigProjection(
       const carriedProfile = Option.isSome(current)
         ? current.value.config.clientProfile
         : undefined;
+      const carriedStash = Option.isSome(current) ? current.value.config.promptStash : undefined;
       const config: ServerConfig = {
         ...event.config,
         providers: withHeldProviderCatalogs(
@@ -128,6 +133,7 @@ export function applyServerConfigProjection(
         ...(carriedThemes === undefined ? {} : { environmentThemes: carriedThemes }),
         ...(carriedSources === undefined ? {} : { usageLimitSources: carriedSources }),
         ...(carriedProfile === undefined ? {} : { clientProfile: carriedProfile }),
+        ...(carriedStash === undefined ? {} : { promptStash: carriedStash }),
       };
       return Option.some({
         // Every reconnect re-sends the whole config, usually unchanged apart from timestamps.
@@ -205,5 +211,26 @@ export function applyServerConfigProjection(
         latestEvent: event,
         source: "live",
       }));
+    case "promptStashUpdated":
+      return Option.map(current, (projection) => ({
+        config: {
+          ...projection.config,
+          promptStash: event.payload.replace
+            ? event.payload.upserted
+            : applyPromptStashDelta(projection.config.promptStash ?? [], event.payload),
+        },
+        latestEvent: event,
+        source: "live",
+      }));
   }
+}
+
+function applyPromptStashDelta(
+  current: ReadonlyArray<PromptStashSummary>,
+  { upserted, removedIds }: ServerConfigPromptStashUpdatedPayload,
+): ReadonlyArray<PromptStashSummary> {
+  const changedIds = new Set([...removedIds, ...upserted.map((summary) => summary.id)]);
+  return [...current.filter((summary) => !changedIds.has(summary.id)), ...upserted].sort((a, b) =>
+    a.createdAt === b.createdAt ? (a.id < b.id ? 1 : -1) : a.createdAt < b.createdAt ? 1 : -1,
+  );
 }

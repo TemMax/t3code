@@ -78,7 +78,8 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("ServerEnvironmen
   it.effect("publishes proven install ownership only for manually updated servers", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
-      const baseDir = yield* fs.makeTempDirectoryScoped();
+      // The server publishes the resolved prefix; macOS temp dirs sit behind /var -> /private/var.
+      const baseDir = yield* fs.realPath(yield* fs.makeTempDirectoryScoped());
       const prefix = `${baseDir}/node`;
       const entry = `${prefix}/lib/node_modules/t3/dist/bin.mjs`;
       yield* fs.makeDirectory(`${prefix}/lib/node_modules/t3/dist`, { recursive: true });
@@ -288,6 +289,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("ServerEnvironmen
       expect(second.capabilities.requiredWorktreeBootstrap).toBe(true);
       expect(second.capabilities.usagePriceOverrides).toBe(true);
       expect(second.capabilities.clientProfile).toBe(true);
+      expect(second.capabilities.promptStash).toBe(true);
       expect(second.capabilities.threadActiveReorder).toBe(true);
       expect(second.capabilities.threadTitleRegeneration).toBe(true);
       expect(second.capabilities.threadPullRequests).toBe(true);

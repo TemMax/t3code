@@ -29,6 +29,7 @@ import { RuntimeMode } from "./providerPolicy.ts";
 import { ProviderDriverKind, ProviderInstanceId } from "./providerInstance.ts";
 import { ServerProviderUsageLimits, UsageLimitSourceSnapshots } from "./providerUsageLimits.ts";
 import { ClientProfileEntries } from "./clientProfile.ts";
+import { PromptStashSummary } from "./promptStash.ts";
 import { ServerSettings } from "./settings.ts";
 import { DesktopUpdateChannelSchema } from "./ipc.ts";
 
@@ -766,6 +767,7 @@ export const ServerConfig = Schema.Struct({
   environmentThemes: Schema.optional(Schema.Array(EnvironmentTheme)),
   /** Only arrives through the config stream, never in a snapshot or `server.getConfig`. */
   clientProfile: Schema.optional(ClientProfileEntries),
+  promptStash: Schema.optional(Schema.Array(PromptStashSummary)),
   /** Stream-only and opt-in; the source stream emits the current set on subscribe. */
   usageLimitSources: Schema.optional(UsageLimitSourceSnapshots),
 });
@@ -919,6 +921,22 @@ export const ServerConfigStreamClientProfileUpdatedEvent = Schema.Struct({
 export type ServerConfigStreamClientProfileUpdatedEvent =
   typeof ServerConfigStreamClientProfileUpdatedEvent.Type;
 
+export const ServerConfigPromptStashUpdatedPayload = Schema.Struct({
+  upserted: Schema.Array(PromptStashSummary),
+  removedIds: Schema.Array(Schema.String),
+  replace: Schema.Boolean,
+});
+export type ServerConfigPromptStashUpdatedPayload =
+  typeof ServerConfigPromptStashUpdatedPayload.Type;
+
+export const ServerConfigStreamPromptStashUpdatedEvent = Schema.Struct({
+  version: Schema.Literal(1),
+  type: Schema.Literal("promptStashUpdated"),
+  payload: ServerConfigPromptStashUpdatedPayload,
+});
+export type ServerConfigStreamPromptStashUpdatedEvent =
+  typeof ServerConfigStreamPromptStashUpdatedEvent.Type;
+
 export const ServerConfigStreamEvent = Schema.Union([
   ServerConfigStreamSnapshotEvent,
   ServerConfigStreamKeybindingsUpdatedEvent,
@@ -928,6 +946,7 @@ export const ServerConfigStreamEvent = Schema.Union([
   ServerConfigStreamEnvironmentThemesUpdatedEvent,
   ServerConfigStreamUsageLimitSourcesUpdatedEvent,
   ServerConfigStreamClientProfileUpdatedEvent,
+  ServerConfigStreamPromptStashUpdatedEvent,
 ]);
 export type ServerConfigStreamEvent = typeof ServerConfigStreamEvent.Type;
 

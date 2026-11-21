@@ -198,9 +198,16 @@ the current prompt and its attachments for later. Wait for uploads to finish fir
 With an empty composer, the same shortcut restores a single stash or opens the
 stash menu when there are several.
 
-Stashes containing uploaded files must be restored in their original environment.
-Those files are retained for 24 hours. After an upload expires, restore the prompt
-and use **Attach again** or remove the missing file before sending.
+On a server with the shared stash, a stashed prompt with attachments restores in the
+environment that holds it, and its attachments do not expire. A prompt without
+attachments restores in any environment. Only prompts stashed on this device while
+offline keep the old rule: their uploaded files are retained for 24 hours. After such
+an upload expires, restore the prompt and use **Attach again** or remove the missing
+file before sending.
+
+The stash is shared by every device connected to the same server. Prompts stashed
+while a device is offline move to the server when it reconnects. Taking a stashed
+prompt from the server needs a connection.
 
 ## Voice input on web and desktop
 

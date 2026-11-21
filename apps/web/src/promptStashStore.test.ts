@@ -265,6 +265,13 @@ describe("promptStashStore", () => {
         "other-tab",
       ]);
 
+      thisTab.usePromptStashStore.getState().dropEntries(["this-tab", "missing"]);
+      const afterDrop = JSON.parse(sharedStorage.getItem(PROMPT_STASH_STORAGE_KEY) as string);
+      expect(afterDrop.state.entries.map((entry: PromptStashEntry) => entry.id)).toEqual([
+        "other-tab",
+      ]);
+      thisTab.usePromptStashStore.getState().stashEntry(makeEntry({ id: "this-tab" }));
+
       thisTab.usePromptStashStore.getState().stashEntry({
         ...makeEntry({ id: "encoding-image" }),
         pendingImageCount: 1,
@@ -287,6 +294,92 @@ describe("promptStashStore", () => {
         )?.attachments,
       ).toEqual(finalized);
     } finally {
+      vi.unstubAllGlobals();
+      vi.resetModules();
+    }
+  });
+
+  it("another tab's encoding entry keeps its pending images", async () => {
+    const sharedStorage = createMemoryStorage();
+    vi.stubGlobal("localStorage", sharedStorage);
+    vi.useFakeTimers({ now: new Date("2026-11-21T12:00:30.000Z"), toFake: ["Date"] });
+    vi.resetModules();
+    try {
+      const encodingTab = await import("./promptStashStore");
+      encodingTab.usePromptStashStore.getState().stashEntry({
+        ...makeEntry({ id: "encoding" }),
+        createdAt: "2026-11-21T12:00:00.000Z",
+        pendingImageCount: 1,
+      });
+      vi.resetModules();
+      const otherTab = await import("./promptStashStore");
+      otherTab.usePromptStashStore.getState().stashEntry(makeEntry({ id: "other" }));
+
+      const saved = JSON.parse(sharedStorage.getItem(PROMPT_STASH_STORAGE_KEY) as string);
+      expect(
+        saved.state.entries.find((entry: PromptStashEntry) => entry.id === "encoding"),
+      ).toMatchObject({ pendingImageCount: 1, attachments: [] });
+      const finalized = makeEntry({ id: "encoding", attachmentChars: 12 }).attachments;
+      expect(
+        encodingTab.usePromptStashStore.getState().finalizeEntryImages("encoding", {
+          attachments: finalized,
+          droppedImageNames: [],
+          unreadableImageNames: [],
+        }).attached,
+      ).toBe(true);
+      expect(otherTab.readLatestEntries().find((entry) => entry.id === "encoding")).toMatchObject({
+        pendingImageCount: 0,
+        attachments: finalized,
+      });
+    } finally {
+      vi.useRealTimers();
+      vi.unstubAllGlobals();
+      vi.resetModules();
+    }
+  });
+
+  it("pending takes persist and expire after 24 hours", async () => {
+    const sharedStorage = createMemoryStorage();
+    vi.stubGlobal("localStorage", sharedStorage);
+    vi.useFakeTimers({ now: new Date("2026-11-21T12:00:00.000Z"), toFake: ["Date"] });
+    vi.resetModules();
+    try {
+      const environmentId = "environment-1";
+      sharedStorage.setItem(
+        "t3code:prompt-stash:pending-takes:v1",
+        JSON.stringify([
+          {
+            environmentId,
+            entryId: "old",
+            requestId: "request-old",
+            at: "2026-11-20T11:59:00.000Z",
+          },
+        ]),
+      );
+      const thisTab = await import("./promptStashStore");
+      thisTab.usePromptStashStore
+        .getState()
+        .addPendingTake({ environmentId, entryId: "lost", requestId: "request-lost" });
+
+      vi.setSystemTime(new Date("2026-11-21T12:01:00.000Z"));
+      vi.resetModules();
+      const reloaded = await import("./promptStashStore");
+      expect(reloaded.usePromptStashStore.getState().pendingTakes).toEqual([
+        {
+          environmentId,
+          entryId: "lost",
+          requestId: "request-lost",
+          at: "2026-11-21T12:00:00.000Z",
+        },
+      ]);
+
+      vi.setSystemTime(new Date("2026-11-22T12:00:00.000Z"));
+      vi.resetModules();
+      const nextDay = await import("./promptStashStore");
+      expect(nextDay.usePromptStashStore.getState().pendingTakes).toEqual([]);
+      expect(sharedStorage.getItem("t3code:prompt-stash:pending-takes:v1")).toBeNull();
+    } finally {
+      vi.useRealTimers();
       vi.unstubAllGlobals();
       vi.resetModules();
     }

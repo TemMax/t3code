@@ -207,6 +207,10 @@
       "types": "./src/state/attachments.ts",
       "default": "./src/state/attachments.ts"
     },
+    "./state/prompt-stash": {
+      "types": "./src/state/promptStash.ts",
+      "default": "./src/state/promptStash.ts"
+    },
     "./state/attachment-uploads": {
       "types": "./src/state/attachmentUploads.ts",
       "default": "./src/state/attachmentUploads.ts"

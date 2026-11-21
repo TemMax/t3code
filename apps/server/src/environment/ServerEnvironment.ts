@@ -254,6 +254,7 @@ export const make = Effect.gen(function* () {
       threadForceStop: true,
       environmentThemes: true,
       clientProfile: true,
+      promptStash: true,
       usageLimitSources: true,
       providerWorkspaceSnapshotsOnDemand: true,
       modelCatalogRefresh: true,

@@ -58,6 +58,16 @@ describe("RPC authorization scopes", () => {
     );
   });
 
+  it("keeps the prompt stash, which holds prompts and attachments, behind operate scope", () => {
+    for (const method of [
+      WS_METHODS.promptStashPut,
+      WS_METHODS.promptStashTake,
+      WS_METHODS.promptStashRemove,
+    ]) {
+      expect(requiredScopeForRpcMethod(method)).toBe(AuthOrchestrationOperateScope);
+    }
+  });
+
   it("keeps triage, which seeds an agent that reads logs and the database, behind operate scope", () => {
     expect(requiredScopeForRpcMethod(WS_METHODS.serverPrepareTriage)).toBe(
       AuthOrchestrationOperateScope,
