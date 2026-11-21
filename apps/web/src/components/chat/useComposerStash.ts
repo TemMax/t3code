@@ -387,13 +387,25 @@ export function useComposerStash(input: {
     const taken = result.value;
     // A summary carries no records, so only the taken entry shows its machines; stash it again.
     if (refuseMachinesInAnswer(taken)) {
-      const restash = await runAtomCommand(
-        appAtomRegistry,
-        promptStashCommands.put,
-        { environmentId, input: { ...taken, id: randomUUID() } },
-        { reportFailure: false },
-      );
-      if (restash._tag === "Success") return;
+      // Put is idempotent by id, so a retry after a lost reply cannot stash it twice.
+      const restashInput = { ...taken, id: randomUUID() };
+      const restash = () =>
+        runAtomCommand(
+          appAtomRegistry,
+          promptStashCommands.put,
+          { environmentId, input: restashInput },
+          { reportFailure: false },
+        );
+      let restashed = await restash();
+      if (restashed._tag === "Failure" && !isServerReply(squashAtomCommandFailure(restashed))) {
+        restashed = await restash();
+      }
+      if (restashed._tag === "Success") return;
+      toastManager.add({
+        type: "error",
+        title: m(msg("Couldn't return this prompt to the stash")),
+        description: m(msg("It was restored here without its machines.")),
+      });
     }
     const stashedImages = taken.attachments.filter((attachment) => attachment.type === "image");
     const downloads = await Promise.all(

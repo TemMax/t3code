@@ -674,6 +674,9 @@ it("a server stash with a machine goes back to the stash when taken into an answ
   await vi.waitFor(() => expect(stash.puts).toHaveLength(1));
   expect(stash.puts[0]).toMatchObject({ prompt: "Deploy on the box", records: [machine] });
   expect(stash.puts[0]?.id).not.toBe("stash-with-machine");
+  expect(page.getByTestId("composer-editor").element().textContent).not.toContain(
+    "Deploy on the box",
+  );
 });
 
 it("a new draft does not load its reserved thread before the server lists it", async () => {
