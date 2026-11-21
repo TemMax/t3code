@@ -28,6 +28,7 @@ import {
 import type * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import type { Queue as EffectQueue } from "effect/Queue";
+import { RpcClientError } from "effect/rpc";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { cdp, page, userEvent } from "vite-plus/test/browser";
 
@@ -114,6 +115,12 @@ function holdRpc<Input>(method: string, end: Effect.Effect<never, Error>) {
   });
   return { calls, release, [Symbol.dispose]: () => answer[Symbol.dispose]() };
 }
+
+/** A transport failure: the request may have reached the server, but no reply came back. */
+const socketClosed = (message: string) =>
+  new RpcClientError.RpcClientError({
+    reason: new RpcClientError.RpcClientDefect({ message, cause: new Error(message) }),
+  });
 
 // Read by the driver mock below; `serveServerStash` sets it and resets it on dispose.
 const serverStash = vi.hoisted(() => ({
@@ -235,27 +242,29 @@ function serveServerStash(initial: ReadonlyArray<PromptStashEntry> = []) {
     ),
   );
   const take = answerRpc(WS_METHODS.promptStashTake, (input: PromptStashTakeInput) =>
-    Effect.suspend(() => {
-      takes.push(input);
-      let taken = takeResults.get(input.requestId);
-      if (!taken) {
-        const entry = entries.find((candidate) => candidate.id === input.entryId);
-        if (!entry) {
-          return Effect.fail(
-            new PromptStashError({ reason: "already-taken", detail: `${input.entryId} is gone` }),
-          );
+    Effect.suspend(
+      (): Effect.Effect<PromptStashEntry, PromptStashError | RpcClientError.RpcClientError> => {
+        takes.push(input);
+        let taken = takeResults.get(input.requestId);
+        if (!taken) {
+          const entry = entries.find((candidate) => candidate.id === input.entryId);
+          if (!entry) {
+            return Effect.fail(
+              new PromptStashError({ reason: "already-taken", detail: `${input.entryId} is gone` }),
+            );
+          }
+          entries = entries.filter((candidate) => candidate !== entry);
+          publish({ upserted: [], removedIds: [entry.id], replace: false });
+          taken = relabel(entry, "stash-", "pending-");
+          takeResults.set(input.requestId, taken);
         }
-        entries = entries.filter((candidate) => candidate !== entry);
-        publish({ upserted: [], removedIds: [entry.id], replace: false });
-        taken = relabel(entry, "stash-", "pending-");
-        takeResults.set(input.requestId, taken);
-      }
-      if (lostTakeReplies > 0) {
-        lostTakeReplies -= 1;
-        return Effect.fail(new Error("The connection dropped before the reply arrived"));
-      }
-      return Effect.succeed(taken);
-    }),
+        if (lostTakeReplies > 0) {
+          lostTakeReplies -= 1;
+          return Effect.fail(socketClosed("The connection dropped before the reply arrived"));
+        }
+        return Effect.succeed(taken);
+      },
+    ),
   );
   const remove = answerRpc(WS_METHODS.promptStashRemove, (input: PromptStashRemoveInput) =>
     Effect.sync(() => {
@@ -866,7 +875,7 @@ describe("server prompt stash", () => {
     ]);
     using _environment = installFakeEnvironment([thread]);
     using _assetUrls = answerRpc(WS_METHODS.assetsCreateUrl, () =>
-      Effect.fail(new Error("The asset URL could not be minted")),
+      Effect.fail(socketClosed("The asset URL could not be minted")),
     );
     const deletes: unknown[] = [];
     using _delete = answerRpc(WS_METHODS.attachmentsDelete, (input: unknown) => {
