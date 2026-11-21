@@ -265,6 +265,13 @@ describe("promptStashStore", () => {
         "other-tab",
       ]);
 
+      thisTab.usePromptStashStore.getState().dropEntries(["this-tab", "missing"]);
+      const afterDrop = JSON.parse(sharedStorage.getItem(PROMPT_STASH_STORAGE_KEY) as string);
+      expect(afterDrop.state.entries.map((entry: PromptStashEntry) => entry.id)).toEqual([
+        "other-tab",
+      ]);
+      thisTab.usePromptStashStore.getState().stashEntry(makeEntry({ id: "this-tab" }));
+
       thisTab.usePromptStashStore.getState().stashEntry({
         ...makeEntry({ id: "encoding-image" }),
         pendingImageCount: 1,

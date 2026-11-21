@@ -34,6 +34,7 @@ export const serverEnvironment = createServerEnvironmentAtoms(connectionAtomRunt
   initialConfigValueAtom: environmentSession.initialConfigValueAtom,
   environmentThemes: true,
   clientProfile: true,
+  promptStash: true,
   usageLimitSources: true,
   usageLimitsCommand: true,
 });

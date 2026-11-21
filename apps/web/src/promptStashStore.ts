@@ -161,6 +161,8 @@ interface PromptStashStoreState {
   };
   /** durable=false means removal was not persisted and reload would restore the entry. */
   takeEntry: (entryId: string) => { entry: PromptStashEntry | null; durable: boolean };
+  /** Removes entries that now live on a server; other tabs' stored entries stay. */
+  dropEntries: (ids: ReadonlyArray<string>) => void;
   /** attached=false means the entry disappeared while encoding, so images could not be saved. */
   finalizeEntryImages: (
     entryId: string,
@@ -194,6 +196,15 @@ export const usePromptStashStore = create<PromptStashStoreState>()((set, get) =>
     unpersistedFinalizedEntryIds.delete(entryId);
     set(() => ({ entries: nextEntries }));
     return { entry, durable };
+  },
+  dropEntries: (ids) => {
+    const dropped = new Set(ids);
+    const entries = latestEntries(get().entries);
+    const nextEntries = entries.filter((candidate) => !dropped.has(candidate.id));
+    if (nextEntries.length === entries.length) return;
+    persistEntries(nextEntries);
+    for (const id of dropped) unpersistedFinalizedEntryIds.delete(id);
+    set(() => ({ entries: nextEntries }));
   },
   finalizeEntryImages: (entryId, images) => {
     const entries = latestEntries(get().entries);

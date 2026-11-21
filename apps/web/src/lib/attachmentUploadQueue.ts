@@ -457,6 +457,55 @@ export function startAttachmentUpload(input: {
   });
 }
 
+/**
+ * Uploads bytes that belong to no composer, such as a stashed prompt's image, and resolves with
+ * the pending attachment id. A failed transfer deletes its own mint before rejecting.
+ */
+export async function uploadDetachedAttachment(input: {
+  readonly environmentId: EnvironmentId;
+  readonly file: File;
+  readonly type: "image" | "file";
+}): Promise<string> {
+  const { environmentId, file, type } = input;
+  if (!canOperate(environmentId)) {
+    throw new Error(m(msg("This connection cannot upload attachments.")));
+  }
+  const mimeType =
+    type === "file"
+      ? file.type.toLowerCase()
+      : PROVIDER_SEND_TURN_SUPPORTED_IMAGE_MIME_TYPES.find(
+          (supportedMimeType) => supportedMimeType === file.type.toLowerCase(),
+        );
+  if (!mimeType) throw new Error(m(msg("Unsupported image type")));
+  const result = await Effect.runPromise(
+    runAttachmentUploadCycle({
+      registry: appAtomRegistry,
+      createUploadUrl: attachmentEnvironment.createUploadUrl,
+      remove: attachmentEnvironment.remove,
+      environmentId,
+      upload: {
+        ...(type === "file" ? { type: "file" as const } : {}),
+        name: file.name,
+        mimeType,
+        sizeBytes: file.size,
+      },
+      resolveUploadUrl: (relativeUrl) => {
+        if (!canOperate(environmentId)) return null;
+        const connection = readPreparedConnection(environmentId);
+        return connection ? resolveAssetUrl(connection.httpBaseUrl, relativeUrl) : null;
+      },
+      transport: (url) =>
+        Effect.tryPromise({
+          try: (signal) => uploadBytes({ url, file, mimeType, signal, onProgress: () => {} }),
+          catch: attachmentUploadError,
+        }),
+    }),
+  );
+  if (result.status === "uploaded") return result.attachmentId;
+  if (result.attachmentId) deletePendingUpload(environmentId, result.attachmentId);
+  throw result.error instanceof Error ? result.error : new Error(m(msg("Upload failed")));
+}
+
 function cancelAttachmentUpload(imageId: string): void {
   const held = heldUploads.get(imageId);
   if (!held) {
