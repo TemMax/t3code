@@ -251,21 +251,23 @@ export function useComposerStash(input: {
   };
 
   // Stable, so the check after the verify await sees a question that opened during it.
-  const refuseMachinesInAnswer = useStableCallback((menuEntry: PromptStashEntry) => {
-    // An answer to an agent's question carries no machines, so restoring here would drop them.
-    if (
-      pendingUserInputs.length > 0 &&
-      menuEntry.records?.some((record) => record.kind === "environment")
-    ) {
-      toastManager.add({
-        type: "error",
-        title: m(msg("Stashed machines can't go in an answer")),
-        description: m(msg("Restore this prompt after the agent's question is answered.")),
-      });
-      return true;
-    }
-    return false;
-  });
+  const refuseMachinesInAnswer = useStableCallback(
+    (menuEntry: Pick<PromptStashEntry, "records">) => {
+      // An answer to an agent's question carries no machines, so restoring here would drop them.
+      if (
+        pendingUserInputs.length > 0 &&
+        menuEntry.records?.some((record) => record.kind === "environment")
+      ) {
+        toastManager.add({
+          type: "error",
+          title: m(msg("Stashed machines can't go in an answer")),
+          description: m(msg("Restore this prompt after the agent's question is answered.")),
+        });
+        return true;
+      }
+      return false;
+    },
+  );
 
   const refuseOtherEnvironment = () => {
     toastManager.add({
@@ -383,6 +385,16 @@ export function useComposerStash(input: {
     }
 
     const taken = result.value;
+    // A summary carries no records, so only the taken entry shows its machines; stash it again.
+    if (refuseMachinesInAnswer(taken)) {
+      const restash = await runAtomCommand(
+        appAtomRegistry,
+        promptStashCommands.put,
+        { environmentId, input: { ...taken, id: randomUUID() } },
+        { reportFailure: false },
+      );
+      if (restash._tag === "Success") return;
+    }
     const stashedImages = taken.attachments.filter((attachment) => attachment.type === "image");
     const downloads = await Promise.all(
       stashedImages.map((attachment) => downloadStashedImage(environmentId, attachment)),

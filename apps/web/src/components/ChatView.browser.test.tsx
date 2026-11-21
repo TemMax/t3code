@@ -633,6 +633,49 @@ it("a prompt taken on another device shows a toast and leaves the composer alone
   expect(editor.element().textContent).not.toContain("Taken elsewhere");
 });
 
+it("a server stash with a machine goes back to the stash when taken into an answer", async () => {
+  const asking = threadWithQuestion("thread-server-stash-question", "Which file should change?");
+  const machine = environmentContextRecord(EnvironmentId.make("environment-build"), "Build box");
+  using stash = serveServerStash([
+    {
+      id: "stash-with-machine",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      prompt: "Deploy on the box",
+      attachments: [],
+      droppedImageNames: [],
+      unreadableImageNames: [],
+      droppedFileNames: [],
+      records: [machine],
+    },
+  ]);
+  using _environment = installFakeEnvironment([asking]);
+  __setClientSettingsForTests({
+    ...DEFAULT_CLIENT_SETTINGS,
+    onboardingCompletedAt: "2026-01-01T00:00:00.000Z",
+  });
+  const router = getRouter(
+    createMemoryHistory({ initialEntries: [`/${ENVIRONMENT_ID}/${asking.id}`] }),
+  );
+  await router.load();
+  await using _app = await render(<AppRoot router={router} />, {
+    // AppRoot brings its own router.
+    router: false,
+  });
+  await expect.element(page.getByText("Which file should change?")).toBeVisible();
+
+  await userEvent.click(page.getByRole("button", { name: /^Stashed prompts/ }));
+  await userEvent.click(
+    page.getByRole("button", { name: "Restore stashed prompt: Deploy on the box" }),
+  );
+
+  await vi.waitFor(() =>
+    expect(document.body.textContent).toContain("Stashed machines can't go in an answer"),
+  );
+  await vi.waitFor(() => expect(stash.puts).toHaveLength(1));
+  expect(stash.puts[0]).toMatchObject({ prompt: "Deploy on the box", records: [machine] });
+  expect(stash.puts[0]?.id).not.toBe("stash-with-machine");
+});
+
 it("a new draft does not load its reserved thread before the server lists it", async () => {
   using _environment = installFakeEnvironment([]);
   using fetchSpy = vi.spyOn(globalThis, "fetch");
