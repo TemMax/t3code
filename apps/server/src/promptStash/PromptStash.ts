@@ -110,17 +110,28 @@ const make = Effect.gen(function* () {
       Effect.mapError(storageError),
     );
 
-  /** Renames the attachment and its `.txt` sidecar; a missing file yields `undefined`. */
+  /**
+   * Renames the attachment and its `.txt` sidecar; a missing file yields `undefined`.
+   * `touchedAtMs` restarts the pending sweep's 24-hour clock, which ages each file by its own mtime.
+   */
   const relabel = Effect.fn("PromptStash.relabel")(function* (
     attachmentId: string,
     from: "pending" | "stash",
     to: "pending" | "stash",
+    touchedAtMs?: number,
   ) {
     const plan = planAttachmentRelabel({ attachmentsDir, attachmentId, from, to });
     if (!plan.ok) return undefined;
-    yield* fs.rename(plan.currentPath, plan.finalPath);
+    const paths = [[plan.currentPath, plan.finalPath] as const];
     if (yield* fs.exists(`${plan.currentPath}.txt`)) {
-      yield* fs.rename(`${plan.currentPath}.txt`, `${plan.finalPath}.txt`);
+      paths.push([`${plan.currentPath}.txt`, `${plan.finalPath}.txt`]);
+    }
+    for (const [currentPath, finalPath] of paths) {
+      yield* fs.rename(currentPath, finalPath);
+      // Node takes seconds.
+      if (touchedAtMs !== undefined) {
+        yield* fs.utimes(finalPath, touchedAtMs / 1000, touchedAtMs / 1000);
+      }
     }
     return plan;
   });
@@ -204,39 +215,69 @@ const make = Effect.gen(function* () {
     );
   });
 
-  /** A put or take that died before writing its entry file leaves `stash-*` files nobody owns. */
-  const sweepUnreferencedStashFiles = Effect.fn("PromptStash.sweepUnreferencedStashFiles")(
-    function* (entries: ReadonlyMap<string, PromptStashEntry>) {
-      const referenced = new Set(
-        [...entries.values()].flatMap((entry) =>
-          entry.attachments.map((attachment) => attachment.attachmentId.toLowerCase()),
-        ),
+  /**
+   * Finishes renames a put or take left half-done when the process died before its entry file
+   * changed: a stored entry gets its `stash-*` files back, and `stash-*` files no entry owns
+   * return to `pending-*` so the client's retried put finds them and the pending sweep owns them.
+   */
+  const repairStashFiles = Effect.fn("PromptStash.repairStashFiles")(function* (
+    entries: ReadonlyMap<string, PromptStashEntry>,
+  ) {
+    const nowMs = yield* Clock.currentTimeMillis;
+    const warnOnFailure = (message: string, attachmentId: string) =>
+      Effect.catch((error: PlatformError.PlatformError) =>
+        Effect.logWarning(message, { attachmentId, detail: error.message }),
       );
-      const names = yield* fs
-        .readDirectory(attachmentsDir)
-        .pipe(Effect.orElseSucceed((): ReadonlyArray<string> => []));
-      for (const name of names) {
-        const attachmentId = parseAttachmentIdFromRelativePath(
-          name.endsWith(".txt") && name.slice(0, -4).includes(".") ? name.slice(0, -4) : name,
-        );
+
+    const referenced = new Set<string>();
+    for (const entry of entries.values()) {
+      for (const { attachmentId } of entry.attachments) {
+        referenced.add(attachmentId.toLowerCase());
         if (
-          attachmentId === null ||
           parseThreadSegmentFromAttachmentId(attachmentId) !== STASH_ATTACHMENT_SEGMENT ||
-          referenced.has(attachmentId.toLowerCase())
+          resolveAttachmentPathById({ attachmentsDir, attachmentId }) !== null
         ) {
           continue;
         }
-        yield* fs.remove(path.join(attachmentsDir, name), { force: true }).pipe(
-          Effect.catch((error) =>
-            Effect.logWarning("could not remove unreferenced stash attachment", {
-              name,
-              detail: error.message,
-            }),
-          ),
+        const pendingId = `pending-${attachmentId.slice(STASH_ATTACHMENT_SEGMENT.length + 1)}`;
+        yield* relabel(pendingId, "pending", STASH_ATTACHMENT_SEGMENT).pipe(
+          warnOnFailure("could not restore stash attachment", attachmentId),
         );
       }
-    },
-  );
+    }
+
+    const names = yield* fs
+      .readDirectory(attachmentsDir)
+      .pipe(Effect.orElseSucceed((): ReadonlyArray<string> => []));
+    const unreferenced = new Map<string, Array<string>>();
+    for (const name of names) {
+      const attachmentId = parseAttachmentIdFromRelativePath(
+        name.endsWith(".txt") && name.slice(0, -4).includes(".") ? name.slice(0, -4) : name,
+      );
+      if (
+        attachmentId === null ||
+        parseThreadSegmentFromAttachmentId(attachmentId) !== STASH_ATTACHMENT_SEGMENT ||
+        referenced.has(attachmentId.toLowerCase())
+      ) {
+        continue;
+      }
+      unreferenced.set(attachmentId, [...(unreferenced.get(attachmentId) ?? []), name]);
+    }
+    for (const [attachmentId, fileNames] of unreferenced) {
+      if (resolveAttachmentPathById({ attachmentsDir, attachmentId }) !== null) {
+        yield* relabel(attachmentId, STASH_ATTACHMENT_SEGMENT, "pending", nowMs).pipe(
+          warnOnFailure("could not return stash attachment to pending", attachmentId),
+        );
+        continue;
+      }
+      // Only a sidecar without its attachment is left.
+      for (const name of fileNames) {
+        yield* fs
+          .remove(path.join(attachmentsDir, name), { force: true })
+          .pipe(warnOnFailure("could not remove orphaned stash sidecar", attachmentId));
+      }
+    }
+  });
 
   const initialEntries = yield* loadEntries.pipe(
     Effect.catch((error) =>
@@ -247,7 +288,7 @@ const make = Effect.gen(function* () {
     ),
   );
   const initialConsumed = yield* loadConsumed;
-  yield* sweepUnreferencedStashFiles(initialEntries);
+  yield* repairStashFiles(initialEntries);
 
   const stored = yield* Ref.make<StoredStash>({
     seq: 0,
@@ -367,13 +408,16 @@ const make = Effect.gen(function* () {
     const droppedImageNames = [...entry.droppedImageNames];
     const droppedFileNames = [...entry.droppedFileNames];
     for (const attachment of entry.attachments) {
-      const plan = yield* relabel(attachment.attachmentId, STASH_ATTACHMENT_SEGMENT, "pending");
+      const plan = yield* relabel(
+        attachment.attachmentId,
+        STASH_ATTACHMENT_SEGMENT,
+        "pending",
+        nowMs,
+      );
       if (plan === undefined) {
         (attachment.type === "image" ? droppedImageNames : droppedFileNames).push(attachment.name);
         continue;
       }
-      // The pending sweep ages files by mtime; count from the take. Node takes seconds.
-      yield* fs.utimes(plan.finalPath, nowMs / 1000, nowMs / 1000);
       attachments.push({ ...attachment, attachmentId: plan.finalId });
     }
     const result: PromptStashEntry = { ...entry, attachments, droppedImageNames, droppedFileNames };

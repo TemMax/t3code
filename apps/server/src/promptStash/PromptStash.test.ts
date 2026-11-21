@@ -253,21 +253,26 @@ it.layer(NodeServices.layer)("PromptStash", (it) => {
     Effect.gen(function* () {
       yield* TestClock.setTime(NOW_MS);
       const stash = yield* PromptStash.PromptStash;
-      const { fs, attachmentPath, attachmentsDir, exists } = yield* dirs;
-      const attachments = [image(10)];
+      const { fs, attachmentPath, attachmentsDir, exists, write } = yield* dirs;
+      const attachments = [image(10), file(14)];
       yield* upload(attachments);
+      yield* write(`pending-${uuidFor(14)}-pdf.pdf.txt`);
       yield* stash.put(entry("a", attachments));
       const twoDaysAgoSeconds = (NOW_MS - 2 * DAY_MS) / 1000;
-      yield* fs.utimes(
-        attachmentPath(`stash-${uuidFor(10)}.png`),
-        twoDaysAgoSeconds,
-        twoDaysAgoSeconds,
-      );
+      for (const name of [
+        `stash-${uuidFor(10)}.png`,
+        `stash-${uuidFor(14)}-pdf.pdf`,
+        `stash-${uuidFor(14)}-pdf.pdf.txt`,
+      ]) {
+        yield* fs.utimes(attachmentPath(name), twoDaysAgoSeconds, twoDaysAgoSeconds);
+      }
 
       yield* stash.take({ entryId: "a", requestId: "r1" });
       sweepStalePendingAttachments({ attachmentsDir, nowMs: NOW_MS });
 
       assert.isTrue(yield* exists(`pending-${uuidFor(10)}.png`));
+      assert.isTrue(yield* exists(`pending-${uuidFor(14)}-pdf.pdf`));
+      assert.isTrue(yield* exists(`pending-${uuidFor(14)}-pdf.pdf.txt`));
     }).pipe(Effect.provide(layerPromptStash)),
   );
 
@@ -338,8 +343,9 @@ it.layer(NodeServices.layer)("PromptStash", (it) => {
     }).pipe(Effect.provide(layerPromptStash)),
   );
 
-  it.effect("startup removes unreferenced stash files and reloads entries", () =>
+  it.effect("startup returns unreferenced stash files to pending and reloads entries", () =>
     Effect.gen(function* () {
+      yield* TestClock.setTime(NOW_MS);
       const attachments = [image(12)];
       yield* upload(attachments);
       yield* Effect.gen(function* () {
@@ -348,9 +354,13 @@ it.layer(NodeServices.layer)("PromptStash", (it) => {
         yield* stash.put(entry("taken"));
         yield* stash.take({ entryId: "taken", requestId: "r1" });
       }).pipe(Effect.provide(PromptStash.layer));
-      const { exists, write } = yield* dirs;
-      yield* write(`stash-${uuidFor(13)}.png`);
-      yield* write(`stash-${uuidFor(13)}.png.txt`);
+      const { attachmentPath, attachmentsDir, exists, fs, write } = yield* dirs;
+      // A put that died after its renames, before its entry file was written.
+      const twoDaysAgoSeconds = (NOW_MS - 2 * DAY_MS) / 1000;
+      for (const name of [`stash-${uuidFor(13)}.png`, `stash-${uuidFor(13)}.png.txt`]) {
+        yield* write(name);
+        yield* fs.utimes(attachmentPath(name), twoDaysAgoSeconds, twoDaysAgoSeconds);
+      }
 
       yield* Effect.gen(function* () {
         const stash = yield* PromptStash.PromptStash;
@@ -369,9 +379,44 @@ it.layer(NodeServices.layer)("PromptStash", (it) => {
         );
       }).pipe(Effect.provide(PromptStash.layer));
 
+      sweepStalePendingAttachments({ attachmentsDir, nowMs: NOW_MS });
       assert.isFalse(yield* exists(`stash-${uuidFor(13)}.png`));
       assert.isFalse(yield* exists(`stash-${uuidFor(13)}.png.txt`));
+      assert.isTrue(yield* exists(`pending-${uuidFor(13)}.png`));
+      assert.isTrue(yield* exists(`pending-${uuidFor(13)}.png.txt`));
       assert.isTrue(yield* exists(`pending-${uuidFor(12)}.png`));
+    }).pipe(Effect.provide(layerConfig)),
+  );
+
+  it.effect("startup gives a stored entry back the files a dead take returned to pending", () =>
+    Effect.gen(function* () {
+      const attachments = [image(15), file(16)];
+      yield* upload(attachments);
+      const { exists, fs, attachmentPath, write } = yield* dirs;
+      yield* write(`pending-${uuidFor(16)}-pdf.pdf.txt`);
+      yield* Effect.gen(function* () {
+        const stash = yield* PromptStash.PromptStash;
+        yield* stash.put(entry("a", attachments));
+      }).pipe(Effect.provide(PromptStash.layer));
+      // A take that died after its renames, before the entry file was removed.
+      for (const [from, to] of [
+        [`stash-${uuidFor(15)}.png`, `pending-${uuidFor(15)}.png`],
+        [`stash-${uuidFor(16)}-pdf.pdf`, `pending-${uuidFor(16)}-pdf.pdf`],
+        [`stash-${uuidFor(16)}-pdf.pdf.txt`, `pending-${uuidFor(16)}-pdf.pdf.txt`],
+      ] as const) {
+        yield* fs.rename(attachmentPath(from), attachmentPath(to));
+      }
+
+      const taken = yield* Effect.gen(function* () {
+        const stash = yield* PromptStash.PromptStash;
+        assert.isTrue(yield* exists(`stash-${uuidFor(15)}.png`));
+        assert.isTrue(yield* exists(`stash-${uuidFor(16)}-pdf.pdf`));
+        assert.isTrue(yield* exists(`stash-${uuidFor(16)}-pdf.pdf.txt`));
+        assert.isFalse(yield* exists(`pending-${uuidFor(15)}.png`));
+        return yield* stash.take({ entryId: "a", requestId: "r1" });
+      }).pipe(Effect.provide(PromptStash.layer));
+
+      assert.deepEqual(taken, entry("a", attachments));
     }).pipe(Effect.provide(layerConfig)),
   );
 
