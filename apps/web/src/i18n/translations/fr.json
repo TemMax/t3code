@@ -4756,6 +4756,8 @@
   "5626293eea17b622": "Impossible de joindre le serveur pour récupérer ce prompt mis de côté",
   "8017fa4ad7e73ef5": "Ce prompt a déjà été récupéré sur un autre appareil",
   "d53fe705459f98f5": "Impossible de récupérer ce prompt mis de côté",
+  "98a98216f66a9390": "Impossible de remettre ce prompt de côté",
+  "ddb411d7fc65f420": "Il a été restauré ici sans ses machines.",
   "1a4bc01f0ca772c2": "{names} dépassait la taille limite de la réserve lors de l’enregistrement de ce prompt.",
   "3139e6da7022b82b": "Impossible de télécharger {names} depuis le serveur.",
   "bb3b4ad32b596e11": "{names} n’a pas pu être lu lors de l’enregistrement de ce prompt.",

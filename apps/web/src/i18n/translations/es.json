@@ -4755,6 +4755,8 @@
   "5626293eea17b622": "No se puede conectar con el servidor para tomar este prompt del stash",
   "8017fa4ad7e73ef5": "Este prompt ya se tomó en otro dispositivo",
   "d53fe705459f98f5": "No se pudo tomar este prompt del stash",
+  "98a98216f66a9390": "No se pudo devolver este prompt al stash",
+  "ddb411d7fc65f420": "Se restauró aquí sin sus máquinas.",
   "1a4bc01f0ca772c2": "{names} superó el límite de tamaño del stash cuando se guardó este prompt.",
   "3139e6da7022b82b": "No se pudo descargar {names} del servidor.",
   "bb3b4ad32b596e11": "No se pudo leer {names} cuando se guardó este prompt.",
