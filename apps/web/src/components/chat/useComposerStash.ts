@@ -557,13 +557,12 @@ export function useComposerStash(input: {
     const itemId = stashMenuItemId(item);
     if (takingEntryIds.has(itemId)) return;
     takingEntryIds.add(itemId);
-    try {
-      await (item.kind === "local"
+    // React Compiler rejects try/finally without catch.
+    await (
+      item.kind === "local"
         ? restoreLocalStashEntry(item.entry)
-        : restoreServerStashEntry(serverSource(item)));
-    } finally {
-      takingEntryIds.delete(itemId);
-    }
+        : restoreServerStashEntry(serverSource(item))
+    ).finally(() => takingEntryIds.delete(itemId));
   };
 
   const applyRestoredEntry = (
@@ -896,39 +895,37 @@ export function useComposerStash(input: {
   const deleteLocalStashEntry = async (entry: PromptStashEntry) => {
     if (takingEntryIds.has(entry.id)) return;
     takingEntryIds.add(entry.id);
-    try {
-      // Deleting only the local copy of an entry the sync just stored would bring it back.
-      if ((await settleLocalEntry(entry.id)) === "stored") {
-        const sourceEnvironmentId = uploadedEntryEnvironment(entry);
-        if (sourceEnvironmentId !== null) {
-          await deleteServerStashEntry(sourceEnvironmentId, entry.id);
-        }
-        return;
+    await deleteSettledLocalEntry(entry).finally(() => takingEntryIds.delete(entry.id));
+  };
+
+  const deleteSettledLocalEntry = async (entry: PromptStashEntry) => {
+    // Deleting only the local copy of an entry the sync just stored would bring it back.
+    if ((await settleLocalEntry(entry.id)) === "stored") {
+      const sourceEnvironmentId = uploadedEntryEnvironment(entry);
+      if (sourceEnvironmentId !== null) {
+        await deleteServerStashEntry(sourceEnvironmentId, entry.id);
       }
-      const { entry: removed, durable } = takeStashEntry(entry.id);
-      if (durable && removed) {
-        for (const file of removed.files ?? []) {
-          releasePersistedAttachmentUpload({
-            id: file.id,
-            environmentId: file.environmentId,
-            attachmentId: file.attachmentId,
-          });
-        }
-      }
-      if (!durable) {
-        toastManager.add({
-          type: "warning",
-          title: m(msg("Stash entry may come back")),
-          description: m(
-            msg(
-              "Browser storage rejected the delete, so this prompt could reappear after a reload.",
-            ),
-          ),
-          data: { hideCopyButton: true },
+      return;
+    }
+    const { entry: removed, durable } = takeStashEntry(entry.id);
+    if (durable && removed) {
+      for (const file of removed.files ?? []) {
+        releasePersistedAttachmentUpload({
+          id: file.id,
+          environmentId: file.environmentId,
+          attachmentId: file.attachmentId,
         });
       }
-    } finally {
-      takingEntryIds.delete(entry.id);
+    }
+    if (!durable) {
+      toastManager.add({
+        type: "warning",
+        title: m(msg("Stash entry may come back")),
+        description: m(
+          msg("Browser storage rejected the delete, so this prompt could reappear after a reload."),
+        ),
+        data: { hideCopyButton: true },
+      });
     }
   };
   const deleteStashEntryStable = useStableCallback(deleteStashEntry);
