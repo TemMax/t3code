@@ -1,9 +1,10 @@
-import { EnvironmentId } from "@t3tools/contracts";
+import { EnvironmentId, type PromptStashSummary } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import type { PromptStashEntry } from "../promptStashStore";
 import {
   applyPutOutcome,
+  mergeStashMenuItems,
   planLocalStashUploads,
   targetEnvironmentForLocalEntry,
 } from "./promptStashSync.logic";
@@ -76,5 +77,45 @@ describe("applyPutOutcome", () => {
     expect(applyPutOutcome(["a", "b"], "a", "already-taken")).toEqual(["a"]);
     expect(applyPutOutcome(["a", "b"], "a", "stored")).toEqual(["a"]);
     expect(applyPutOutcome(["a", "b"], "a", "failed")).toEqual([]);
+  });
+});
+
+describe("mergeStashMenuItems", () => {
+  it("merges local and server entries newest first and hides local duplicates", () => {
+    const server = EnvironmentId.make("server");
+    const summary = (id: string, createdAt: string): PromptStashSummary => ({
+      id,
+      createdAt,
+      prompt: id,
+      attachments: [],
+      droppedImageNames: [],
+      unreadableImageNames: [],
+      droppedFileNames: [],
+    });
+    const items = mergeStashMenuItems(
+      [
+        entry("local-new", { createdAt: "2026-11-21T12:05:00.000Z" }),
+        entry("synced", { createdAt: "2026-11-21T12:04:00.000Z" }),
+        entry("local-old", { createdAt: "2026-11-21T11:00:00.000Z" }),
+      ],
+      [
+        {
+          environmentId: server,
+          summaries: [
+            summary("synced", "2026-11-21T12:04:00.000Z"),
+            summary("server-mid", "2026-11-21T12:01:00.000Z"),
+          ],
+        },
+      ],
+    );
+    expect(
+      items.map((item) => [item.kind, item.kind === "local" ? item.entry.id : item.summary.id]),
+    ).toEqual([
+      ["local", "local-new"],
+      ["server", "synced"],
+      ["server", "server-mid"],
+      ["local", "local-old"],
+    ]);
+    expect(items[1]).toMatchObject({ kind: "server", environmentId: server });
   });
 });

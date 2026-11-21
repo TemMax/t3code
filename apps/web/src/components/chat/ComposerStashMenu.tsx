@@ -1,22 +1,56 @@
 import { msg, T, useGT, useMessages, Var } from "gt-react";
 import { BookmarkIcon, FileIcon, FileTextIcon } from "lucide-react";
 import { memo, useEffect, useEffectEvent, useRef, useState, type RefObject } from "react";
+import type { EnvironmentId, PromptStashAttachment, PromptStashSummary } from "@t3tools/contracts";
 import { assistantCitationsToPlainText } from "@t3tools/shared/assistantCitations";
 import { replaceComposerContextReferences } from "@t3tools/shared/composerContextReferences";
 
 import { RelativeTime } from "../RelativeTime";
+import { useAssetUrls } from "~/assets/assetUrls";
 import { m, type MessageResolver } from "~/i18n/messages";
 import { cn } from "~/lib/utils";
 import { type PromptStashEntry } from "../../promptStashStore";
+import { stashMenuItemId, type StashMenuItem } from "../../promptStash/promptStashSync.logic";
 import { ComposerBanner } from "./ComposerBanner";
 
 const SNIPPET_MAX_CHARS = 90;
+const THUMBNAIL_LIMIT = 3;
 
-function missingImageCount(entry: PromptStashEntry): number {
-  return entry.droppedImageNames.length + (entry.unreadableImageNames?.length ?? 0);
+/** A bare local entry still works here, so callers that only know local entries pass those. */
+type StashMenuEntry = PromptStashEntry | StashMenuItem;
+
+function asStashMenuItem(entry: StashMenuEntry): StashMenuItem {
+  return "kind" in entry ? entry : { kind: "local", entry };
 }
 
-export function stashEntrySnippet(entry: PromptStashEntry, resolve: MessageResolver = m): string {
+function stashMenuEntryId(entry: StashMenuEntry): string {
+  return stashMenuItemId(asStashMenuItem(entry));
+}
+
+function isServerSummary(
+  entry: PromptStashEntry | PromptStashSummary,
+): entry is PromptStashSummary {
+  return "droppedFileNames" in entry;
+}
+
+function missingAttachmentCount(entry: PromptStashEntry | PromptStashSummary): number {
+  return (
+    entry.droppedImageNames.length +
+    (entry.unreadableImageNames?.length ?? 0) +
+    (isServerSummary(entry) ? entry.droppedFileNames.length : 0)
+  );
+}
+
+function stashedFileCount(entry: PromptStashEntry | PromptStashSummary): number {
+  return isServerSummary(entry)
+    ? entry.attachments.filter((attachment) => attachment.type === "file").length
+    : (entry.files?.length ?? 0);
+}
+
+export function stashEntrySnippet(
+  entry: PromptStashEntry | PromptStashSummary,
+  resolve: MessageResolver = m,
+): string {
   const trimmed = assistantCitationsToPlainText(
     replaceComposerContextReferences(entry.prompt, (reference) => reference.label),
   )
@@ -29,8 +63,11 @@ export function stashEntrySnippet(entry: PromptStashEntry, resolve: MessageResol
     const end = last >= 0xd800 && last <= 0xdbff ? SNIPPET_MAX_CHARS - 1 : SNIPPET_MAX_CHARS;
     return `${trimmed.slice(0, end)}…`;
   }
-  const imageCount = entry.attachments.length + entry.droppedImageNames.length;
-  const fileCount = entry.files?.length ?? 0;
+  const storedImageCount = isServerSummary(entry)
+    ? entry.attachments.filter((attachment) => attachment.type === "image").length
+    : entry.attachments.length;
+  const imageCount = storedImageCount + entry.droppedImageNames.length;
+  const fileCount = stashedFileCount(entry);
   const attachmentCount = imageCount + fileCount;
   if (attachmentCount === 0) {
     return resolve(msg("(empty)"));
@@ -55,21 +92,77 @@ export function stashEntrySnippet(entry: PromptStashEntry, resolve: MessageResol
       );
 }
 
+const thumbnailClassName = "size-4 rounded border border-border/70 object-cover";
+
+function ServerStashThumbnails(props: {
+  environmentId: EnvironmentId;
+  images: ReadonlyArray<PromptStashAttachment>;
+}) {
+  const urls = useAssetUrls(
+    props.environmentId,
+    props.images.map((image) => ({
+      _tag: "attachment" as const,
+      attachmentId: image.attachmentId,
+    })),
+  );
+  return props.images.map((image, index) => {
+    const url = urls[index];
+    return url ? (
+      <img key={image.id} src={url} alt="" aria-hidden="true" className={thumbnailClassName} />
+    ) : (
+      <span key={image.id} aria-hidden="true" className={cn(thumbnailClassName, "bg-muted")} />
+    );
+  });
+}
+
+function StashThumbnails(props: { item: StashMenuItem }) {
+  const { item } = props;
+  if (item.kind === "local") {
+    if (item.entry.attachments.length === 0) return null;
+    return (
+      <span className="flex shrink-0 items-center -space-x-1.5">
+        {item.entry.attachments.slice(0, THUMBNAIL_LIMIT).map((attachment) => (
+          <img
+            key={attachment.id}
+            src={attachment.dataUrl}
+            alt=""
+            aria-hidden="true"
+            className={thumbnailClassName}
+          />
+        ))}
+      </span>
+    );
+  }
+  const images = item.summary.attachments
+    .filter((attachment) => attachment.type === "image")
+    .slice(0, THUMBNAIL_LIMIT);
+  if (images.length === 0) return null;
+  return (
+    <span className="flex shrink-0 items-center -space-x-1.5">
+      <ServerStashThumbnails environmentId={item.environmentId} images={images} />
+    </span>
+  );
+}
+
 /** Window capture gives the open menu priority over composer key handlers. */
-export const ComposerStashMenu = memo(function ComposerStashMenu(props: {
-  entries: ReadonlyArray<PromptStashEntry>;
+function ComposerStashMenuList<T extends StashMenuEntry>(props: {
+  entries: ReadonlyArray<T>;
   stashShortcutLabel: string | null;
   composerFormRef: RefObject<HTMLFormElement | null>;
-  onRestore: (entry: PromptStashEntry) => void;
-  onDelete: (entry: PromptStashEntry) => void;
+  onRestore: (entry: T) => void;
+  onDelete: (entry: T) => void;
   onClose: () => void;
 }) {
   const { entries, stashShortcutLabel, composerFormRef, onRestore, onDelete, onClose } = props;
   const gt = useGT();
   const m = useMessages();
-  const [highlightedId, setHighlightedId] = useState<string | null>(entries[0]?.id ?? null);
+  const [highlightedId, setHighlightedId] = useState<string | null>(
+    entries[0] ? stashMenuEntryId(entries[0]) : null,
+  );
 
-  const highlightedEntry = entries.find((entry) => entry.id === highlightedId) ?? entries[0];
+  const highlightedEntry =
+    entries.find((entry) => stashMenuEntryId(entry) === highlightedId) ?? entries[0];
+  const highlightedEntryId = highlightedEntry ? stashMenuEntryId(highlightedEntry) : null;
   const drawerRef = useRef<HTMLDivElement>(null);
 
   // Both listeners read entries, highlight and callbacks at event time, so they subscribe
@@ -108,11 +201,14 @@ export const ComposerStashMenu = memo(function ComposerStashMenu(props: {
       if (entries.length === 0) return;
       event.preventDefault();
       event.stopPropagation();
-      const currentIndex = entries.findIndex((entry) => entry.id === highlightedEntry?.id);
+      const currentIndex = entries.findIndex(
+        (entry) => stashMenuEntryId(entry) === highlightedEntryId,
+      );
       const offset = event.key === "ArrowDown" ? 1 : -1;
       const normalizedIndex = currentIndex >= 0 ? currentIndex : offset === 1 ? -1 : 0;
       const nextIndex = (normalizedIndex + offset + entries.length) % entries.length;
-      setHighlightedId(entries[nextIndex]?.id ?? null);
+      const nextEntry = entries[nextIndex];
+      setHighlightedId(nextEntry ? stashMenuEntryId(nextEntry) : null);
       const nextButton =
         drawer.querySelectorAll<HTMLButtonElement>("[data-stash-restore]")[nextIndex];
       nextButton?.scrollIntoView({ block: "nearest" });
@@ -195,91 +291,89 @@ export const ComposerStashMenu = memo(function ComposerStashMenu(props: {
               </ComposerBanner.Content>
             </ComposerBanner.Row>
           ) : (
-            entries.map((entry) => (
-              <ComposerBanner.Row
-                render={<li />}
-                key={entry.id}
-                data-stash-entry={entry.id}
-                data-highlighted={highlightedEntry?.id === entry.id || undefined}
-                className={cn(
-                  "relative rounded-sm",
-                  highlightedEntry?.id === entry.id && "bg-accent text-accent-foreground",
-                )}
-                onMouseMove={() => {
-                  if (highlightedId !== entry.id) setHighlightedId(entry.id);
-                }}
-                onFocus={() => setHighlightedId(entry.id)}
-              >
-                <ComposerBanner.Icon>
-                  <FileTextIcon />
-                </ComposerBanner.Icon>
-                <ComposerBanner.Content>
-                  <button
-                    type="button"
-                    className="min-w-0 flex-1 cursor-pointer truncate text-left text-foreground/80 outline-none before:absolute before:inset-0 before:rounded-sm focus-visible:before:ring-2 focus-visible:before:ring-inset focus-visible:before:ring-ring"
-                    data-stash-restore={entry.id}
-                    aria-label={gt("Restore stashed prompt: {snippet}", {
-                      snippet: stashEntrySnippet(entry, m),
-                    })}
-                    onPointerDown={(event) => event.preventDefault()}
-                    onClick={() => onRestore(entry)}
-                  >
-                    {stashEntrySnippet(entry, m)}
-                  </button>
-                </ComposerBanner.Content>
-                <ComposerBanner.Actions>
-                  {entry.pendingImageCount ? (
-                    <span className="shrink-0 text-muted-foreground">
-                      {gt(
-                        "{count, plural, one {saving {count} image…} other {saving {count} images…}}",
-                        { count: entry.pendingImageCount },
-                      )}
-                    </span>
-                  ) : missingImageCount(entry) > 0 ? (
-                    <span className="shrink-0 text-warning-foreground">
-                      {gt(
-                        "{count, plural, one {{count} image dropped} other {{count} images dropped}}",
-                        { count: missingImageCount(entry) },
-                      )}
-                    </span>
-                  ) : null}
-                  {entry.attachments.length > 0 ? (
-                    <span className="flex shrink-0 items-center -space-x-1.5">
-                      {entry.attachments.slice(0, 3).map((attachment) => (
-                        <img
-                          key={attachment.id}
-                          src={attachment.dataUrl}
-                          alt=""
-                          aria-hidden="true"
-                          className="size-4 rounded border border-border/70 object-cover"
-                        />
-                      ))}
-                    </span>
-                  ) : null}
-                  {(entry.files?.length ?? 0) > 0 ? (
-                    <span className="flex shrink-0 items-center gap-1 text-muted-foreground">
-                      <FileIcon className="size-3" aria-hidden />
-                      {entry.files!.length}
-                    </span>
-                  ) : null}
-                  <time
-                    dateTime={entry.createdAt}
-                    className="shrink-0 text-muted-foreground tabular-nums max-sm:hidden"
-                  >
-                    <RelativeTime timestamp={entry.createdAt} />
-                  </time>
-                  <ComposerBanner.Dismiss
-                    className="z-10"
-                    aria-label={gt("Delete stashed prompt")}
-                    onPointerDown={(event) => event.preventDefault()}
-                    onClick={() => onDelete(entry)}
-                  />
-                </ComposerBanner.Actions>
-              </ComposerBanner.Row>
-            ))
+            entries.map((entry) => {
+              const item = asStashMenuItem(entry);
+              const id = stashMenuEntryId(entry);
+              const stashed = item.kind === "local" ? item.entry : item.summary;
+              const pendingImageCount = item.kind === "local" ? item.entry.pendingImageCount : 0;
+              const missingCount = missingAttachmentCount(stashed);
+              const fileCount = stashedFileCount(stashed);
+              const snippet = stashEntrySnippet(stashed, m);
+              return (
+                <ComposerBanner.Row
+                  render={<li />}
+                  key={id}
+                  data-stash-entry={id}
+                  data-highlighted={highlightedEntryId === id || undefined}
+                  className={cn(
+                    "relative rounded-sm",
+                    highlightedEntryId === id && "bg-accent text-accent-foreground",
+                  )}
+                  onMouseMove={() => {
+                    if (highlightedId !== id) setHighlightedId(id);
+                  }}
+                  onFocus={() => setHighlightedId(id)}
+                >
+                  <ComposerBanner.Icon>
+                    <FileTextIcon />
+                  </ComposerBanner.Icon>
+                  <ComposerBanner.Content>
+                    <button
+                      type="button"
+                      className="min-w-0 flex-1 cursor-pointer truncate text-left text-foreground/80 outline-none before:absolute before:inset-0 before:rounded-sm focus-visible:before:ring-2 focus-visible:before:ring-inset focus-visible:before:ring-ring"
+                      data-stash-restore={id}
+                      aria-label={gt("Restore stashed prompt: {snippet}", { snippet })}
+                      onPointerDown={(event) => event.preventDefault()}
+                      onClick={() => onRestore(entry)}
+                    >
+                      {snippet}
+                    </button>
+                  </ComposerBanner.Content>
+                  <ComposerBanner.Actions>
+                    {pendingImageCount ? (
+                      <span className="shrink-0 text-muted-foreground">
+                        {gt(
+                          "{count, plural, one {saving {count} image…} other {saving {count} images…}}",
+                          { count: pendingImageCount },
+                        )}
+                      </span>
+                    ) : missingCount > 0 ? (
+                      <span className="shrink-0 text-warning-foreground">
+                        {gt(
+                          "{count, plural, one {{count} image dropped} other {{count} images dropped}}",
+                          { count: missingCount },
+                        )}
+                      </span>
+                    ) : null}
+                    <StashThumbnails item={item} />
+                    {fileCount > 0 ? (
+                      <span className="flex shrink-0 items-center gap-1 text-muted-foreground">
+                        <FileIcon className="size-3" aria-hidden />
+                        {fileCount}
+                      </span>
+                    ) : null}
+                    <time
+                      dateTime={stashed.createdAt}
+                      className="shrink-0 text-muted-foreground tabular-nums max-sm:hidden"
+                    >
+                      <RelativeTime timestamp={stashed.createdAt} />
+                    </time>
+                    <ComposerBanner.Dismiss
+                      className="z-10"
+                      aria-label={gt("Delete stashed prompt")}
+                      onPointerDown={(event) => event.preventDefault()}
+                      onClick={() => onDelete(entry)}
+                    />
+                  </ComposerBanner.Actions>
+                </ComposerBanner.Row>
+              );
+            })
           )}
         </ComposerBanner.Children>
       </ComposerBanner.Scroll>
     </ComposerBanner.Root>
   );
-});
+}
+
+// `memo` drops the generic, so the cast restores it.
+export const ComposerStashMenu = memo(ComposerStashMenuList) as typeof ComposerStashMenuList;

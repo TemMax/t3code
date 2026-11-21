@@ -533,6 +533,25 @@ export function releaseAttachmentUpload(imageId: string): void {
   clearUploadState(imageId);
 }
 
+/** Lets go of an upload without deleting it, because its file now belongs to the stash. */
+export function forgetAttachmentUpload(imageId: string): void {
+  cancelAttachmentUpload(imageId);
+  clearUploadState(imageId);
+}
+
+/** Marks an image as already uploaded, such as one taken back from the server stash. */
+export function adoptAttachmentUpload(input: {
+  readonly imageId: string;
+  readonly environmentId: EnvironmentId;
+  readonly attachmentId: string;
+}): void {
+  setUploadState(input.imageId, {
+    status: "ready",
+    environmentId: input.environmentId,
+    attachmentId: input.attachmentId,
+  });
+}
+
 export function releasePersistedAttachmentUpload(input: {
   readonly id: string;
   readonly environmentId: EnvironmentId;

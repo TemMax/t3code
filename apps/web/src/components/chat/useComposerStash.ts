@@ -1,15 +1,27 @@
+import { useAtomValue } from "@effect/atom-react";
 import { msg } from "gt-react";
 import { m } from "~/i18n/messages";
 import type { ChatComposerProps } from "./ChatComposer";
 import {
   type ComposerContextRecord,
   type EnvironmentId,
+  PROMPT_STASH_MAX_ENTRIES,
   PROVIDER_SEND_TURN_MAX_ATTACHMENTS,
   type PreviewAnnotationPayload,
+  type PromptStashAttachment,
+  type PromptStashPutInput,
   type ThreadContextRecord,
 } from "@t3tools/contracts";
+import { errorDisplayMessage } from "@t3tools/client-runtime/errors";
+import { resolveAssetUrl } from "@t3tools/client-runtime/state/assets";
+import {
+  executeAtomQuery,
+  runAtomCommand,
+  squashAtomCommandFailure,
+} from "@t3tools/client-runtime/state/runtime";
 import {
   type ComposerFileAttachment,
+  type ComposerImageAttachment,
   type ComposerThreadDraftState,
   type PersistedComposerFileAttachment,
   type PersistedComposerImageAttachment,
@@ -32,7 +44,7 @@ import { type PendingUserInput } from "../../session-logic";
 import { type ReviewCommentContext } from "../../reviewCommentContext";
 import { collapseExpandedComposerCursor } from "../../composer-logic";
 import { collectComposerPromptInlineTokens } from "../../composer-editor-mentions";
-import { compressImageForStash } from "../../lib/imageCompression";
+import { compressImageForStash, readFileAsDataUrl } from "../../lib/imageCompression";
 import { formatInlineContextReference } from "~/lib/composerContextReferences";
 import { isCommandPaletteOpen } from "../../commandPaletteBus";
 import { pendingDraftWork } from "./pendingDraftWork";
@@ -45,11 +57,24 @@ import {
 } from "~/lib/composerContextRecords";
 import { randomUUID } from "~/lib/utils";
 import {
+  adoptAttachmentUpload,
+  forgetAttachmentUpload,
   readAttachmentUpload,
   releaseAttachmentUpload,
   releasePersistedAttachmentUpload,
   verifyStashedAttachmentUpload,
 } from "../../lib/attachmentUploadQueue";
+import { serverStashSummariesAtom } from "../../promptStash/serverStashSummaries";
+import {
+  mergeStashMenuItems,
+  stashMenuItemId,
+  type StashMenuItem,
+} from "../../promptStash/promptStashSync.logic";
+import { serverStashAccess } from "../../promptStash/promptStashSync";
+import { appAtomRegistry } from "../../rpc/atomRegistry";
+import { assetEnvironment } from "../../state/assets";
+import { promptStashCommands } from "../../state/promptStash";
+import { readPreparedConnection } from "../../state/session";
 import { remainingComposerAttachmentSlots } from "./composerThreadImport";
 import { composerImageDedupKey } from "./composerAttachmentFiles";
 import { replaceComposerContextReferences } from "@t3tools/shared/composerContextReferences";
@@ -70,6 +95,63 @@ import {
 import { BackgroundThreadContext } from "./backgroundThread";
 import { isInSideChatPane } from "../../lib/sideChatPane";
 import { useStableCallback } from "../../hooks/useStableCallback";
+
+type ServerStashMenuItem = Extract<StashMenuItem, { readonly kind: "server" }>;
+
+function errorTag(error: unknown): unknown {
+  return typeof error === "object" && error !== null && "_tag" in error ? error._tag : undefined;
+}
+
+function promptStashErrorReason(error: unknown): unknown {
+  return errorTag(error) === "PromptStashError" &&
+    typeof error === "object" &&
+    error !== null &&
+    "reason" in error
+    ? error.reason
+    : undefined;
+}
+
+/** A typed reply from the server; anything else may not have reached it. */
+function isServerReply(error: unknown): boolean {
+  const tag = errorTag(error);
+  return tag === "PromptStashError" || tag === "EnvironmentAuthorizationError";
+}
+
+/** The image's bytes from the server, for the composer preview its draft keeps. */
+async function downloadStashedImage(
+  environmentId: EnvironmentId,
+  attachment: PromptStashAttachment,
+): Promise<PersistedComposerImageAttachment | null> {
+  try {
+    const minted = await executeAtomQuery(
+      appAtomRegistry,
+      assetEnvironment.createUrl({
+        environmentId,
+        input: { resource: { _tag: "attachment", attachmentId: attachment.attachmentId } },
+      }),
+      { refresh: true, reportFailure: false },
+    );
+    const connection = readPreparedConnection(environmentId);
+    const url =
+      minted._tag === "Success" && connection
+        ? resolveAssetUrl(connection.httpBaseUrl, minted.value.relativeUrl)
+        : null;
+    if (!url) return null;
+    const response = await fetch(url);
+    if (!response.ok) return null;
+    const dataUrl = await readFileAsDataUrl(await response.blob());
+    return {
+      id: attachment.id,
+      name: attachment.name,
+      mimeType: attachment.mimeType,
+      sizeBytes: attachment.sizeBytes,
+      dataUrl,
+      ...(attachment.source && "kind" in attachment.source ? { source: attachment.source } : {}),
+    };
+  } catch {
+    return null;
+  }
+}
 
 /**
  * The prompt stash: saving the draft aside, restoring or deleting an entry, the badge pulse,
@@ -158,6 +240,8 @@ export function useComposerStash(input: {
   const stashInFlightRef = useRef<Set<string>>(new Set());
 
   const stashQueue = usePromptStashStore((state) => state.entries);
+  const serverStashSummaries = useAtomValue(serverStashSummariesAtom);
+  const stashItems = mergeStashMenuItems(stashQueue, serverStashSummaries);
   const stashEntryToQueue = usePromptStashStore((state) => state.stashEntry);
   const takeStashEntry = usePromptStashStore((state) => state.takeEntry);
   const finalizeStashEntryImages = usePromptStashStore((state) => state.finalizeEntryImages);
@@ -183,14 +267,18 @@ export function useComposerStash(input: {
     return false;
   });
 
-  const restoreStashEntry = async (menuEntry: PromptStashEntry) => {
+  const refuseOtherEnvironment = () => {
+    toastManager.add({
+      type: "error",
+      title: m(msg("Stashed files belong to another environment")),
+      description: m(msg("Restore this prompt in the environment that received its files.")),
+    });
+  };
+
+  const restoreLocalStashEntry = async (menuEntry: PromptStashEntry) => {
     const filesToVerify = menuEntry.files ?? [];
     if (filesToVerify.some((file) => file.environmentId !== environmentId)) {
-      toastManager.add({
-        type: "error",
-        title: m(msg("Stashed files belong to another environment")),
-        description: m(msg("Restore this prompt in the environment that received its files.")),
-      });
+      refuseOtherEnvironment();
       return;
     }
     if (refuseMachinesInAnswer(menuEntry)) return;
@@ -236,7 +324,159 @@ export function useComposerStash(input: {
         data: { hideCopyButton: true },
       });
     }
+    applyRestoredEntry(entry, { durable, expiredAttachmentIds });
+  };
 
+  const restoreServerStashEntry = async (item: ServerStashMenuItem) => {
+    if (item.environmentId !== environmentId) {
+      refuseOtherEnvironment();
+      return;
+    }
+    if (
+      isRevertingCheckpoint() ||
+      !isComposerDraftTargetOpen(composerTargetKey(composerDraftTarget))
+    ) {
+      return;
+    }
+    setIsStashMenuOpen(false);
+    const cannotReach = () =>
+      toastManager.add({
+        type: "error",
+        title: m(msg("Can't reach the server to take this stashed prompt")),
+      });
+    if (serverStashAccess(environmentId) === "unavailable") {
+      cannotReach();
+      return;
+    }
+
+    // The same request id makes a retry after a lost reply return the first take's result.
+    const requestId = randomUUID();
+    const take = () =>
+      runAtomCommand(
+        appAtomRegistry,
+        promptStashCommands.take,
+        { environmentId, input: { entryId: item.summary.id, requestId } },
+        { reportFailure: false },
+      );
+    let result = await take();
+    if (result._tag === "Failure" && !isServerReply(squashAtomCommandFailure(result))) {
+      result = await take();
+    }
+    if (result._tag === "Failure") {
+      const error = squashAtomCommandFailure(result);
+      const reason = promptStashErrorReason(error);
+      if (reason === "already-taken" || reason === "not-found") {
+        toastManager.add({
+          type: "info",
+          title: m(msg("This prompt was already taken on another device")),
+        });
+      } else if (!isServerReply(error)) {
+        cannotReach();
+      } else {
+        toastManager.add({
+          type: "error",
+          title: m(msg("Could not take this stashed prompt")),
+          description: errorDisplayMessage(error, m) ?? undefined,
+        });
+      }
+      return;
+    }
+
+    const taken = result.value;
+    const stashedImages = taken.attachments.filter((attachment) => attachment.type === "image");
+    const downloads = await Promise.all(
+      stashedImages.map((attachment) => downloadStashedImage(environmentId, attachment)),
+    );
+    const undownloadedImageNames: string[] = [];
+    stashedImages.forEach((attachment, index) => {
+      if (downloads[index]) return;
+      undownloadedImageNames.push(attachment.name);
+      releasePersistedAttachmentUpload({
+        id: attachment.id,
+        environmentId,
+        attachmentId: attachment.attachmentId,
+      });
+    });
+    applyRestoredEntry(
+      {
+        id: taken.id,
+        createdAt: taken.createdAt,
+        prompt: taken.prompt,
+        attachments: downloads.filter((image) => image !== null),
+        files: taken.attachments.flatMap((attachment) =>
+          attachment.type === "file"
+            ? [
+                {
+                  id: attachment.id,
+                  name: attachment.name,
+                  mimeType: attachment.mimeType,
+                  sizeBytes: attachment.sizeBytes,
+                  attachmentId: attachment.attachmentId,
+                  environmentId,
+                  ...(attachment.source && "_tag" in attachment.source
+                    ? { source: attachment.source }
+                    : {}),
+                },
+              ]
+            : [],
+        ),
+        droppedImageNames: taken.droppedImageNames,
+        unreadableImageNames: taken.unreadableImageNames,
+        records: taken.records,
+      },
+      {
+        durable: true,
+        expiredAttachmentIds: new Set(),
+        uploadedImageIds: new Map(
+          stashedImages.flatMap((attachment, index) =>
+            downloads[index] ? [[attachment.id, attachment.attachmentId] as const] : [],
+          ),
+        ),
+        droppedFileNames: taken.droppedFileNames,
+        undownloadedImageNames,
+      },
+    );
+  };
+
+  const adoptServerImageUploads = (
+    restored: ReadonlyArray<ComposerImageAttachment>,
+    uploads: ReadonlyMap<string, string>,
+  ) => {
+    const restoredIds = new Set(restored.map((image) => image.id));
+    for (const [imageId, attachmentId] of uploads) {
+      if (restoredIds.has(imageId)) {
+        adoptAttachmentUpload({ imageId, environmentId, attachmentId });
+        continue;
+      }
+      const held = readAttachmentUpload(imageId);
+      if (held?.status === "ready" && held.attachmentId === attachmentId) continue;
+      releasePersistedAttachmentUpload({ id: imageId, environmentId, attachmentId });
+    }
+  };
+
+  const restoreStashEntry = (item: StashMenuItem) =>
+    item.kind === "local" ? restoreLocalStashEntry(item.entry) : restoreServerStashEntry(item);
+
+  const applyRestoredEntry = (
+    entry: PromptStashEntry,
+    options: {
+      readonly durable: boolean;
+      readonly expiredAttachmentIds: ReadonlySet<string>;
+      /** Composer image id to the server upload it already has, so it is not uploaded again. */
+      readonly uploadedImageIds?: ReadonlyMap<string, string>;
+      readonly droppedFileNames?: ReadonlyArray<string>;
+      readonly undownloadedImageNames?: ReadonlyArray<string>;
+    },
+  ) => {
+    const { durable, expiredAttachmentIds } = options;
+    // A server take cannot be undone, so after a thread switch during it the prompt still lands
+    // in the draft it was taken for, without touching the composer now on screen.
+    const live = isComposerDraftTargetOpen(composerTargetKey(composerDraftTarget));
+    const readTargetAttachments = (): Pick<ComposerThreadDraftState, "images" | "files"> => {
+      if (live) return readAttachmentDraft();
+      const draft = getComposerDraft(composerDraftTarget);
+      return { images: draft?.images ?? [], files: draft?.files ?? [] };
+    };
     const rewrittenContextIds = entry.records
       ? importContextRecords(entry.records, null, composerDraftTarget)
       : new Map<string, string>();
@@ -261,7 +501,9 @@ export function useComposerStash(input: {
           })
         : reference.source;
     });
-    const currentPrompt = promptRef.current;
+    const currentPrompt = live
+      ? promptRef.current
+      : (getComposerDraft(composerDraftTarget)?.prompt ?? "");
     const nextPrompt =
       restoredPrompt.length === 0
         ? currentPrompt
@@ -270,18 +512,20 @@ export function useComposerStash(input: {
           : restoredPrompt;
     let promptChanged = nextPrompt !== currentPrompt;
     if (promptChanged) {
-      promptRef.current = nextPrompt;
+      if (live) promptRef.current = nextPrompt;
       setComposerDraftPrompt(composerDraftTarget, nextPrompt);
-      setComposerCursor(collapseExpandedComposerCursor(nextPrompt, nextPrompt.length));
-      setComposerTrigger(null);
+      if (live) {
+        setComposerCursor(collapseExpandedComposerCursor(nextPrompt, nextPrompt.length));
+        setComposerTrigger(null);
+      }
     }
 
     let unrestoredFileNames: string[] = [];
-    const expiredFileNames: string[] = [];
+    const expiredFileNames: string[] = [...(options.droppedFileNames ?? [])];
     let restoredFileCount = 0;
     const stashedFiles = entry.files ?? [];
     if (stashedFiles.length > 0) {
-      const composerFilesNow = readAttachmentDraft().files;
+      const composerFilesNow = readTargetAttachments().files;
       const existingFileIds = new Set(composerFilesNow.map((file) => file.id));
       const retainedUploadIds = new Set(
         composerFilesNow.flatMap((file) =>
@@ -347,7 +591,7 @@ export function useComposerStash(input: {
         appendedFiles.push(restored);
       }
       const capacity = remainingComposerAttachmentSlots(
-        readAttachmentDraft().images.length + composerFilesNow.length,
+        readTargetAttachments().images.length + composerFilesNow.length,
         pendingThreadImportsRef.current.get(composerTargetKey(composerDraftTarget)) ?? 0,
       );
       const filesToAppend = appendedFiles.slice(0, capacity);
@@ -377,7 +621,7 @@ export function useComposerStash(input: {
       if (restoredFiles.length > 0) {
         addComposerDraftFiles(composerDraftTarget, restoredFiles, { appendReference: true });
         const restoredFilePrompt = getComposerDraft(composerDraftTarget)?.prompt;
-        if (restoredFilePrompt !== undefined && restoredFilePrompt !== promptRef.current) {
+        if (live && restoredFilePrompt !== undefined && restoredFilePrompt !== promptRef.current) {
           promptRef.current = restoredFilePrompt;
           setComposerCursor(
             collapseExpandedComposerCursor(restoredFilePrompt, restoredFilePrompt.length),
@@ -391,7 +635,7 @@ export function useComposerStash(input: {
 
     let unrestoredImageNames: string[] = [];
     if (entry.attachments.length > 0) {
-      const attachmentDraft = readAttachmentDraft();
+      const attachmentDraft = readTargetAttachments();
       const existingIds = new Set(attachmentDraft.images.map((image) => image.id));
       // Filter on the draft store's dedupe key here. Counting a duplicate
       // against capacity would burn a slot the store then refuses to fill,
@@ -407,6 +651,9 @@ export function useComposerStash(input: {
       );
       unrestoredImageNames = pending.slice(capacity).map((image) => image.name);
       const restoredImages = pending.slice(0, capacity);
+      if (options.uploadedImageIds) {
+        adoptServerImageUploads(restoredImages, options.uploadedImageIds);
+      }
       if (restoredImages.length > 0) {
         addComposerDraftImages(composerDraftTarget, restoredImages);
       }
@@ -418,6 +665,15 @@ export function useComposerStash(input: {
         m(
           msg("{names} exceeded the stash size limit when this prompt was saved.", {
             names: entry.droppedImageNames.join(", "),
+          }),
+        ),
+      );
+    }
+    if (options.undownloadedImageNames && options.undownloadedImageNames.length > 0) {
+      missingImageReasons.push(
+        m(
+          msg("{names} could not be downloaded from the server.", {
+            names: options.undownloadedImageNames.join(", "),
           }),
         ),
       );
@@ -469,7 +725,7 @@ export function useComposerStash(input: {
       });
     }
 
-    if (promptChanged) {
+    if (promptChanged && live) {
       window.requestAnimationFrame(() => {
         composerEditorRef.current?.focusAtEnd();
       });
@@ -477,11 +733,31 @@ export function useComposerStash(input: {
   };
   const restoreStashEntryStable = useStableCallback(restoreStashEntry);
 
-  const deleteStashEntry = (entry: PromptStashEntry) => {
-    const { entry: removed, durable } = takeStashEntry(entry.id);
-    if (!stashQueue.some((candidate) => candidate.id !== entry.id)) {
+  const deleteServerStashEntry = async (item: ServerStashMenuItem) => {
+    const result = await runAtomCommand(
+      appAtomRegistry,
+      promptStashCommands.remove,
+      { environmentId: item.environmentId, input: { entryId: item.summary.id } },
+      { reportFailure: false },
+    );
+    if (result._tag === "Success") return;
+    toastManager.add({
+      type: "error",
+      title: m(msg("Could not delete this stashed prompt")),
+      description: errorDisplayMessage(squashAtomCommandFailure(result), m) ?? undefined,
+    });
+  };
+
+  const deleteStashEntry = (item: StashMenuItem) => {
+    const itemId = stashMenuItemId(item);
+    if (!stashItems.some((candidate) => stashMenuItemId(candidate) !== itemId)) {
       setIsStashMenuOpen(false);
     }
+    if (item.kind === "server") {
+      void deleteServerStashEntry(item);
+      return;
+    }
+    const { entry: removed, durable } = takeStashEntry(item.entry.id);
     if (durable && removed) {
       for (const file of removed.files ?? []) {
         releasePersistedAttachmentUpload({
@@ -540,10 +816,13 @@ export function useComposerStash(input: {
       ),
     ];
     if (prompt.length === 0 && images.length === 0 && files.length === 0) {
-      const entries = usePromptStashStore.getState().entries;
-      const entry = entries.length === 1 ? entries[0] : undefined;
-      if (entry && !entry.pendingImageCount) {
-        await restoreStashEntry(entry);
+      const items = mergeStashMenuItems(
+        usePromptStashStore.getState().entries,
+        appAtomRegistry.get(serverStashSummariesAtom),
+      );
+      const item = items.length === 1 ? items[0] : undefined;
+      if (item && !(item.kind === "local" && item.entry.pendingImageCount)) {
+        await restoreStashEntry(item);
       } else {
         setIsStashMenuOpen((open) => !open);
       }
@@ -597,15 +876,98 @@ export function useComposerStash(input: {
     stashInFlightRef.current.add(snapshotKey);
 
     const stashTarget = composerDraftTarget;
+    // The local fallback reuses the id, so an entry the server stored despite a lost reply
+    // syncs onto it instead of showing twice.
     const entryId = randomUUID();
+    const createdAt = new Date().toISOString();
+
+    const clearStashedComposer = (releaseImageUpload: (imageId: string) => void) => {
+      promptRef.current = "";
+      clearComposerDraftPromptAndImages(stashTarget);
+      clearComposerDraftTerminalContexts(stashTarget);
+      setComposerDraftThreadContexts(stashTarget, []);
+      setComposerDraftEnvironmentContexts(stashTarget, []);
+      setComposerDraftReplyTo(stashTarget, null);
+      for (const comment of composerReviewComments) {
+        removeComposerDraftReviewComment(stashTarget, comment.id);
+      }
+      for (const annotation of composerPreviewAnnotations) {
+        releaseAttachmentUpload(annotation.id);
+        removeComposerDraftPreviewAnnotation(stashTarget, annotation.id);
+      }
+      setComposerDraftPrompt(stashTarget, "");
+      for (const image of images) {
+        releaseImageUpload(image.id);
+      }
+      setComposerCursor(0);
+      setComposerTrigger(null);
+      pulseStashBadge();
+    };
+
+    const announceEvicted = (max: number) => {
+      toastManager.add({
+        type: "warning",
+        title: m(msg("Oldest stashed prompt discarded")),
+        description: m(
+          msg("The stash holds {max} prompts; the oldest was removed to make room.", { max }),
+        ),
+        data: { hideCopyButton: true },
+      });
+    };
+
+    // The composer already uploaded every image and file, so the server stash keeps those uploads.
+    const putToServerStash = async (): Promise<boolean> => {
+      if (serverStashAccess(environmentId) !== "writable") return false;
+      const attachments: PromptStashPutInput["attachments"][number][] = [];
+      for (const attachment of [...images, ...files]) {
+        const upload = readAttachmentUpload(attachment.id);
+        if (upload?.status !== "ready" || upload.environmentId !== environmentId) return false;
+        attachments.push({
+          type: attachment.type,
+          id: attachment.id,
+          attachmentId: upload.attachmentId,
+          name: attachment.name,
+          mimeType: attachment.mimeType,
+          sizeBytes: attachment.sizeBytes,
+          ...(attachment.source ? { source: attachment.source } : {}),
+        });
+      }
+      const result = await runAtomCommand(
+        appAtomRegistry,
+        promptStashCommands.put,
+        {
+          environmentId,
+          input: {
+            id: entryId,
+            createdAt,
+            prompt,
+            attachments,
+            droppedImageNames: [],
+            unreadableImageNames: [],
+            droppedFileNames: [],
+            records: stashedRecords,
+          },
+        },
+        { reportFailure: false },
+      );
+      if (result._tag === "Failure") {
+        console.warn("Prompt stash put failed; stashing locally", squashAtomCommandFailure(result));
+        return false;
+      }
+      clearStashedComposer(forgetAttachmentUpload);
+      if (result.value.evictedIds.length > 0) announceEvicted(PROMPT_STASH_MAX_ENTRIES);
+      return true;
+    };
+
     const stashAndEncode = async () => {
+      if (await putToServerStash()) return;
       // Ordering matters in both directions: writing before clearing means a
       // crash or closed tab mid-encode still leaves the prompt recoverable,
       // while clearing before the async image work means edits typed during
       // encoding are not wiped.
       const { evicted, written, durable } = stashEntryToQueue({
         id: entryId,
-        createdAt: new Date().toISOString(),
+        createdAt,
         prompt,
         attachments: [],
         ...(stashedFiles.length > 0 ? { files: stashedFiles } : {}),
@@ -644,26 +1006,7 @@ export function useComposerStash(input: {
         });
       }
 
-      promptRef.current = "";
-      clearComposerDraftPromptAndImages(stashTarget);
-      clearComposerDraftTerminalContexts(stashTarget);
-      setComposerDraftThreadContexts(stashTarget, []);
-      setComposerDraftEnvironmentContexts(stashTarget, []);
-      setComposerDraftReplyTo(stashTarget, null);
-      for (const comment of composerReviewComments) {
-        removeComposerDraftReviewComment(stashTarget, comment.id);
-      }
-      for (const annotation of composerPreviewAnnotations) {
-        releaseAttachmentUpload(annotation.id);
-        removeComposerDraftPreviewAnnotation(stashTarget, annotation.id);
-      }
-      setComposerDraftPrompt(stashTarget, "");
-      for (const image of images) {
-        releaseAttachmentUpload(image.id);
-      }
-      setComposerCursor(0);
-      setComposerTrigger(null);
-      pulseStashBadge();
+      clearStashedComposer(releaseAttachmentUpload);
 
       if (evicted) {
         for (const file of evicted.files ?? []) {
@@ -673,16 +1016,7 @@ export function useComposerStash(input: {
             attachmentId: file.attachmentId,
           });
         }
-        toastManager.add({
-          type: "warning",
-          title: m(msg("Oldest stashed prompt discarded")),
-          description: m(
-            msg("The stash holds {max} prompts; the oldest was removed to make room.", {
-              max: MAX_STASH_ENTRIES,
-            }),
-          ),
-          data: { hideCopyButton: true },
-        });
+        announceEvicted(MAX_STASH_ENTRIES);
       }
 
       // Images are re-encoded for the stash rather than stored verbatim: the
@@ -807,7 +1141,7 @@ export function useComposerStash(input: {
   }, [backgroundThread, handleStashShortcut, readShortcutContext]);
 
   return {
-    stashQueue,
+    stashItems,
     isStashMenuOpen,
     setIsStashMenuOpen,
     stashPulseKey,

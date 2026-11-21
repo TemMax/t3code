@@ -40,6 +40,15 @@ function writableEnvironmentIds(get: Get): EnvironmentId[] {
   );
 }
 
+/** Whether the composer can put to this environment's stash now, or at least take from it. */
+export function serverStashAccess(
+  environmentId: EnvironmentId,
+): "writable" | "connected" | "unavailable" {
+  const get: Get = (atom) => appAtomRegistry.get(atom);
+  if (!connectedStashEnvironmentIds(get).includes(environmentId)) return "unavailable";
+  return get(promptStashCommands.put.permissionAtom(environmentId)) ? "writable" : "connected";
+}
+
 // A string, so an unrelated presentation change leaves the subscription quiet.
 const writableEnvironmentsKeyAtom = Atom.make((get) =>
   writableEnvironmentIds(get).toSorted().join("\n"),

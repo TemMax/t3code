@@ -4,11 +4,19 @@ import {
   EnvironmentId,
   IssueTrackerKind,
   ORCHESTRATION_V2_WS_METHODS,
+  PromptStashError,
   RunId,
   ThreadId,
   WS_METHODS,
   type IssueDetail,
   type IssueRef,
+  type PromptStashEntry,
+  type PromptStashPutInput,
+  type PromptStashSummary,
+  type PromptStashTakeInput,
+  type ServerConfig,
+  type ServerConfigPromptStashUpdatedPayload,
+  type ServerConfigStreamEvent,
   type ThreadIssueLink,
 } from "@t3tools/contracts";
 import { DEFAULT_CLIENT_SETTINGS } from "@t3tools/contracts/settings";
@@ -18,6 +26,7 @@ import {
 } from "@t3tools/shared/keybindings";
 import type * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
+import type { Queue as EffectQueue } from "effect/Queue";
 import { expect, it, vi } from "vite-plus/test";
 import { cdp, page, userEvent } from "vite-plus/test/browser";
 
@@ -29,6 +38,7 @@ import { DraftId, useComposerDraftStore } from "~/composerDraftStore";
 import { selectThreadDiffPanelSelection, useDiffPanelStore } from "~/diffPanelStore";
 import { __setClientSettingsForTests } from "~/hooks/useSettings";
 import stylesheet from "~/index.css?inline";
+import { useAttachmentUploadStore } from "~/lib/attachmentUploadQueue";
 import { environmentContextRecord } from "~/lib/composerContextRecords";
 import { startWorkspaceFocus } from "~/lib/workspaceFocus";
 import { usePromptStashStore } from "~/promptStashStore";
@@ -102,15 +112,147 @@ function holdRpc<Input>(method: string, end: Effect.Effect<never, Error>) {
   return { calls, release, [Symbol.dispose]: () => answer[Symbol.dispose]() };
 }
 
-// The socket is the only fake layer; see test/appScenarios.renders.tsx.
+// Read by the driver mock below; `serveServerStash` sets it and resets it on dispose.
+const serverStash = vi.hoisted(() => ({
+  enabled: false,
+  summaries: [] as ReadonlyArray<PromptStashSummary>,
+  publish: (_event: ServerConfigStreamEvent) => {},
+}));
+
+// The socket is the only fake layer; see test/appScenarios.renders.tsx. A served stash adds the
+// prompt stash capability and its updates to the environment's config stream.
 vi.mock("../../../../packages/client-runtime/src/connection/driver.ts", async (importOriginal) => {
-  const [actual, { fakeDriver }, Layer] = await Promise.all([
+  const [actual, { fakeDriver }, Layer, Effect, Stream, Queue] = await Promise.all([
     importOriginal<{ readonly ConnectionDriver: Context.Key<unknown, FakeDriver> }>(),
     import("../../test/fakeEnvironment"),
     import("effect/Layer"),
+    import("effect/Effect"),
+    import("effect/Stream"),
+    import("effect/Queue"),
   ]);
-  return { ...actual, layer: Layer.succeed(actual.ConnectionDriver, fakeDriver) };
+  const subscribers = new Set<EffectQueue<ServerConfigStreamEvent>>();
+  serverStash.publish = (event) => {
+    for (const queue of subscribers) Queue.offerUnsafe(queue, event);
+  };
+  const stashUpdates = Stream.unwrap(
+    Effect.gen(function* () {
+      const queue = yield* Queue.unbounded<ServerConfigStreamEvent>();
+      subscribers.add(queue);
+      yield* Effect.addFinalizer(() => Effect.sync(() => subscribers.delete(queue)));
+      return Stream.fromQueue(queue);
+    }),
+  );
+  const withStash = (config: ServerConfig): ServerConfig =>
+    serverStash.enabled
+      ? {
+          ...config,
+          environment: {
+            ...config.environment,
+            capabilities: { ...config.environment.capabilities, promptStash: true },
+          },
+          promptStash: serverStash.summaries,
+        }
+      : config;
+  const driver: FakeDriver = {
+    ...fakeDriver,
+    connect: (entry) =>
+      fakeDriver.connect(entry).pipe(
+        Effect.map((lease) => ({
+          ...lease,
+          session: {
+            ...lease.session,
+            initialConfig: lease.session.initialConfig.pipe(Effect.map(withStash)),
+            subscribeServerConfig: (input) =>
+              Stream.merge(
+                lease.session
+                  .subscribeServerConfig(input)
+                  .pipe(
+                    Stream.map((event) =>
+                      event.type === "snapshot"
+                        ? { ...event, config: withStash(event.config) }
+                        : event,
+                    ),
+                  ),
+                stashUpdates,
+              ),
+          },
+        })),
+      ),
+  };
+  return { ...actual, layer: Layer.succeed(actual.ConnectionDriver, driver) };
 });
+
+/**
+ * Serves a prompt stash holding `initial` until disposed. Put moves `pending-*` ids to `stash-*`
+ * and take moves them back, like the server. Call before `installFakeEnvironment`, whose config
+ * snapshot carries the capability.
+ */
+function serveServerStash(initial: ReadonlyArray<PromptStashEntry> = []) {
+  let entries = [...initial];
+  const toSummary = ({ records: _records, ...summary }: PromptStashEntry): PromptStashSummary =>
+    summary;
+  const relabel = (entry: PromptStashEntry, from: string, to: string): PromptStashEntry => ({
+    ...entry,
+    attachments: entry.attachments.map((attachment) => ({
+      ...attachment,
+      attachmentId: attachment.attachmentId.replace(from, to),
+    })),
+  });
+  const publish = (
+    payload: Omit<ServerConfigPromptStashUpdatedPayload, "removedIds"> & {
+      readonly removedIds?: ReadonlyArray<string>;
+    },
+  ) => {
+    serverStash.summaries = entries.map(toSummary);
+    serverStash.publish({
+      version: 1,
+      type: "promptStashUpdated",
+      payload: { removedIds: [], ...payload },
+    });
+  };
+  serverStash.enabled = true;
+  publish({ upserted: entries.map(toSummary), replace: true });
+  const puts: PromptStashPutInput[] = [];
+  const takes: PromptStashTakeInput[] = [];
+  const put = answerRpc(WS_METHODS.promptStashPut, (input: PromptStashPutInput) =>
+    Effect.sync(() => {
+      puts.push(input);
+      const stored = relabel(input, "pending-", "stash-");
+      entries = [stored, ...entries];
+      publish({ upserted: [toSummary(stored)], replace: false });
+      return { summary: toSummary(stored), evictedIds: [] };
+    }),
+  );
+  const take = answerRpc(WS_METHODS.promptStashTake, (input: PromptStashTakeInput) =>
+    Effect.suspend(() => {
+      takes.push(input);
+      const entry = entries.find((candidate) => candidate.id === input.entryId);
+      if (!entry) {
+        return Effect.fail(
+          new PromptStashError({ reason: "already-taken", detail: `${input.entryId} is gone` }),
+        );
+      }
+      entries = entries.filter((candidate) => candidate !== entry);
+      publish({ upserted: [], removedIds: [entry.id], replace: false });
+      return Effect.succeed(relabel(entry, "stash-", "pending-"));
+    }),
+  );
+  return {
+    puts,
+    takes,
+    /** Another device took the entry: this one still lists it, the server no longer has it. */
+    takeElsewhere: (entryId: string) => {
+      entries = entries.filter((entry) => entry.id !== entryId);
+    },
+    [Symbol.dispose]: () => {
+      put[Symbol.dispose]();
+      take[Symbol.dispose]();
+      entries = [];
+      publish({ upserted: [], replace: true });
+      serverStash.enabled = false;
+    },
+  };
+}
 
 vi.mock(import("~/rpc/requestLatencyState"), async (original) => ({
   ...(await original()),
@@ -361,6 +503,134 @@ it("a question that opens while a stashed file is checked keeps a machine stash"
   );
   expect(usePromptStashStore.getState().entries).toHaveLength(1);
   usePromptStashStore.getState().takeEntry("stash-late-question");
+});
+
+it("stashes to the server and restores with uploaded images", async () => {
+  const thread = threadWithHistory("thread-stash-server", 1);
+  using stash = serveServerStash();
+  using _environment = installFakeEnvironment([thread]);
+  __setClientSettingsForTests({
+    ...DEFAULT_CLIENT_SETTINGS,
+    onboardingCompletedAt: "2026-01-01T00:00:00.000Z",
+  });
+  const router = getRouter(
+    createMemoryHistory({ initialEntries: [`/${ENVIRONMENT_ID}/${thread.id}`] }),
+  );
+  await router.load();
+  await using _app = await render(<AppRoot router={router} />, {
+    // AppRoot brings its own router.
+    router: false,
+  });
+  const mints: unknown[] = [];
+  using _mint = answerRpc(WS_METHODS.attachmentsCreateUploadUrl, (input: unknown) => {
+    mints.push(input);
+    return Effect.succeed({ attachmentId: "pending-shot", relativeUrl: "/upload", expiresAt: 0 });
+  });
+  const deletes: unknown[] = [];
+  using _delete = answerRpc(WS_METHODS.attachmentsDelete, (input: unknown) => {
+    deletes.push(input);
+    return Effect.void;
+  });
+  const imageUrl = URL.createObjectURL(new Blob([PNG], { type: "image/png" }));
+  using _imageUrl = { [Symbol.dispose]: () => URL.revokeObjectURL(imageUrl) };
+  using _assetUrls = answerRpc(WS_METHODS.assetsCreateUrl, () =>
+    Effect.succeed({ relativeUrl: imageUrl, expiresAt: 4_102_444_800_000 }),
+  );
+  using _status = vi.spyOn(XMLHttpRequest.prototype, "status", "get").mockReturnValue(200);
+  using _send = vi.spyOn(XMLHttpRequest.prototype, "send").mockImplementation(function (
+    this: XMLHttpRequest,
+  ) {
+    queueMicrotask(() => this.dispatchEvent(new ProgressEvent("load")));
+  });
+  await expect.element(page.getByText(`Answer 0 for ${thread.id}.`)).toBeVisible();
+
+  const editor = page.getByTestId("composer-editor");
+  const image = page.getByRole("img", { name: "shot.png" });
+  await userEvent.click(editor);
+  const clipboardData = new DataTransfer();
+  clipboardData.items.add(new File([PNG], "shot.png", { type: "image/png" }));
+  editor
+    .element()
+    .dispatchEvent(new ClipboardEvent("paste", { clipboardData, bubbles: true, cancelable: true }));
+  await expect.element(image).toBeVisible();
+  await insertText("Look at this");
+  await vi.waitFor(() =>
+    expect(Object.values(useAttachmentUploadStore.getState().uploadsByImageId)).toContainEqual(
+      expect.objectContaining({ status: "ready", attachmentId: "pending-shot" }),
+    ),
+  );
+  await userEvent.keyboard("{ControlOrMeta>}s{/ControlOrMeta}");
+
+  await expect.element(image).not.toBeInTheDocument();
+  const stashed = stash.puts.find((input) => input.prompt.includes("Look at this"));
+  expect(stashed?.attachments).toEqual([
+    expect.objectContaining({ type: "image", name: "shot.png", attachmentId: "pending-shot" }),
+  ]);
+  expect(usePromptStashStore.getState().entries).toEqual([]);
+  const composerImageId = stashed!.attachments[0]!.id;
+  expect(useAttachmentUploadStore.getState().uploadsByImageId[composerImageId]).toBeUndefined();
+
+  await userEvent.click(page.getByRole("button", { name: /^Stashed prompts/ }));
+  await userEvent.click(
+    page.getByRole("button", { name: /^Restore stashed prompt: Look at this/ }),
+  );
+
+  await expect.element(image).toBeVisible();
+  expect(stash.takes).toEqual([expect.objectContaining({ entryId: stashed!.id })]);
+  await vi.waitFor(() => expect(editor.element().textContent).toContain("Look at this"));
+  expect(useAttachmentUploadStore.getState().uploadsByImageId[composerImageId]).toEqual({
+    status: "ready",
+    environmentId: ENVIRONMENT_ID,
+    attachmentId: "pending-shot",
+  });
+  expect(mints).toHaveLength(1);
+  expect(deletes).not.toContainEqual(expect.objectContaining({ attachmentId: "pending-shot" }));
+});
+
+it("a prompt taken on another device shows a toast and leaves the composer alone", async () => {
+  const thread = threadWithHistory("thread-stash-taken", 1);
+  using stash = serveServerStash([
+    {
+      id: "stash-taken-elsewhere",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      prompt: "Taken elsewhere",
+      attachments: [],
+      droppedImageNames: [],
+      unreadableImageNames: [],
+      droppedFileNames: [],
+      records: [],
+    },
+  ]);
+  using _environment = installFakeEnvironment([thread]);
+  __setClientSettingsForTests({
+    ...DEFAULT_CLIENT_SETTINGS,
+    onboardingCompletedAt: "2026-01-01T00:00:00.000Z",
+  });
+  const router = getRouter(
+    createMemoryHistory({ initialEntries: [`/${ENVIRONMENT_ID}/${thread.id}`] }),
+  );
+  await router.load();
+  await using _app = await render(<AppRoot router={router} />, {
+    // AppRoot brings its own router.
+    router: false,
+  });
+  await expect.element(page.getByText(`Answer 0 for ${thread.id}.`)).toBeVisible();
+  const editor = page.getByTestId("composer-editor");
+  await userEvent.click(editor);
+  await insertText("Keep me");
+  stash.takeElsewhere("stash-taken-elsewhere");
+
+  await userEvent.click(page.getByRole("button", { name: /^Stashed prompts/ }));
+  await userEvent.click(
+    page.getByRole("button", { name: "Restore stashed prompt: Taken elsewhere" }),
+  );
+
+  await expect
+    .element(page.getByText("This prompt was already taken on another device"))
+    .toBeVisible();
+  expect(stash.takes).toHaveLength(1);
+  expect(editor.element().textContent).toContain("Keep me");
+  expect(editor.element().textContent).not.toContain("Taken elsewhere");
 });
 
 it("a new draft does not load its reserved thread before the server lists it", async () => {

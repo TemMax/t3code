@@ -1,4 +1,4 @@
-import type { EnvironmentId } from "@t3tools/contracts";
+import type { EnvironmentId, PromptStashSummary } from "@t3tools/contracts";
 
 import type { PromptStashEntry } from "../promptStashStore";
 
@@ -38,4 +38,44 @@ export function applyPutOutcome(
   outcome: "stored" | "already-taken" | "failed",
 ): string[] {
   return outcome === "failed" ? [] : [id];
+}
+
+export type StashMenuItem =
+  | { readonly kind: "local"; readonly entry: PromptStashEntry }
+  | {
+      readonly kind: "server";
+      readonly environmentId: EnvironmentId;
+      readonly summary: PromptStashSummary;
+    };
+
+export function stashMenuItemId(item: StashMenuItem): string {
+  return item.kind === "local" ? item.entry.id : item.summary.id;
+}
+
+function stashMenuItemCreatedAt(item: StashMenuItem): string {
+  return item.kind === "local" ? item.entry.createdAt : item.summary.createdAt;
+}
+
+/** Newest first; a local entry already on a server shows once, as the server's. */
+export function mergeStashMenuItems(
+  local: ReadonlyArray<PromptStashEntry>,
+  server: ReadonlyArray<{
+    readonly environmentId: EnvironmentId;
+    readonly summaries: ReadonlyArray<PromptStashSummary>;
+  }>,
+): StashMenuItem[] {
+  const items: StashMenuItem[] = server.flatMap(({ environmentId, summaries }) =>
+    summaries.map((summary) => ({ kind: "server" as const, environmentId, summary })),
+  );
+  const serverIds = new Set(
+    server.flatMap(({ summaries }) => summaries.map((summary) => summary.id)),
+  );
+  for (const entry of local) {
+    if (!serverIds.has(entry.id)) items.push({ kind: "local", entry });
+  }
+  return items.toSorted((a, b) => {
+    const aAt = stashMenuItemCreatedAt(a);
+    const bAt = stashMenuItemCreatedAt(b);
+    return aAt === bAt ? 0 : aAt < bAt ? 1 : -1;
+  });
 }
