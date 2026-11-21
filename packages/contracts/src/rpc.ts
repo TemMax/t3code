@@ -39,6 +39,14 @@ import * as RpcGroup from "effect/rpc/RpcGroup";
 import * as RpcMiddleware from "effect/rpc/RpcMiddleware";
 import { NonNegativeInt, TrimmedNonEmptyString } from "./baseSchemas.ts";
 import { ClientProfileError, ClientProfileUpdateInput } from "./clientProfile.ts";
+import {
+  PromptStashEntry,
+  PromptStashError,
+  PromptStashPutInput,
+  PromptStashPutResult,
+  PromptStashRemoveInput,
+  PromptStashTakeInput,
+} from "./promptStash.ts";
 import { SecretSourceCheckResult } from "./settingsSecretValue.ts";
 import { SecretReference } from "./secretReference.ts";
 import {
@@ -553,6 +561,9 @@ export const WS_METHODS = {
   serverGetSettings: "server.getSettings",
   serverUpdateSettings: "server.updateSettings",
   serverUpdateClientProfile: "server.updateClientProfile",
+  promptStashPut: "promptStash.put",
+  promptStashTake: "promptStash.take",
+  promptStashRemove: "promptStash.remove",
   serverDiscoverSourceControl: "server.discoverSourceControl",
   serverCheckSecretSource: "server.checkSecretSource",
   serverSearchAcpRegistry: "server.searchAcpRegistry",
@@ -928,6 +939,24 @@ const WsServerUpdateSettingsRpc = Rpc.make(WS_METHODS.serverUpdateSettings, {
 const WsServerUpdateClientProfileRpc = Rpc.make(WS_METHODS.serverUpdateClientProfile, {
   payload: ClientProfileUpdateInput,
   error: Schema.Union([ClientProfileError, EnvironmentAuthorizationError]),
+});
+
+const WsPromptStashPutRpc = Rpc.make(WS_METHODS.promptStashPut, {
+  payload: PromptStashPutInput,
+  success: PromptStashPutResult,
+  error: Schema.Union([PromptStashError, EnvironmentAuthorizationError]),
+});
+
+const WsPromptStashTakeRpc = Rpc.make(WS_METHODS.promptStashTake, {
+  payload: PromptStashTakeInput,
+  success: PromptStashEntry,
+  error: Schema.Union([PromptStashError, EnvironmentAuthorizationError]),
+});
+
+const WsPromptStashRemoveRpc = Rpc.make(WS_METHODS.promptStashRemove, {
+  payload: PromptStashRemoveInput,
+  success: Schema.Void,
+  error: Schema.Union([PromptStashError, EnvironmentAuthorizationError]),
 });
 
 const WsServerDiscoverSourceControlRpc = Rpc.make(WS_METHODS.serverDiscoverSourceControl, {
@@ -2153,6 +2182,7 @@ export const WsSubscribeServerConfigRpc = Rpc.make(WS_METHODS.subscribeServerCon
     /** Opt-in protects older clients that reject unknown theme event types. */
     environmentThemes: Schema.optional(Schema.Boolean),
     clientProfile: Schema.optional(Schema.Boolean),
+    promptStash: Schema.optional(Schema.Boolean),
     usageLimitSources: Schema.optional(Schema.Boolean),
     /** Advertise client handling before the server offers /usage-limits, or older clients send it as a prompt. */
     usageLimitsCommand: Schema.optional(Schema.Boolean),
@@ -2316,6 +2346,9 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerReclaimDatabaseSpaceRpc,
   WsServerUpdateSettingsRpc,
   WsServerUpdateClientProfileRpc,
+  WsPromptStashPutRpc,
+  WsPromptStashTakeRpc,
+  WsPromptStashRemoveRpc,
   WsPeerLinksListRpc,
   WsPeerLinksLinkRpc,
   WsPeerLinksUnlinkRpc,

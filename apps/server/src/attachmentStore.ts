@@ -27,6 +27,7 @@ const ATTACHMENT_ID_PATTERN = new RegExp(
 );
 
 export const PENDING_ATTACHMENT_THREAD_SEGMENT = "pending";
+export const STASH_ATTACHMENT_SEGMENT = "stash";
 const PENDING_ATTACHMENT_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 const PARTIAL_UPLOAD_MAX_AGE_MS = 60 * 60 * 1000;
 
@@ -42,7 +43,8 @@ export function toSafeThreadAttachmentSegment(threadId: string): string | null {
   if (segment.length === 0) {
     return null;
   }
-  return segment === PENDING_ATTACHMENT_THREAD_SEGMENT ? "_pending" : segment;
+  if (segment === PENDING_ATTACHMENT_THREAD_SEGMENT) return "_pending";
+  return segment === STASH_ATTACHMENT_SEGMENT ? "_stash" : segment;
 }
 
 export function attachmentFileExtension(fileName: string): string {
@@ -260,6 +262,34 @@ export function planAttachmentClaim(input: {
   };
 }
 
+export function planAttachmentRelabel(input: {
+  readonly attachmentsDir: string;
+  readonly attachmentId: string;
+  readonly from: "pending" | "stash";
+  readonly to: "pending" | "stash";
+}): AttachmentClaimPlan {
+  const uuid = parseAttachmentUuid(input.attachmentId);
+  if (!uuid || parseThreadSegmentFromAttachmentId(input.attachmentId) !== input.from) {
+    return { ok: false, reason: `attachment must be a ${input.from} upload` };
+  }
+  const currentPath = resolveAttachmentPathById({
+    attachmentsDir: input.attachmentsDir,
+    attachmentId: input.attachmentId,
+  });
+  if (!currentPath) {
+    return { ok: false, reason: "attachment not found (removed or expired)" };
+  }
+  const finalId = `${input.to}-${uuid}${attachmentIdExtensionSuffix(parseAttachmentFileExtension(input.attachmentId) ?? undefined)}`;
+  const finalPath = resolveAttachmentRelativePath({
+    attachmentsDir: input.attachmentsDir,
+    relativePath: `${finalId}${NodePath.extname(currentPath)}`,
+  });
+  if (!finalPath) {
+    return { ok: false, reason: "failed to resolve attachment path" };
+  }
+  return { ok: true, finalId, currentPath, finalPath };
+}
+
 export function sweepStalePendingAttachments(input: {
   readonly attachmentsDir: string;
   readonly nowMs: number;
@@ -307,7 +337,7 @@ export function sweepStalePendingAttachments(input: {
   return { deleted };
 }
 
-function parseAttachmentIdFromRelativePath(relativePath: string): string | null {
+export function parseAttachmentIdFromRelativePath(relativePath: string): string | null {
   const normalized = normalizeAttachmentRelativePath(relativePath);
   if (!normalized || normalized.includes("/")) {
     return null;

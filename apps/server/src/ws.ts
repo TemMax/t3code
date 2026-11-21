@@ -117,6 +117,7 @@ import * as CheckpointDiffQuery from "./checkpointing/CheckpointDiffQuery.ts";
 import * as NativeChildWorkQuery from "./orchestration-v2/NativeChildWorkQuery.ts";
 import * as ServerConfig from "./config.ts";
 import * as ClientProfile from "./clientProfile.ts";
+import * as PromptStash from "./promptStash/PromptStash.ts";
 import * as EnvironmentTheme from "./environmentTheme.ts";
 import * as Keybindings from "./keybindings.ts";
 import * as ExternalLauncher from "./process/externalLauncher.ts";
@@ -1531,6 +1532,7 @@ export const layerWsRpc = (
       const keybindings = yield* Keybindings.Keybindings;
       const environmentTheme = yield* EnvironmentTheme.EnvironmentThemeService;
       const clientProfile = yield* ClientProfile.ClientProfile;
+      const promptStash = yield* PromptStash.PromptStash;
       const externalLauncher = yield* ExternalLauncher.ExternalLauncher;
       const remoteOpenTargets = yield* RemoteOpenTargets.RemoteOpenTargets;
       const directEndpoints = yield* DirectEndpoints.DirectEndpoints;
@@ -2726,6 +2728,9 @@ export const layerWsRpc = (
           ),
         [WS_METHODS.serverUpdateClientProfile]: ({ entries }) =>
           clientProfile.merge(entries).pipe(Effect.asVoid),
+        [WS_METHODS.promptStashPut]: (input) => promptStash.put(input),
+        [WS_METHODS.promptStashTake]: (input) => promptStash.take(input),
+        [WS_METHODS.promptStashRemove]: (input) => promptStash.remove(input),
         [WS_METHODS.serverGetSettings]: (_input) =>
           Effect.map(serverSettings.getSettings, (settings) =>
             ServerSettings.redactServerSettingsForClient(settings, settingsClient),
@@ -3475,6 +3480,17 @@ export const layerWsRpc = (
                       })),
                     )
                   : Stream.empty;
+              const promptStashUpdates =
+                input.promptStash === true &&
+                currentSession.scopes.includes(AuthOrchestrationOperateScope)
+                  ? promptStash.streamChanges.pipe(
+                      Stream.map((payload) => ({
+                        version: 1 as const,
+                        type: "promptStashUpdated" as const,
+                        payload,
+                      })),
+                    )
+                  : Stream.empty;
               const usageLimitSourceUpdates =
                 input.usageLimitSources === true
                   ? usageLimitSources.streamChanges.pipe(
@@ -3504,7 +3520,10 @@ export const layerWsRpc = (
                     settingsUpdates,
                     Stream.merge(
                       environmentThemeUpdates,
-                      Stream.merge(usageLimitSourceUpdates, clientProfileUpdates),
+                      Stream.merge(
+                        usageLimitSourceUpdates,
+                        Stream.merge(clientProfileUpdates, promptStashUpdates),
+                      ),
                     ),
                   ),
                 ),

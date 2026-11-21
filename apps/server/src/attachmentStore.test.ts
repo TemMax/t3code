@@ -12,8 +12,10 @@ import {
   createPendingAttachmentId,
   parseAttachmentUuid,
   planAttachmentClaim,
+  planAttachmentRelabel,
   parseThreadSegmentFromAttachmentId,
   sweepStalePendingAttachments,
+  toSafeThreadAttachmentSegment,
   threadHtmlRenderAttachmentIds,
 } from "./attachmentStore.ts";
 
@@ -136,7 +138,15 @@ describe("attachmentStore", () => {
       const sidecarPath = `${pendingFilePath}.txt`;
       const threadPath = NodePath.join(attachmentsDir, `thread-1-${uuid}.png`);
       const partialPath = NodePath.join(attachmentsDir, `${uuid}.part`);
-      for (const filePath of [pendingPath, pendingFilePath, sidecarPath, threadPath, partialPath]) {
+      const stashPath = NodePath.join(attachmentsDir, `stash-${uuid}.png`);
+      for (const filePath of [
+        pendingPath,
+        pendingFilePath,
+        sidecarPath,
+        threadPath,
+        partialPath,
+        stashPath,
+      ]) {
         NodeFS.writeFileSync(filePath, Buffer.from("pixels"));
         NodeFS.utimesSync(filePath, oldTimeSeconds, oldTimeSeconds);
       }
@@ -147,9 +157,85 @@ describe("attachmentStore", () => {
       expect(NodeFS.existsSync(sidecarPath)).toBe(false);
       expect(NodeFS.existsSync(partialPath)).toBe(false);
       expect(NodeFS.existsSync(threadPath)).toBe(true);
+      expect(NodeFS.existsSync(stashPath)).toBe(true);
     } finally {
       NodeFS.rmSync(attachmentsDir, { recursive: true, force: true });
     }
+  });
+
+  it("planAttachmentRelabel moves pending to stash keeping uuid and extension", () => {
+    const attachmentsDir = NodeFS.mkdtempSync(
+      NodePath.join(NodeOS.tmpdir(), "t3code-attachment-relabel-"),
+    );
+    try {
+      const uuid = "00000000-0000-4000-8000-000000000004";
+      NodeFS.writeFileSync(NodePath.join(attachmentsDir, `pending-${uuid}-pdf.pdf`), "doc");
+      NodeFS.writeFileSync(
+        NodePath.join(attachmentsDir, `pending-${uuid.replace(/4$/, "5")}.png`),
+        "px",
+      );
+
+      const file = planAttachmentRelabel({
+        attachmentsDir,
+        attachmentId: `pending-${uuid}-pdf`,
+        from: "pending",
+        to: "stash",
+      });
+      expect(file).toEqual({
+        ok: true,
+        finalId: `stash-${uuid}-pdf`,
+        currentPath: NodePath.join(attachmentsDir, `pending-${uuid}-pdf.pdf`),
+        finalPath: NodePath.join(attachmentsDir, `stash-${uuid}-pdf.pdf`),
+      });
+
+      const imageUuid = uuid.replace(/4$/, "5");
+      const image = planAttachmentRelabel({
+        attachmentsDir,
+        attachmentId: `pending-${imageUuid}`,
+        from: "pending",
+        to: "stash",
+      });
+      expect(image).toMatchObject({
+        ok: true,
+        finalId: `stash-${imageUuid}`,
+        finalPath: NodePath.join(attachmentsDir, `stash-${imageUuid}.png`),
+      });
+    } finally {
+      NodeFS.rmSync(attachmentsDir, { recursive: true, force: true });
+    }
+  });
+
+  it("planAttachmentRelabel refuses a wrong source segment or a missing file", () => {
+    const attachmentsDir = NodeFS.mkdtempSync(
+      NodePath.join(NodeOS.tmpdir(), "t3code-attachment-relabel-"),
+    );
+    try {
+      const uuid = "00000000-0000-4000-8000-000000000006";
+      NodeFS.writeFileSync(NodePath.join(attachmentsDir, `stash-${uuid}.png`), "px");
+
+      expect(
+        planAttachmentRelabel({
+          attachmentsDir,
+          attachmentId: `stash-${uuid}`,
+          from: "pending",
+          to: "stash",
+        }).ok,
+      ).toBe(false);
+      expect(
+        planAttachmentRelabel({
+          attachmentsDir,
+          attachmentId: `pending-${uuid}`,
+          from: "pending",
+          to: "stash",
+        }).ok,
+      ).toBe(false);
+    } finally {
+      NodeFS.rmSync(attachmentsDir, { recursive: true, force: true });
+    }
+  });
+
+  it("a thread named stash cannot take the stash segment", () => {
+    expect(toSafeThreadAttachmentSegment("stash")).toBe("_stash");
   });
 });
 

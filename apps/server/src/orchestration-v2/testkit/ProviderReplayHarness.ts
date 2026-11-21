@@ -148,6 +148,7 @@ export function makeReplayServerConfig(
       keybindingsConfigPath: path.join(stateDir, "keybindings.json"),
       settingsPath: path.join(stateDir, "settings.json"),
       clientProfilePath: path.join(stateDir, "client-profile.json"),
+      promptStashDir: path.join(stateDir, "prompt-stash"),
       providerStatusCacheDir,
       worktreesDir,
       worktreeCheckoutCacheDir: path.join(providerStatusCacheDir, "worktree-checkouts"),
