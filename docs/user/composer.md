@@ -202,6 +202,10 @@ Stashes containing uploaded files must be restored in their original environment
 Those files are retained for 24 hours. After an upload expires, restore the prompt
 and use **Attach again** or remove the missing file before sending.
 
+The stash is shared by every device connected to the same server. Prompts stashed
+while a device is offline move to the server when it reconnects. Taking a stashed
+prompt from the server needs a connection.
+
 ## Voice input on web and desktop
 
 Use the composer's microphone or `mod+shift+d` to dictate into your draft. Audio
