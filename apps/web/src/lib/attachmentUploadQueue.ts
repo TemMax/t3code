@@ -132,7 +132,8 @@ function stampDraftFileUpload(job: DraftFileOwner, attachmentId: string): void {
     .setFileUpload(draftTarget, job.image.id, job.environmentId, attachmentId);
 }
 
-function deletePendingUpload(environmentId: EnvironmentId, attachmentId: string): void {
+/** Deletes an upload no composer holds, such as a stash image whose put went nowhere. */
+export function deletePendingUpload(environmentId: EnvironmentId, attachmentId: string): void {
   if (!readEnvironmentScope(environmentId, AuthOrchestrationOperateScope)) return;
   deletePendingAttachmentUpload({
     registry: appAtomRegistry,

@@ -1,4 +1,8 @@
-import { runAtomCommand, squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
+import {
+  runAtomCommand,
+  squashAtomCommandFailure,
+  type AtomCommandResult,
+} from "@t3tools/client-runtime/state/runtime";
 import type { EnvironmentId, PromptStashPutInput } from "@t3tools/contracts";
 import { PROMPT_STASH_MAX_ENTRIES } from "@t3tools/contracts";
 import { Atom } from "effect/reactivity";
@@ -6,24 +10,38 @@ import { msg } from "gt-react";
 
 import { toastManager } from "../components/ui/toast";
 import { m } from "../i18n/messages";
-import { uploadDetachedAttachment } from "../lib/attachmentUploadQueue";
-import { usePromptStashStore, type PromptStashEntry } from "../promptStashStore";
+import { deletePendingUpload, uploadDetachedAttachment } from "../lib/attachmentUploadQueue";
+import { dataUrlToFile } from "../lib/imageCompression";
+import {
+  readLatestEntries,
+  usePromptStashStore,
+  type PendingStashTake,
+  type PromptStashEntry,
+} from "../promptStashStore";
 import { appAtomRegistry } from "../rpc/atomRegistry";
 import { promptStashCommands } from "../state/promptStash";
 import { primaryEnvironmentIdAtom } from "../state/primaryEnvironment";
 import { environmentPresentations } from "../state/presentation";
+import { announceEvicted } from "./announceEvicted";
 import {
-  applyPutOutcome,
-  planLocalStashUploads,
+  retryablePendingTakes,
+  runStashSyncPass,
   targetEnvironmentForLocalEntry,
+  type StashPutOutcome,
 } from "./promptStashSync.logic";
 import { serverStashSummariesAtom } from "./serverStashSummaries";
 
 type Get = <A>(atom: Atom.Atom<A>) => A;
+const get: Get = (atom) => appAtomRegistry.get(atom);
 
-function connectedStashEnvironmentIds(get: Get): EnvironmentId[] {
+/** Entries a restore or a lost-take retry in this tab is taking; nothing else touches them. */
+export const takingEntryIds = new Set<string>();
+/** Take request ids this tab started, so its own abandoned takes retry without a grace period. */
+export const ownTakeRequestIds = new Set<string>();
+
+function connectedStashEnvironmentIds(read: Get = get): EnvironmentId[] {
   const ids: EnvironmentId[] = [];
-  for (const [environmentId, presentation] of get(environmentPresentations.presentationsAtom)) {
+  for (const [environmentId, presentation] of read(environmentPresentations.presentationsAtom)) {
     if (
       presentation.connection.phase === "connected" &&
       presentation.serverConfig?.environment.capabilities.promptStash === true
@@ -34,9 +52,9 @@ function connectedStashEnvironmentIds(get: Get): EnvironmentId[] {
   return ids;
 }
 
-function writableEnvironmentIds(get: Get): EnvironmentId[] {
-  return connectedStashEnvironmentIds(get).filter((environmentId) =>
-    get(promptStashCommands.put.permissionAtom(environmentId)),
+function writableEnvironmentIds(read: Get = get): EnvironmentId[] {
+  return connectedStashEnvironmentIds(read).filter((environmentId) =>
+    read(promptStashCommands.put.permissionAtom(environmentId)),
   );
 }
 
@@ -44,151 +62,213 @@ function writableEnvironmentIds(get: Get): EnvironmentId[] {
 export function serverStashAccess(
   environmentId: EnvironmentId,
 ): "writable" | "connected" | "unavailable" {
-  const get: Get = (atom) => appAtomRegistry.get(atom);
-  if (!connectedStashEnvironmentIds(get).includes(environmentId)) return "unavailable";
+  if (!connectedStashEnvironmentIds().includes(environmentId)) return "unavailable";
   return get(promptStashCommands.put.permissionAtom(environmentId)) ? "writable" : "connected";
 }
 
-// A string, so an unrelated presentation change leaves the subscription quiet.
-const writableEnvironmentsKeyAtom = Atom.make((get) =>
-  writableEnvironmentIds(get).toSorted().join("\n"),
-).pipe(Atom.withLabel("web-prompt-stash-writable-environments"));
-
-function dataUrlToFile(image: PromptStashEntry["attachments"][number]): File {
-  const comma = image.dataUrl.indexOf(",");
-  const header = image.dataUrl.slice(0, comma);
-  const payload = image.dataUrl.slice(comma + 1);
-  const bytes = header.endsWith(";base64")
-    ? Uint8Array.from(atob(payload), (char) => char.charCodeAt(0))
-    : new TextEncoder().encode(decodeURIComponent(payload));
-  return new File([bytes], image.name, { type: image.mimeType });
-}
-
-async function buildPutInput(
-  entry: PromptStashEntry,
-  environmentId: EnvironmentId,
-): Promise<PromptStashPutInput> {
-  const attachments: PromptStashPutInput["attachments"][number][] = [];
-  for (const image of entry.attachments) {
-    const attachmentId = await uploadDetachedAttachment({
-      environmentId,
-      file: dataUrlToFile(image),
-      type: "image",
-    });
-    attachments.push({
-      type: "image",
-      id: image.id,
-      attachmentId,
-      name: image.name,
-      mimeType: image.mimeType,
-      sizeBytes: image.sizeBytes,
-      ...(image.source ? { source: image.source } : {}),
-    });
-  }
-  for (const file of entry.files ?? []) {
-    attachments.push({
-      type: "file",
-      id: file.id,
-      attachmentId: file.attachmentId,
-      name: file.name,
-      mimeType: file.mimeType,
-      sizeBytes: file.sizeBytes,
-      ...(file.source ? { source: file.source } : {}),
-    });
-  }
-  return {
-    id: entry.id,
-    createdAt: entry.createdAt,
-    prompt: entry.prompt,
-    attachments,
-    droppedImageNames: [...entry.droppedImageNames],
-    unreadableImageNames: [...(entry.unreadableImageNames ?? [])],
-    droppedFileNames: [],
-    records: entry.records ?? [],
-  };
-}
-
-function isAlreadyTaken(error: unknown): boolean {
-  return (
-    typeof error === "object" &&
-    error !== null &&
-    "_tag" in error &&
-    error._tag === "PromptStashError" &&
-    "reason" in error &&
-    error.reason === "already-taken"
+/** The environment the sync uploads a local entry to, or null while none fits. */
+export function localEntryTarget(entry: PromptStashEntry): EnvironmentId | null {
+  return targetEnvironmentForLocalEntry(
+    entry,
+    get(primaryEnvironmentIdAtom),
+    writableEnvironmentIds(),
   );
 }
 
-function announceEvicted(): void {
-  toastManager.add({
-    type: "warning",
-    title: m(msg("Oldest stashed prompt discarded")),
-    description: m(
-      msg("The stash holds {max} prompts; the oldest was removed to make room.", {
-        max: PROMPT_STASH_MAX_ENTRIES,
-      }),
-    ),
-    data: { hideCopyButton: true },
-  });
+// A string, so an unrelated presentation change leaves the subscription quiet.
+const writableEnvironmentsKeyAtom = Atom.make((read) =>
+  writableEnvironmentIds(read).toSorted().join("\n"),
+).pipe(Atom.withLabel("web-prompt-stash-writable-environments"));
+
+function errorTag(error: unknown): unknown {
+  return typeof error === "object" && error !== null && "_tag" in error ? error._tag : undefined;
 }
 
-async function putEntry(
-  entry: PromptStashEntry,
-  environmentId: EnvironmentId,
-): Promise<"stored" | "already-taken" | "failed"> {
+export function promptStashErrorReason(error: unknown): unknown {
+  return errorTag(error) === "PromptStashError" &&
+    typeof error === "object" &&
+    error !== null &&
+    "reason" in error
+    ? error.reason
+    : undefined;
+}
+
+/** A typed reply from the server; anything else may not have reached it. */
+export function isServerReply(error: unknown): boolean {
+  const tag = errorTag(error);
+  return tag === "PromptStashError" || tag === "EnvironmentAuthorizationError";
+}
+
+/** Runs a stash command and repeats it once when its reply was lost. */
+export async function retryLostReply<A, E>(
+  run: () => Promise<AtomCommandResult<A, E>>,
+): Promise<AtomCommandResult<A, E>> {
+  const result = await run();
+  if (result._tag === "Success" || isServerReply(squashAtomCommandFailure(result))) return result;
+  return run();
+}
+
+async function uploadEntryImages(entry: PromptStashEntry, environmentId: EnvironmentId) {
+  const attachmentIds: string[] = [];
   try {
-    const input = await buildPutInput(entry, environmentId);
-    const result = await runAtomCommand(
-      appAtomRegistry,
-      promptStashCommands.put,
-      { environmentId, input },
-      { reportFailure: false },
-    );
-    if (result._tag === "Success") {
-      if (result.value.evictedIds.length > 0) announceEvicted();
-      return "stored";
+    for (const image of entry.attachments) {
+      attachmentIds.push(
+        await uploadDetachedAttachment({
+          environmentId,
+          file: dataUrlToFile(image.dataUrl, image.name, image.mimeType),
+          type: "image",
+        }),
+      );
     }
-    const error = squashAtomCommandFailure(result);
-    if (isAlreadyTaken(error)) return "already-taken";
-    console.warn("Prompt stash upload failed", error);
-    return "failed";
+    return { attachmentIds, complete: true };
   } catch (error) {
     console.warn("Prompt stash upload failed", error);
-    return "failed";
+    return { attachmentIds, complete: false };
   }
 }
 
-async function runPass(): Promise<void> {
-  const get: Get = (atom) => appAtomRegistry.get(atom);
-  const connected = new Set<string>(connectedStashEnvironmentIds(get));
+async function putEntry(
+  input: PromptStashPutInput,
+  environmentId: EnvironmentId,
+): Promise<StashPutOutcome> {
+  const result = await runAtomCommand(
+    appAtomRegistry,
+    promptStashCommands.put,
+    { environmentId, input },
+    { reportFailure: false },
+  );
+  if (result._tag === "Success") return { _tag: "stored", ...result.value };
+  const error = squashAtomCommandFailure(result);
+  const reason = promptStashErrorReason(error);
+  if (reason === "already-taken") return { _tag: "already-taken" };
+  if (reason === "entry-too-large") return { _tag: "too-large" };
+  console.warn("Prompt stash upload failed", error);
+  return { _tag: "failed" };
+}
+
+const uploadsInFlight = new Map<string, Promise<"local" | "stored">>();
+const tooLargeEntryIds = new Set<string>();
+
+/** Waits out a background upload of this entry; "stored" means it now lives on a server. */
+export function settleLocalEntry(id: string): Promise<"local" | "stored"> {
+  return uploadsInFlight.get(id) ?? Promise.resolve("local");
+}
+
+/** A take whose reply was lost may have succeeded; ask again and put what comes back. */
+async function retryPendingTake(take: PendingStashTake): Promise<boolean> {
+  const environmentId = take.environmentId as EnvironmentId;
+  takingEntryIds.add(take.entryId);
+  try {
+    const taken = await runAtomCommand(
+      appAtomRegistry,
+      promptStashCommands.take,
+      { environmentId, input: { entryId: take.entryId, requestId: take.requestId } },
+      { reportFailure: false },
+    );
+    if (taken._tag === "Failure") {
+      const reason = promptStashErrorReason(squashAtomCommandFailure(taken));
+      if (reason !== "already-taken" && reason !== "not-found") return false;
+      usePromptStashStore.getState().removePendingTake(take.requestId);
+      return true;
+    }
+    // The request id makes the put idempotent too, should this reply be lost as well.
+    const put = await retryLostReply(() =>
+      runAtomCommand(
+        appAtomRegistry,
+        promptStashCommands.put,
+        { environmentId, input: { ...taken.value, id: take.requestId } },
+        { reportFailure: false },
+      ),
+    );
+    if (put._tag === "Failure") return false;
+    usePromptStashStore.getState().removePendingTake(take.requestId);
+    toastManager.add({
+      type: "info",
+      title: m(msg("A prompt that couldn't be taken was returned to the stash")),
+      data: { hideCopyButton: true },
+    });
+    return true;
+  } finally {
+    takingEntryIds.delete(take.entryId);
+    ownTakeRequestIds.delete(take.requestId);
+  }
+}
+
+/** True when everything this pass tried went through. */
+async function runPass(): Promise<boolean> {
+  const connected = new Set<string>(connectedStashEnvironmentIds());
+  const writable = new Set<string>(writableEnvironmentIds());
+  let settled = true;
+  const takes = retryablePendingTakes(usePromptStashStore.getState().pendingTakes, {
+    connected: writable,
+    taking: takingEntryIds,
+    ownRequestIds: ownTakeRequestIds,
+    now: Date.now(),
+  });
+  for (const take of takes) {
+    if (!(await retryPendingTake(take))) settled = false;
+  }
+
   const serverIds = new Set(
     get(serverStashSummariesAtom)
       .filter(({ environmentId }) => connected.has(environmentId))
       .flatMap(({ summaries }) => summaries.map((summary) => summary.id)),
   );
   const store = usePromptStashStore.getState();
-  const { drop, upload } = planLocalStashUploads(store.entries, serverIds);
-  if (drop.length > 0) store.dropEntries(drop);
-
-  for (const entry of upload) {
-    const environmentId = targetEnvironmentForLocalEntry(entry, get(primaryEnvironmentIdAtom));
-    if (environmentId === null || !writableEnvironmentIds(get).includes(environmentId)) continue;
-    const outcome = await putEntry(entry, environmentId);
-    const localStore = usePromptStashStore.getState();
-    const done = applyPutOutcome(
-      localStore.entries.map((local) => local.id),
-      entry.id,
-      outcome,
-    );
-    if (done.length > 0) localStore.dropEntries(done);
+  const result = await runStashSyncPass({
+    readEntries: readLatestEntries,
+    serverIds,
+    targetFor: (entry) => {
+      const environmentId = localEntryTarget(entry);
+      return environmentId !== null && writable.has(environmentId) ? environmentId : null;
+    },
+    isHeld: (entryId) => takingEntryIds.has(entryId) || tooLargeEntryIds.has(entryId),
+    uploadImages: uploadEntryImages,
+    put: putEntry,
+    deleteUploads: (environmentId, attachmentIds) => {
+      for (const attachmentId of attachmentIds) deletePendingUpload(environmentId, attachmentId);
+    },
+    dropEntries: store.dropEntries,
+    onUpload: (entryId, outcome) => {
+      uploadsInFlight.set(entryId, outcome);
+      void outcome.then(() => {
+        if (uploadsInFlight.get(entryId) === outcome) uploadsInFlight.delete(entryId);
+      });
+    },
+  });
+  if (result.evicted) announceEvicted(PROMPT_STASH_MAX_ENTRIES);
+  for (const entryId of result.tooLarge) {
+    tooLargeEntryIds.add(entryId);
+    toastManager.add({
+      type: "warning",
+      title: m(msg("This stashed prompt is too large to sync and stays on this device")),
+      data: { hideCopyButton: true },
+    });
   }
+  return settled && !result.retry;
 }
+
+const RETRY_BASE_MS = 15_000;
+const RETRY_MAX_MS = 10 * 60_000;
+
+// An entry becomes uploadable when its images finish encoding, so that counts as a change too.
+const localEntriesKey = (entries: ReadonlyArray<PromptStashEntry>) =>
+  entries
+    .map((entry) => `${entry.id}:${entry.pendingImageCount ? "encoding" : "ready"}`)
+    .toSorted()
+    .join("\n");
 
 export const promptStashSync = {
   start: () => {
     let stopped = false;
     let tail: Promise<unknown> = Promise.resolve();
     let passQueued = false;
+    let failures = 0;
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
+    const clearRetry = () => {
+      if (retryTimer !== null) clearTimeout(retryTimer);
+      retryTimer = null;
+    };
     // One chain, so two passes never upload the same entry at once.
     const requestPass = () => {
       if (passQueued) return;
@@ -196,19 +276,38 @@ export const promptStashSync = {
       tail = tail.then(async () => {
         passQueued = false;
         if (stopped) return;
+        let ok = false;
         try {
-          await runPass();
+          ok = await runPass();
         } catch (error) {
           console.warn("Prompt stash sync failed", error);
         }
+        if (stopped) return;
+        clearRetry();
+        if (ok) {
+          failures = 0;
+          return;
+        }
+        if (writableEnvironmentIds().length === 0) return;
+        const delay = Math.min(RETRY_BASE_MS * 2 ** failures, RETRY_MAX_MS);
+        failures += 1;
+        retryTimer = setTimeout(requestPass, delay);
       });
     };
-    const stopStore = usePromptStashStore.subscribe(requestPass);
+    const stopStore = usePromptStashStore.subscribe((state, previous) => {
+      if (
+        state.entries !== previous.entries &&
+        localEntriesKey(state.entries) !== localEntriesKey(previous.entries)
+      ) {
+        requestPass();
+      }
+    });
     const stopEnvironments = appAtomRegistry.subscribe(writableEnvironmentsKeyAtom, requestPass, {
       immediate: true,
     });
     return () => {
       stopped = true;
+      clearRetry();
       stopStore();
       stopEnvironments();
     };

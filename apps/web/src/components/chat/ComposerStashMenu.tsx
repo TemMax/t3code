@@ -33,12 +33,12 @@ function isServerSummary(
   return "droppedFileNames" in entry;
 }
 
-function missingAttachmentCount(entry: PromptStashEntry | PromptStashSummary): number {
-  return (
-    entry.droppedImageNames.length +
-    (entry.unreadableImageNames?.length ?? 0) +
-    (isServerSummary(entry) ? entry.droppedFileNames.length : 0)
-  );
+function missingImageCount(entry: PromptStashEntry | PromptStashSummary): number {
+  return entry.droppedImageNames.length + (entry.unreadableImageNames?.length ?? 0);
+}
+
+function missingFileCount(entry: PromptStashEntry | PromptStashSummary): number {
+  return isServerSummary(entry) ? entry.droppedFileNames.length : 0;
 }
 
 function stashedFileCount(entry: PromptStashEntry | PromptStashSummary): number {
@@ -296,7 +296,8 @@ function ComposerStashMenuList<T extends StashMenuEntry>(props: {
               const id = stashMenuEntryId(entry);
               const stashed = item.kind === "local" ? item.entry : item.summary;
               const pendingImageCount = item.kind === "local" ? item.entry.pendingImageCount : 0;
-              const missingCount = missingAttachmentCount(stashed);
+              const missingImages = missingImageCount(stashed);
+              const missingFiles = missingFileCount(stashed);
               const fileCount = stashedFileCount(stashed);
               const snippet = stashEntrySnippet(stashed, m);
               return (
@@ -337,14 +338,26 @@ function ComposerStashMenuList<T extends StashMenuEntry>(props: {
                           { count: pendingImageCount },
                         )}
                       </span>
-                    ) : missingCount > 0 ? (
-                      <span className="shrink-0 text-warning-foreground">
-                        {gt(
-                          "{count, plural, one {{count} image dropped} other {{count} images dropped}}",
-                          { count: missingCount },
-                        )}
-                      </span>
-                    ) : null}
+                    ) : (
+                      <>
+                        {missingImages > 0 ? (
+                          <span className="shrink-0 text-warning-foreground">
+                            {gt(
+                              "{count, plural, one {{count} image dropped} other {{count} images dropped}}",
+                              { count: missingImages },
+                            )}
+                          </span>
+                        ) : null}
+                        {missingFiles > 0 ? (
+                          <span className="shrink-0 text-warning-foreground">
+                            {gt(
+                              "{count, plural, one {{count} file dropped} other {{count} files dropped}}",
+                              { count: missingFiles },
+                            )}
+                          </span>
+                        ) : null}
+                      </>
+                    )}
                     <StashThumbnails item={item} />
                     {fileCount > 0 ? (
                       <span className="flex shrink-0 items-center gap-1 text-muted-foreground">
