@@ -10,32 +10,44 @@ const decodeCache = Schema.decodeUnknownSync(
   Schema.Record(Schema.String, Schema.Array(PromptStashSummary)),
 );
 
-let cache: Record<string, ReadonlyArray<PromptStashSummary>> | null = null;
+type SummaryCache = Record<string, ReadonlyArray<PromptStashSummary>>;
 
-function loadCache(): Record<string, ReadonlyArray<PromptStashSummary>> {
-  if (cache) return cache;
+let cache: SummaryCache | null = null;
+// Presentations recompute often; an unchanged array skips the storage round trip.
+const remembered = new Map<string, ReadonlyArray<PromptStashSummary>>();
+
+function readStoredCache(): { raw: string | null; value: SummaryCache } {
   try {
     const raw = localStorage.getItem(SERVER_STASH_CACHE_KEY);
-    cache = raw ? { ...decodeCache(JSON.parse(raw)) } : {};
+    return { raw, value: raw ? { ...decodeCache(JSON.parse(raw)) } : {} };
   } catch {
-    cache = {};
+    return { raw: null, value: {} };
   }
+}
+
+function loadCache(): SummaryCache {
+  cache ??= readStoredCache().value;
   return cache;
 }
 
+/** Starts from storage, so another tab's environments survive this write. */
 function rememberSummaries(
   environmentId: EnvironmentId,
   summaries: ReadonlyArray<PromptStashSummary>,
   knownEnvironmentIds: ReadonlySet<string>,
 ): void {
-  const stored = loadCache();
-  if (stored[environmentId] === summaries) return;
+  if (remembered.get(environmentId) === summaries) return;
+  remembered.set(environmentId, summaries);
+  const { raw, value: stored } = readStoredCache();
   stored[environmentId] = summaries;
   for (const id of Object.keys(stored)) {
     if (!knownEnvironmentIds.has(id)) delete stored[id];
   }
+  cache = stored;
+  const next = JSON.stringify(stored);
+  if (next === raw) return;
   try {
-    localStorage.setItem(SERVER_STASH_CACHE_KEY, JSON.stringify(stored));
+    localStorage.setItem(SERVER_STASH_CACHE_KEY, next);
   } catch {}
 }
 
@@ -59,13 +71,16 @@ export const serverStashSummariesAtom = Atom.make(
     for (const [environmentId, presentation] of presentations) {
       if (presentation.connection.phase === "connected") {
         if (presentation.serverConfig?.environment.capabilities.promptStash !== true) continue;
-        const summaries = presentation.serverConfig.promptStash ?? [];
+        // Undefined until the stash snapshot arrives, and for a client without the scope.
+        const summaries = presentation.serverConfig.promptStash;
+        if (summaries === undefined) continue;
         rememberSummaries(environmentId, summaries, knownEnvironmentIds);
         result.push({ environmentId, summaries });
         continue;
       }
-      const remembered = loadCache()[environmentId];
-      if (remembered) result.push({ environmentId, summaries: remembered });
+      remembered.delete(environmentId);
+      const cached = loadCache()[environmentId];
+      if (cached) result.push({ environmentId, summaries: cached });
     }
     return result;
   },

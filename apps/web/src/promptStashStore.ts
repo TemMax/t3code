@@ -1,4 +1,4 @@
-import { ComposerContextRecord, ForwardCompatibleArray } from "@t3tools/contracts";
+import { ComposerContextRecord, EnvironmentId, ForwardCompatibleArray } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
 import { create } from "zustand";
 
@@ -11,6 +11,12 @@ import { createMemoryStorage, type StateStorage } from "./lib/storage";
 export const PROMPT_STASH_STORAGE_KEY = "t3code:prompt-stash:v2";
 const LEGACY_PROMPT_STASH_STORAGE_KEY = "t3code:prompt-stash:v1";
 const PROMPT_STASH_STORAGE_VERSION = 2;
+const PENDING_TAKES_STORAGE_KEY = "t3code:prompt-stash:pending-takes:v1";
+
+// Another tab may still be encoding a younger entry's images.
+const ORPHANED_PENDING_IMAGES_AGE_MS = 2 * 60 * 1000;
+// The server answers a repeated take with the first result for this long.
+const PENDING_TAKE_TTL_MS = 24 * 60 * 60 * 1000;
 
 export const MAX_STASH_ENTRIES = 20;
 // Share localStorage's ~5MB quota with drafts; record oversized attachments in droppedImageNames.
@@ -26,8 +32,18 @@ const StashEntrySchema = Schema.Struct({
   unreadableImageNames: Schema.optionalKey(Schema.Array(Schema.String)),
   pendingImageCount: Schema.optionalKey(Schema.Number),
   records: Schema.optionalKey(ForwardCompatibleArray(ComposerContextRecord)),
+  environmentId: Schema.optionalKey(EnvironmentId),
 });
 export type PromptStashEntry = typeof StashEntrySchema.Type;
+
+const PendingTakeSchema = Schema.Struct({
+  environmentId: Schema.String,
+  entryId: Schema.String,
+  requestId: Schema.String,
+  at: Schema.String,
+});
+export type PendingStashTake = typeof PendingTakeSchema.Type;
+const decodePendingTakes = Schema.decodeUnknownSync(Schema.Array(PendingTakeSchema));
 
 const PersistedPromptStashState = Schema.Struct({
   entries: Schema.Array(StashEntrySchema),
@@ -121,8 +137,18 @@ function readStoredEntries(): ReadonlyArray<PromptStashEntry> | null {
 }
 
 function readPersistedEntries(): ReadonlyArray<PromptStashEntry> | null {
-  return readStoredEntries()?.map(clearOrphanedPendingImages) ?? null;
+  const stored = readStoredEntries();
+  if (!stored) return null;
+  const now = Date.now();
+  return stored.map((entry) =>
+    now - Date.parse(entry.createdAt) > ORPHANED_PENDING_IMAGES_AGE_MS
+      ? clearOrphanedPendingImages(entry)
+      : entry,
+  );
 }
+
+/** Entries whose images this tab is still encoding; only this tab may settle their count. */
+const encodingEntryIds = new Set<string>();
 
 /**
  * Starts each write from storage so other tabs' stashes, takes and finalized images survive.
@@ -138,20 +164,43 @@ function latestEntries(memory: ReadonlyArray<PromptStashEntry>): ReadonlyArray<P
   const memoryById = new Map(memory.map((entry) => [entry.id, entry]));
   return stored.map((entry) => {
     const local = memoryById.get(entry.id);
-    if (
-      local &&
-      (local.pendingImageCount ||
-        entry.pendingImageCount ||
-        unpersistedFinalizedEntryIds.has(entry.id))
-    ) {
+    if (local && (encodingEntryIds.has(entry.id) || unpersistedFinalizedEntryIds.has(entry.id))) {
       return local;
     }
-    return clearOrphanedPendingImages(entry);
+    return entry;
   });
+}
+
+/** The queue as storage holds it now, with this tab's unsaved work on top. */
+export function readLatestEntries(): ReadonlyArray<PromptStashEntry> {
+  return latestEntries(usePromptStashStore.getState().entries);
+}
+
+function readStoredPendingTakes(): ReadonlyArray<PendingStashTake> {
+  try {
+    const raw = baseStashStorage.getItem(PENDING_TAKES_STORAGE_KEY);
+    if (typeof raw !== "string" || raw.length === 0) return [];
+    return decodePendingTakes(JSON.parse(raw));
+  } catch {
+    return [];
+  }
+}
+
+function persistPendingTakes(takes: ReadonlyArray<PendingStashTake>): void {
+  try {
+    if (takes.length === 0) baseStashStorage.removeItem(PENDING_TAKES_STORAGE_KEY);
+    else baseStashStorage.setItem(PENDING_TAKES_STORAGE_KEY, JSON.stringify(takes));
+  } catch (error) {
+    console.error("[PROMPT-STASH] Could not persist pending takes.", error);
+  }
 }
 
 interface PromptStashStoreState {
   entries: ReadonlyArray<PromptStashEntry>;
+  /** Server takes whose reply never arrived; the sync retries them with the same request id. */
+  pendingTakes: ReadonlyArray<PendingStashTake>;
+  addPendingTake: (take: Omit<PendingStashTake, "at">) => void;
+  removePendingTake: (requestId: string) => void;
   stashEntry: (entry: PromptStashEntry) => {
     evicted: PromptStashEntry | null;
     /** False when the write failed outright (e.g. quota); nothing was kept. */
@@ -176,6 +225,20 @@ interface PromptStashStoreState {
 
 export const usePromptStashStore = create<PromptStashStoreState>()((set, get) => ({
   entries: [],
+  pendingTakes: [],
+  addPendingTake: (take) => {
+    const pendingTakes = [
+      ...readStoredPendingTakes().filter((stored) => stored.requestId !== take.requestId),
+      { ...take, at: new Date(Date.now()).toISOString() },
+    ];
+    persistPendingTakes(pendingTakes);
+    set(() => ({ pendingTakes }));
+  },
+  removePendingTake: (requestId) => {
+    const pendingTakes = readStoredPendingTakes().filter((take) => take.requestId !== requestId);
+    persistPendingTakes(pendingTakes);
+    set(() => ({ pendingTakes }));
+  },
   stashEntry: (entry) => {
     const nextEntries = [entry, ...latestEntries(get().entries)];
     const evicted = nextEntries.length > MAX_STASH_ENTRIES ? (nextEntries.pop() ?? null) : null;
@@ -184,6 +247,8 @@ export const usePromptStashStore = create<PromptStashStoreState>()((set, get) =>
     if (!written) {
       return { evicted: null, written: false, durable: false };
     }
+    if (entry.pendingImageCount) encodingEntryIds.add(entry.id);
+    if (evicted) encodingEntryIds.delete(evicted.id);
     set(() => ({ entries: nextEntries }));
     return { evicted, written: true, durable };
   },
@@ -194,6 +259,7 @@ export const usePromptStashStore = create<PromptStashStoreState>()((set, get) =>
     const nextEntries = entries.filter((candidate) => candidate.id !== entryId);
     const { durable } = persistEntries(nextEntries);
     unpersistedFinalizedEntryIds.delete(entryId);
+    encodingEntryIds.delete(entryId);
     set(() => ({ entries: nextEntries }));
     return { entry, durable };
   },
@@ -203,13 +269,17 @@ export const usePromptStashStore = create<PromptStashStoreState>()((set, get) =>
     const nextEntries = entries.filter((candidate) => !dropped.has(candidate.id));
     if (nextEntries.length === entries.length) return;
     persistEntries(nextEntries);
-    for (const id of dropped) unpersistedFinalizedEntryIds.delete(id);
+    for (const id of dropped) {
+      unpersistedFinalizedEntryIds.delete(id);
+      encodingEntryIds.delete(id);
+    }
     set(() => ({ entries: nextEntries }));
   },
   finalizeEntryImages: (entryId, images) => {
     const entries = latestEntries(get().entries);
     const index = entries.findIndex((candidate) => candidate.id === entryId);
     const existing = index === -1 ? undefined : entries[index];
+    encodingEntryIds.delete(entryId);
     if (!existing) return { attached: false, durable: true };
     const nextEntries = [...entries];
     nextEntries[index] = {
@@ -234,6 +304,13 @@ export const usePromptStashStore = create<PromptStashStoreState>()((set, get) =>
   if (persisted) {
     usePromptStashStore.setState({ entries: persisted });
   }
+  const pendingTakes = readStoredPendingTakes();
+  const now = Date.now();
+  const livePendingTakes = pendingTakes.filter(
+    (take) => now - Date.parse(take.at) < PENDING_TAKE_TTL_MS,
+  );
+  if (livePendingTakes.length !== pendingTakes.length) persistPendingTakes(livePendingTakes);
+  usePromptStashStore.setState({ pendingTakes: livePendingTakes });
 }
 
 export function writePromptStashStorageForTest(raw: string): void {

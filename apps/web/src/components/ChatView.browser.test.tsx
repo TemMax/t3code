@@ -12,6 +12,7 @@ import {
   type IssueRef,
   type PromptStashEntry,
   type PromptStashPutInput,
+  type PromptStashRemoveInput,
   type PromptStashSummary,
   type PromptStashTakeInput,
   type ServerConfig,
@@ -27,7 +28,8 @@ import {
 import type * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import type { Queue as EffectQueue } from "effect/Queue";
-import { expect, it, vi } from "vite-plus/test";
+import { RpcClientError } from "effect/rpc";
+import { describe, expect, it, vi } from "vite-plus/test";
 import { cdp, page, userEvent } from "vite-plus/test/browser";
 
 import { AppRoot } from "~/AppRoot";
@@ -41,6 +43,7 @@ import stylesheet from "~/index.css?inline";
 import { useAttachmentUploadStore } from "~/lib/attachmentUploadQueue";
 import { environmentContextRecord } from "~/lib/composerContextRecords";
 import { startWorkspaceFocus } from "~/lib/workspaceFocus";
+import { promptStashSync, serverStashAccess } from "~/promptStash/promptStashSync";
 import { usePromptStashStore } from "~/promptStashStore";
 import { useRightPanelStore } from "~/rightPanelStore";
 import { getRouter } from "~/router";
@@ -60,6 +63,7 @@ import {
   threadWithHistory,
   threadWithQuestion,
   type FakeDriver,
+  type FakeThread,
 } from "../../test/fakeEnvironment";
 import { act, fakeTimers, render } from "../../test/render";
 
@@ -111,6 +115,12 @@ function holdRpc<Input>(method: string, end: Effect.Effect<never, Error>) {
   });
   return { calls, release, [Symbol.dispose]: () => answer[Symbol.dispose]() };
 }
+
+/** A transport failure: the request may have reached the server, but no reply came back. */
+const socketClosed = (message: string) =>
+  new RpcClientError.RpcClientError({
+    reason: new RpcClientError.RpcClientDefect({ message, cause: new Error(message) }),
+  });
 
 // Read by the driver mock below; `serveServerStash` sets it and resets it on dispose.
 const serverStash = vi.hoisted(() => ({
@@ -184,8 +194,8 @@ vi.mock("../../../../packages/client-runtime/src/connection/driver.ts", async (i
 
 /**
  * Serves a prompt stash holding `initial` until disposed. Put moves `pending-*` ids to `stash-*`
- * and take moves them back, like the server. Call before `installFakeEnvironment`, whose config
- * snapshot carries the capability.
+ * and take moves them back, like the server, and a repeated take request gets the first result.
+ * Call before `installFakeEnvironment`, whose config snapshot carries the capability.
  */
 function serveServerStash(initial: ReadonlyArray<PromptStashEntry> = []) {
   let entries = [...initial];
@@ -214,32 +224,75 @@ function serveServerStash(initial: ReadonlyArray<PromptStashEntry> = []) {
   publish({ upserted: entries.map(toSummary), replace: true });
   const puts: PromptStashPutInput[] = [];
   const takes: PromptStashTakeInput[] = [];
+  const removes: PromptStashRemoveInput[] = [];
+  let putGate: Promise<void> = Promise.resolve();
+  let lostTakeReplies = 0;
+  const takeResults = new Map<string, PromptStashEntry>();
   const put = answerRpc(WS_METHODS.promptStashPut, (input: PromptStashPutInput) =>
-    Effect.sync(() => {
+    Effect.promise(() => {
       puts.push(input);
-      const stored = relabel(input, "pending-", "stash-");
-      entries = [stored, ...entries];
-      publish({ upserted: [toSummary(stored)], replace: false });
-      return { summary: toSummary(stored), evictedIds: [] };
-    }),
+      return putGate;
+    }).pipe(
+      Effect.map(() => {
+        const stored = relabel(input, "pending-", "stash-");
+        entries = [stored, ...entries];
+        publish({ upserted: [toSummary(stored)], replace: false });
+        return { summary: toSummary(stored), evictedIds: [] };
+      }),
+    ),
   );
   const take = answerRpc(WS_METHODS.promptStashTake, (input: PromptStashTakeInput) =>
-    Effect.suspend(() => {
-      takes.push(input);
-      const entry = entries.find((candidate) => candidate.id === input.entryId);
-      if (!entry) {
-        return Effect.fail(
-          new PromptStashError({ reason: "already-taken", detail: `${input.entryId} is gone` }),
-        );
-      }
-      entries = entries.filter((candidate) => candidate !== entry);
-      publish({ upserted: [], removedIds: [entry.id], replace: false });
-      return Effect.succeed(relabel(entry, "stash-", "pending-"));
+    Effect.suspend(
+      (): Effect.Effect<PromptStashEntry, PromptStashError | RpcClientError.RpcClientError> => {
+        takes.push(input);
+        let taken = takeResults.get(input.requestId);
+        if (!taken) {
+          const entry = entries.find((candidate) => candidate.id === input.entryId);
+          if (!entry) {
+            return Effect.fail(
+              new PromptStashError({ reason: "already-taken", detail: `${input.entryId} is gone` }),
+            );
+          }
+          entries = entries.filter((candidate) => candidate !== entry);
+          publish({ upserted: [], removedIds: [entry.id], replace: false });
+          taken = relabel(entry, "stash-", "pending-");
+          takeResults.set(input.requestId, taken);
+        }
+        if (lostTakeReplies > 0) {
+          lostTakeReplies -= 1;
+          return Effect.fail(socketClosed("The connection dropped before the reply arrived"));
+        }
+        return Effect.succeed(taken);
+      },
+    ),
+  );
+  const remove = answerRpc(WS_METHODS.promptStashRemove, (input: PromptStashRemoveInput) =>
+    Effect.sync(() => {
+      removes.push(input);
+      entries = entries.filter((entry) => entry.id !== input.entryId);
+      publish({ upserted: [], removedIds: [input.entryId], replace: false });
     }),
   );
   return {
     puts,
     takes,
+    removes,
+    /** Holds every put until the returned release is called. */
+    holdPuts: () => {
+      let release = () => {};
+      putGate = new Promise((resolve) => {
+        release = resolve;
+      });
+      return release;
+    },
+    /** The next `count` takes happen on the server, but their replies never reach the client. */
+    loseTakeReplies: (count: number) => {
+      lostTakeReplies = count;
+    },
+    /** Whether config snapshots advertise the stash, as a server dropping off and coming back. */
+    setAvailable: (available: boolean) => {
+      serverStash.enabled = available;
+    },
     /** Another device took the entry: this one still lists it, the server no longer has it. */
     takeElsewhere: (entryId: string) => {
       entries = entries.filter((entry) => entry.id !== entryId);
@@ -247,6 +300,7 @@ function serveServerStash(initial: ReadonlyArray<PromptStashEntry> = []) {
     [Symbol.dispose]: () => {
       put[Symbol.dispose]();
       take[Symbol.dispose]();
+      remove[Symbol.dispose]();
       entries = [];
       publish({ upserted: [], replace: true });
       serverStash.enabled = false;
@@ -677,6 +731,228 @@ it("a server stash with a machine goes back to the stash when taken into an answ
   expect(page.getByTestId("composer-editor").element().textContent).not.toContain(
     "Deploy on the box",
   );
+});
+
+/** Opens the thread in the full app, unmounting it if the thread never shows. */
+async function openStashThread(thread: FakeThread): Promise<AsyncDisposable> {
+  __setClientSettingsForTests({
+    ...DEFAULT_CLIENT_SETTINGS,
+    onboardingCompletedAt: "2026-01-01T00:00:00.000Z",
+  });
+  const router = getRouter(
+    createMemoryHistory({ initialEntries: [`/${ENVIRONMENT_ID}/${thread.id}`] }),
+  );
+  await router.load();
+  await using stack = new AsyncDisposableStack();
+  // AppRoot brings its own router.
+  stack.use(await render(<AppRoot router={router} />, { router: false }));
+  await expect.element(page.getByText(`Answer 0 for ${thread.id}.`)).toBeVisible();
+  return stack.move();
+}
+
+const textStashEntry = (id: string, prompt: string): PromptStashEntry => ({
+  id,
+  createdAt: "2026-01-01T00:00:00.000Z",
+  prompt,
+  attachments: [],
+  droppedImageNames: [],
+  unreadableImageNames: [],
+  droppedFileNames: [],
+  records: [],
+});
+
+describe("server prompt stash", () => {
+  it("typing during a server put stays in the composer", async () => {
+    const thread = threadWithHistory("thread-stash-typing", 1);
+    using stash = serveServerStash();
+    using _environment = installFakeEnvironment([thread]);
+    await using _app = await openStashThread(thread);
+    const release = stash.holdPuts();
+    const editor = page.getByTestId("composer-editor");
+    await userEvent.click(editor);
+    await insertText("Stash this part");
+    await userEvent.keyboard("{ControlOrMeta>}s{/ControlOrMeta}");
+
+    await vi.waitFor(() => expect(stash.puts).toHaveLength(1));
+    expect(editor.element().textContent).not.toContain("Stash this part");
+    await insertText("Typed while saving");
+    release();
+
+    await userEvent.click(page.getByRole("button", { name: /^Stashed prompts/ }));
+    await expect
+      .element(page.getByRole("button", { name: "Restore stashed prompt: Stash this part" }))
+      .toBeVisible();
+    expect(stash.puts[0]?.prompt).toBe("Stash this part");
+    expect(editor.element().textContent).toContain("Typed while saving");
+    expect(usePromptStashStore.getState().entries).toEqual([]);
+  });
+
+  it("a failing put stashes locally", async () => {
+    const thread = threadWithHistory("thread-stash-failing-put", 1);
+    using _stash = serveServerStash();
+    using _failingPut = answerRpc(WS_METHODS.promptStashPut, () =>
+      Effect.fail(new PromptStashError({ reason: "storage", detail: "The disk is full" })),
+    );
+    using _environment = installFakeEnvironment([thread]);
+    await using _app = await openStashThread(thread);
+    const editor = page.getByTestId("composer-editor");
+    await userEvent.click(editor);
+    await insertText("Keep me on this device");
+    await userEvent.keyboard("{ControlOrMeta>}s{/ControlOrMeta}");
+
+    await vi.waitFor(() =>
+      expect(usePromptStashStore.getState().entries).toEqual([
+        expect.objectContaining({
+          prompt: "Keep me on this device",
+          environmentId: ENVIRONMENT_ID,
+        }),
+      ]),
+    );
+    expect(editor.element().textContent).not.toContain("Keep me on this device");
+    usePromptStashStore
+      .getState()
+      .dropEntries(usePromptStashStore.getState().entries.map((entry) => entry.id));
+  });
+
+  it("a take that loses its reply twice comes back to the stash after reconnect", async () => {
+    const thread = threadWithHistory("thread-stash-lost-take", 1);
+    using stash = serveServerStash([textStashEntry("stash-lost-take", "Lost on the way")]);
+    using _environment = installFakeEnvironment([thread]);
+    await using _app = await openStashThread(thread);
+    // The app starts the sync in main.tsx, which a rendered AppRoot skips.
+    using _sync = { [Symbol.dispose]: promptStashSync.start() };
+    stash.loseTakeReplies(2);
+
+    await userEvent.click(page.getByRole("button", { name: /^Stashed prompts/ }));
+    await userEvent.click(
+      page.getByRole("button", { name: "Restore stashed prompt: Lost on the way" }),
+    );
+    await expect
+      .element(page.getByText("Can't reach the server to take this stashed prompt"))
+      .toBeVisible();
+    expect(stash.takes).toHaveLength(2);
+    const [pending] = usePromptStashStore.getState().pendingTakes;
+    expect(pending).toMatchObject({ environmentId: ENVIRONMENT_ID, entryId: "stash-lost-take" });
+
+    stash.setAvailable(false);
+    using _offline = installFakeEnvironment([thread]);
+    await vi.waitFor(() => expect(serverStashAccess(ENVIRONMENT_ID)).toBe("unavailable"));
+    stash.setAvailable(true);
+    using _online = installFakeEnvironment([thread]);
+
+    await expect
+      .element(page.getByText("A prompt that couldn't be taken was returned to the stash"))
+      .toBeVisible();
+    expect(stash.takes.at(-1)).toEqual({
+      entryId: "stash-lost-take",
+      requestId: pending?.requestId,
+    });
+    expect(stash.puts).toEqual([
+      expect.objectContaining({ id: pending?.requestId, prompt: "Lost on the way" }),
+    ]);
+    expect(usePromptStashStore.getState().pendingTakes).toEqual([]);
+    expect(page.getByTestId("composer-editor").element().textContent).not.toContain(
+      "Lost on the way",
+    );
+  });
+
+  it("an image that fails to download goes back to the stash", async () => {
+    const thread = threadWithHistory("thread-stash-broken-image", 1);
+    using stash = serveServerStash([
+      {
+        ...textStashEntry("stash-broken-image", "With a picture"),
+        attachments: [
+          {
+            type: "image",
+            id: "image-broken",
+            attachmentId: "stash-broken",
+            name: "broken.png",
+            mimeType: "image/png",
+            sizeBytes: PNG.length,
+          },
+        ],
+      },
+    ]);
+    using _environment = installFakeEnvironment([thread]);
+    using _assetUrls = answerRpc(WS_METHODS.assetsCreateUrl, () =>
+      Effect.fail(socketClosed("The asset URL could not be minted")),
+    );
+    const deletes: unknown[] = [];
+    using _delete = answerRpc(WS_METHODS.attachmentsDelete, (input: unknown) => {
+      deletes.push(input);
+      return Effect.void;
+    });
+    await using _app = await openStashThread(thread);
+
+    await userEvent.click(page.getByRole("button", { name: /^Stashed prompts/ }));
+    await userEvent.click(
+      page.getByRole("button", { name: "Restore stashed prompt: With a picture" }),
+    );
+
+    await expect
+      .element(page.getByText("broken.png couldn't be downloaded and were returned to the stash."))
+      .toBeVisible();
+    expect(stash.puts).toEqual([
+      expect.objectContaining({
+        prompt: "",
+        attachments: [
+          expect.objectContaining({ attachmentId: "pending-broken", name: "broken.png" }),
+        ],
+      }),
+    ]);
+    expect(deletes).toEqual([]);
+    expect(page.getByTestId("composer-editor").element().textContent).toContain("With a picture");
+  });
+
+  it("a text-only server entry restores in another environment", async () => {
+    const otherEnvironmentId = EnvironmentId.make("environment-elsewhere");
+    using stash = serveServerStash([textStashEntry("stash-text-only", "Plain words travel")]);
+    using _environment = installFakeEnvironment([]);
+    __setClientSettingsForTests({
+      ...DEFAULT_CLIENT_SETTINGS,
+      onboardingCompletedAt: "2026-01-01T00:00:00.000Z",
+    });
+    const draftId = DraftId.make("draft-stash-elsewhere");
+    useComposerDraftStore
+      .getState()
+      .setProjectDraftThreadId(scopeProjectRef(otherEnvironmentId, PROJECT_ID), draftId, {
+        threadId: ThreadId.make("thread-stash-elsewhere"),
+      });
+    const router = getRouter(createMemoryHistory({ initialEntries: [`/draft/${draftId}`] }));
+    await router.load();
+    await using _app = await render(<AppRoot router={router} />, {
+      // AppRoot brings its own router.
+      router: false,
+    });
+
+    await userEvent.click(page.getByRole("button", { name: /^Stashed prompts/ }));
+    await userEvent.click(
+      page.getByRole("button", { name: "Restore stashed prompt: Plain words travel" }),
+    );
+
+    await vi.waitFor(() =>
+      expect(page.getByTestId("composer-editor").element().textContent).toContain(
+        "Plain words travel",
+      ),
+    );
+    expect(stash.takes).toEqual([expect.objectContaining({ entryId: "stash-text-only" })]);
+  });
+
+  it("deleting a server entry calls remove", async () => {
+    const thread = threadWithHistory("thread-stash-delete", 1);
+    using stash = serveServerStash([textStashEntry("stash-delete-me", "Delete me")]);
+    using _environment = installFakeEnvironment([thread]);
+    await using _app = await openStashThread(thread);
+
+    await userEvent.click(page.getByRole("button", { name: /^Stashed prompts/ }));
+    await expect
+      .element(page.getByRole("button", { name: "Restore stashed prompt: Delete me" }))
+      .toBeVisible();
+    await userEvent.click(page.getByRole("button", { name: "Delete stashed prompt" }));
+
+    await vi.waitFor(() => expect(stash.removes).toEqual([{ entryId: "stash-delete-me" }]));
+    expect(stash.takes).toEqual([]);
+  });
 });
 
 it("a new draft does not load its reserved thread before the server lists it", async () => {
