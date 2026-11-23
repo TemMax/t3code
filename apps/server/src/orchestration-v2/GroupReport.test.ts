@@ -473,6 +473,44 @@ it.effect("reports at once a worker its lead asked to hear from first, until tol
   }).pipe(Effect.provide(layerReactorTest)),
 );
 
+it.effect("drops the still-working note when a later report joins a queued early one", () =>
+  Effect.gen(function* () {
+    const { orchestrator, reactor, thread, create, startTurn, endTurn, reports } = yield* harness;
+    yield* create("lead");
+    yield* create("author", thread("lead"));
+    yield* create("other", thread("lead"));
+    yield* orchestrator.dispatch({
+      type: "thread.group.attach",
+      commandId: CommandId.make("command:group-report:merge-note:report-now"),
+      threadId: thread("author"),
+      parentThreadId: thread("lead"),
+      reportNow: true,
+    });
+    // The lead is busy, so the early report queues behind its turn.
+    yield* startTurn(thread("lead"), "Coordinate");
+    const other = yield* startTurn(thread("other"), "Long job");
+    const draft = yield* startTurn(thread("author"), "Write the fix");
+    yield* reactor.handle(yield* endTurn(draft, "waiting", "Fix written."));
+    const [early] = yield* reports(thread("lead"));
+    assert.include(early?.text, 'Still working: "other".');
+
+    yield* reactor.handle(yield* endTurn(other, "waiting", "Job done."));
+    const merged = yield* reports(thread("lead"));
+    assert.deepEqual(
+      merged.map((report) => [report.notification?.summary, report.text]),
+      [
+        [
+          "2 workers finished",
+          [
+            `author [finished] (threadId ${thread("author")}):\nFix written.`,
+            `other [finished] (threadId ${thread("other")}):\nJob done.`,
+          ].join("\n\n"),
+        ],
+      ],
+    );
+  }).pipe(Effect.provide(layerReactorTest)),
+);
+
 it.effect("sends no report while a worker waits for an answer", () =>
   Effect.gen(function* () {
     const { reactor, thread, create, startTurn, endTurn, reports } = yield* harness;
