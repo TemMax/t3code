@@ -1363,6 +1363,23 @@ it.layer(layerTest)("delegated completion delivery repairs", (it) => {
   );
 });
 
+it.each([
+  {
+    name: "completed results",
+    tasks: [{ status: "completed" }, { status: "completed" }],
+    waits: true,
+  },
+  { name: "a failed result", tasks: [{ status: "completed" }, { status: "failed" }], waits: false },
+  { name: "an interrupted result", tasks: [{ status: "interrupted" }], waits: false },
+  {
+    name: "a result asked for at once",
+    tasks: [{ status: "completed", wakeNow: true }],
+    waits: false,
+  },
+] as const)("a delegate's wake can wait for its run's other delegates: $name", (row) => {
+  assert.equal(Orchestrator.delegatedCompletionCanWait(row.tasks), row.waits);
+});
+
 const reconcileCommandId = (name: string) => CommandId.make(`command:runtime-reconcile:${name}`);
 
 const parentProviderThreadId = (threadId: ThreadId) =>
@@ -4250,6 +4267,28 @@ it.layer(Layer.merge(layerTest, ProviderContinuationRequests.layer))(
             outcome === "stopped" || outcome === "cancelled" ? "disposed" : "claimed",
           );
           assert.equal(followup.cancelledRunId, outcome === "cancelled" ? run.id : undefined);
+          if (outcome === "overlapping") {
+            // The later follow-up still runs, so the first result waits for it.
+            const laterRun = (yield* orchestrator.getThreadProjection(
+              child.childThreadId,
+            )).runs.find(
+              (row) => row.userMessageId === MessageId.make("message:overlapping-followup"),
+            )!;
+            yield* eventSink.write({
+              commandId: reconcileCommandId("followup-later-finished"),
+              events: [
+                {
+                  id: EventId.make("event:followup-later-finished"),
+                  type: "run.updated",
+                  threadId: child.childThreadId,
+                  runId: laterRun.id,
+                  occurredAt: now,
+                  payload: { ...laterRun, status: "completed", startedAt: now, completedAt: now },
+                },
+              ],
+            });
+            yield* orchestrator.recoverDelegatedTasks;
+          }
           if (outcome !== "stopped" && outcome !== "cancelled") {
             let wake = yield* requests.take;
             while (
@@ -4263,6 +4302,15 @@ it.layer(Layer.merge(layerTest, ProviderContinuationRequests.layer))(
               wake.delegatedCompletion?.messageId,
               firstWake.delegatedCompletion?.messageId,
             );
+            if (outcome === "overlapping") {
+              // One wake carries both results.
+              const waiting = yield* orchestrator.getThreadProjection(parentThreadId);
+              const delivery = waiting.runs.find((row) => row.id === parentRunId)
+                ?.delegatedCompletion?.delivery;
+              assert.equal(delivery?.messageId, wake.delegatedCompletion?.messageId);
+              assert.lengthOf(delivery?.taskIds ?? [], 2);
+              assert.include(delivery?.taskIds ?? [], followup.id);
+            }
           }
           assert.equal(
             finished.contextTransfers.filter(
@@ -4274,7 +4322,11 @@ it.layer(Layer.merge(layerTest, ProviderContinuationRequests.layer))(
           );
           yield* orchestrator.recoverDelegatedTasks;
           const recovered = yield* orchestrator.getThreadProjection(parentThreadId);
-          assert.equal(recovered.contextTransfers.length, finished.contextTransfers.length);
+          assert.equal(
+            recovered.contextTransfers.length,
+            // The later follow-up's result arrived after `finished` was read.
+            finished.contextTransfers.length + (outcome === "overlapping" ? 1 : 0),
+          );
           if (outcome === "completed") {
             const automaticMessageId = MessageId.make("message:followup-automatic-wake");
             yield* orchestrator.dispatch({

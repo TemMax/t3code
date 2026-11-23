@@ -185,10 +185,12 @@ are still working alone. A settled lead with live members stays in place, dimmed
 **Un-settle**; the group moves to Settled once every member is settled. Settling or snoozing
 a member only affects that member.
 
-Messages agents send to others in their group wait until the receiver's turn ends. When a
-worker finishes or fails, its lead gets a report with the worker's last reply, even when the
-lead is snoozed. Reports from several workers that arrive while the lead is busy reach it as one
-message.
+Messages agents send to others in their group wait until the receiver's turn ends. When every
+worker has stopped, the lead gets one report with each worker's last reply, even when the lead
+is snoozed, so it writes to you once instead of after each worker. A worker that fails does not
+wait for the others: its report reaches the lead at once. A worker still waiting on checks it
+started in the background counts as working. A lead whose next step depends on one worker can
+ask for that worker's report as soon as it stops.
 
 A group has a board where its agents post the current state of their work as short topics.
 Agents write it and you read it. Choose **Board** at the right end of the group strip above the

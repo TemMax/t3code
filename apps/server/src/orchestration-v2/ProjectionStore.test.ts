@@ -13,6 +13,7 @@ import {
   MessageId,
   type ModelSelection,
   type OrchestrationV2ProviderThread,
+  type OrchestrationV2Subagent,
   type OrchestrationV2TurnItem,
   type OrchestrationV2ThreadHistoryPage,
   type OrchestrationV2ThreadShellSnapshot,
@@ -2757,6 +2758,73 @@ const runlessNativeSubagentNeedsRecovery = Effect.gen(function* () {
     );
   }
 });
+
+const workingAsyncDelegates = Effect.gen(function* () {
+  const store = yield* ProjectionStore.ProjectionStoreV2;
+  const threadId = yield* addRolledBackRecoveryCandidate("working-async-delegates");
+  const now = yield* DateTime.now;
+  const runId = RunId.make("run:working-async-delegates");
+  const done = NodeId.make("node:working-async-delegates:done");
+  const other = NodeId.make("node:working-async-delegates:other");
+  let revision = 0;
+  const put = (id: NodeId, overrides: Partial<OrchestrationV2Subagent>) =>
+    store.apply({
+      id: EventId.make(`event:${id}:${revision++}`),
+      type: "subagent.updated",
+      threadId,
+      nodeId: id,
+      driver,
+      providerInstanceId,
+      occurredAt: now,
+      payload: {
+        id,
+        threadId,
+        runId,
+        parentNodeId: NodeId.make("node:working-async-delegates:parent"),
+        origin: "app_owned",
+        createdBy: "agent",
+        driver,
+        providerInstanceId,
+        providerThreadId: null,
+        childThreadId: null,
+        nativeTaskRef: null,
+        prompt: "Do the work",
+        title: "Delegated task",
+        model: null,
+        completionWake: "always",
+        status: "running",
+        result: null,
+        startedAt: now,
+        completedAt: null,
+        updatedAt: now,
+        ...overrides,
+      },
+    });
+  const othersWork = (exceptTaskIds: ReadonlyArray<NodeId>) =>
+    store.hasWorkingAsyncDelegate({ threadId, runId, exceptTaskIds });
+  yield* put(done, { status: "completed" });
+  assert.isFalse(yield* othersWork([done]));
+  const rows: ReadonlyArray<readonly [Partial<OrchestrationV2Subagent>, boolean]> = [
+    [{ status: "running" }, true],
+    [{ status: "waiting" }, true],
+    [{ status: "idle" }, false],
+    [{ status: "completed" }, false],
+    // The caller waits on this one inside its turn.
+    [{ completionWake: "settled_only" }, false],
+    [{ origin: "provider_native" }, false],
+    [{ runId: RunId.make("run:working-async-delegates:later") }, false],
+  ];
+  for (const [overrides, expected] of rows) {
+    yield* put(other, overrides);
+    assert.equal(yield* othersWork([done]), expected, JSON.stringify(overrides));
+  }
+  yield* put(other, {});
+  assert.isFalse(yield* othersWork([done, other]));
+});
+
+it.effect("SQL projection finds a run's async delegates that still work", () =>
+  workingAsyncDelegates.pipe(Effect.provide(layerTest)),
+);
 
 const subagentRecordsSelectById = Effect.gen(function* () {
   const store = yield* ProjectionStore.ProjectionStoreV2;

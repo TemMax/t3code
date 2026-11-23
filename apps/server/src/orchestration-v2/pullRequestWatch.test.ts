@@ -8,6 +8,7 @@ import { assert, describe, it } from "@effect/vitest";
 import {
   PULL_REQUEST_WATCH_WAKE_LIMIT,
   evaluatePullRequestWatch as evaluate,
+  changeRequestsMergedByTool,
   pullRequestWatchEndMessage,
   pullRequestWatchMessage,
 } from "./pullRequestWatch.ts";
@@ -1053,6 +1054,21 @@ describe("evaluatePullRequestWatch", () => {
     assert.isFalse(unanswered(null));
     assert.isTrue(unanswered(STARTED));
   });
+});
+
+it.each([
+  ["a named pull request", { number: 25, method: "squash" }, [25]],
+  ["the thread's own pull request", { expectedHeadSha: "053232f" }, "any"],
+  ["a stack", { number: 25, stack: true }, "any"],
+  ["an auto-merge, which lands later", { number: 25, auto: true }, undefined],
+] as const)("the merge tool ends the agent's own watch for %s", (_name, input, expected) => {
+  const merged = changeRequestsMergedByTool({
+    toolName: "mcp__t3-code__pull_request_merge",
+    input,
+  });
+  const numbers: unknown = merged instanceof Set ? [...merged] : merged;
+  assert.deepEqual(numbers, expected);
+  assert.isUndefined(changeRequestsMergedByTool({ toolName: "mcp__t3-code__ci_rerun", input }));
 });
 
 describe("pullRequestWatchEndMessage", () => {

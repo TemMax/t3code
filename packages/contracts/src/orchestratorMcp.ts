@@ -194,6 +194,12 @@ export const OrchestratorMcpDelegateTaskInput = Schema.Struct({
         "Default 'async'. 'wait' only if this turn needs the result. A question or approval ends the wait.",
     }),
   ),
+  wake: Schema.optional(
+    Schema.Literals(["with_others", "now"]).annotate({
+      description:
+        "Mode 'async' only. Default 'with_others': the result waits for the other children started in the same turn, and you wake once for all of them. 'now' only if your next step needs this result first. A failed child always wakes you at once.",
+    }),
+  ),
   timeoutMs: Schema.optional(Schema.Finite).annotate({
     description: "Mode 'wait' only. At most 45 s. A timeout does not cancel the child.",
   }),
@@ -210,7 +216,7 @@ export type OrchestratorMcpDelegateTaskInput = typeof OrchestratorMcpDelegateTas
 
 // Set only on results for still-running tasks whose completion will wake the parent.
 export const ORCHESTRATOR_MCP_RUNNING_TASK_NEXT =
-  "Completion wakes this thread. Do not wait on it or poll it. Continue other work, and end your turn when none is left.";
+  "Completion wakes this thread, once for the children started in one turn unless you set `wake:'now'`. Do not wait on it or poll it. Continue other work, and end your turn when none is left.";
 // A string, not a literal: linked environments on other versions send their own wording.
 const OrchestratorMcpRunningTaskNext = Schema.String;
 
@@ -281,8 +287,14 @@ export const OrchestratorMcpTaskCancelResult = Schema.Struct({
 });
 export type OrchestratorMcpTaskCancelResult = typeof OrchestratorMcpTaskCancelResult.Type;
 
+export const OrchestratorMcpGroupWake = Schema.Literals(["with_group", "now"]).annotate({
+  description:
+    "For a worker in your group. Default 'with_group': its report waits until every worker has stopped, and you wake once. 'now' only if your next step needs this worker's report first. A failed worker always wakes you at once.",
+});
+
 export const OrchestratorMcpCreateThreadRequest = Schema.Struct({
   prompt: Schema.optional(OrchestratorMcpPrompt),
+  wake: Schema.optional(OrchestratorMcpGroupWake),
   title: Schema.optional(OrchestratorMcpTitle),
   target: Schema.optional(OrchestratorMcpTarget),
   runtimeMode: Schema.optional(OrchestratorMcpRuntimeMode),
@@ -581,6 +593,7 @@ export const OrchestratorMcpThreadSendInput = Schema.Struct({
   threadId: ThreadId,
   message: OrchestratorMcpPrompt,
   mode: Schema.optional(Schema.Literals(["auto", "queue", "steer", "restart"])),
+  wake: Schema.optional(OrchestratorMcpGroupWake),
   freshContext: Schema.optional(
     Schema.Boolean.annotate({
       description:

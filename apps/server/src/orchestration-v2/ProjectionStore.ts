@@ -378,6 +378,7 @@ export interface ProjectionRecordFilter {
   readonly attemptIds?: ReadonlyArray<RunAttemptId>;
   readonly messageRoles?: ReadonlyArray<OrchestrationV2ConversationMessage["role"]>;
   readonly monitorNotificationsOnly?: boolean;
+  readonly groupWorkerNotificationsOnly?: true;
   /** User messages that are monitor notifications or delegated-completion wakes, through their partial index. */
   readonly delegatedTaskMessagesOnly?: true;
   readonly turnItemRunId?: RunId;
@@ -576,6 +577,12 @@ export interface ProjectionStoreV2Shape {
   readonly hasPendingDelegatedCompletion: (
     childThreadId: ThreadId,
   ) => Effect.Effect<boolean, ProjectionStoreV2Error>;
+  /** Whether a run's async delegates, other than `exceptTaskIds`, still work. */
+  readonly hasWorkingAsyncDelegate: (input: {
+    readonly threadId: ThreadId;
+    readonly runId: RunId;
+    readonly exceptTaskIds: ReadonlyArray<NodeId>;
+  }) => Effect.Effect<boolean, ProjectionStoreV2Error>;
   readonly getNextTurnItemOrdinal: (
     threadId: ThreadId,
   ) => Effect.Effect<number, ProjectionStoreV2Error>;
@@ -4615,6 +4622,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
                   ${filter?.messageIds === undefined ? sql`` : sql`AND message_id IN (SELECT value FROM json_each(${encodeIdList(filter.messageIds)}))`}
                   ${filter?.messageRoles === undefined ? sql`` : sql`AND role IN (SELECT value FROM json_each(${encodeIdList(filter.messageRoles)}))`}
                   ${filter?.monitorNotificationsOnly === true ? sql`AND json_extract(payload_json, '$.notification.source.kind') = 'monitor'` : sql``}
+                  ${filter?.groupWorkerNotificationsOnly === true ? sql`AND json_extract(payload_json, '$.notification.source.kind') = 'group_worker'` : sql``}
                   ${filter?.delegatedTaskMessagesOnly === true ? sql`AND ${sql.literal(DELEGATED_TASK_MESSAGE_CONDITION)}` : sql``}
                   ${filter?.messageRunIds === undefined ? sql`` : sql`AND run_id IN (SELECT value FROM json_each(${encodeIdList(filter.messageRunIds)}))`}
                 ORDER BY created_at ASC, message_id ASC
@@ -6856,6 +6864,22 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
           Effect.mapError(controlReadError(childThreadId)),
         ),
       );
+    // An idle task has no run to end, so nothing would release a wake that waited for it.
+    const hasWorkingAsyncDelegate: ProjectionStoreV2Shape["hasWorkingAsyncDelegate"] = Effect.fn(
+      "ProjectionStore.hasWorkingAsyncDelegate",
+    )(({ threadId, runId, exceptTaskIds }) =>
+      sql`SELECT 1 FROM orchestration_v2_projection_subagents AS task
+        WHERE task.thread_id = ${threadId}
+          AND task.status IN ('pending', 'running', 'waiting')
+          AND task.run_id = ${runId}
+          AND task.origin = 'app_owned'
+          AND json_extract(task.payload_json, '$.completionWake') = 'always'
+          AND task.subagent_id NOT IN (SELECT value FROM json_each(${encodeIdList(exceptTaskIds)}))
+        LIMIT 1`.pipe(
+        Effect.map((rows) => rows.length > 0),
+        Effect.mapError(controlReadError(threadId)),
+      ),
+    );
     const getNextTurnItemOrdinal: ProjectionStoreV2Shape["getNextTurnItemOrdinal"] = (threadId) =>
       sql<{ ordinal: number | null }>`SELECT MAX(ordinal) AS ordinal
         FROM orchestration_v2_projection_turn_items WHERE thread_id = ${threadId}`.pipe(
@@ -9980,6 +10004,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
       getRunCount: readOnReader(getRunCount),
       listAppOwnedChildThreadIds: readOnReader(listAppOwnedChildThreadIds),
       hasPendingDelegatedCompletion: readOnReader(hasPendingDelegatedCompletion),
+      hasWorkingAsyncDelegate: readOnReader(hasWorkingAsyncDelegate),
       getNextTurnItemOrdinal: readOnReader(getNextTurnItemOrdinal),
       getTurnItem: readOnReader(getTurnItem),
       getMessagesById: readOnReader(getMessagesById),
