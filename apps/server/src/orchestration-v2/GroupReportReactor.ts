@@ -175,7 +175,14 @@ const make = Effect.gen(function* () {
         };
       }),
     );
-    const text = sections.map((section) => section.text).join("\n\n");
+    const detail = sections.map((section) => section.text).join("\n\n");
+    const text =
+      detail +
+      Orchestrator.groupReportStillWorkingNote(
+        workers.flatMap((worker) =>
+          worker.busy ? [worker.thread.title.replace(/\s+/g, " ").trim() || "Untitled worker"] : [],
+        ),
+      );
     const failures = pending.filter((report) => report.failed).length;
     const key = `group-report:${first.key}`;
     yield* engine.dispatch({
@@ -195,7 +202,7 @@ const make = Effect.gen(function* () {
           pending.length === 1
             ? `${sections[0]!.title} ${first.failed ? "failed" : "finished"}`
             : Orchestrator.groupWorkerReportSummary(pending.length, failures),
-        detail: text,
+        detail,
       },
       attachments: [],
       dispatchMode: { type: "queue_after_active" },

@@ -456,8 +456,13 @@ it.effect("reports at once a worker its lead asked to hear from first, until tol
     const draft = yield* startTurn(thread("author"), "Write the fix");
     yield* reactor.handle(yield* endTurn(draft, "waiting", "Fix written."));
     assert.deepEqual(
-      (yield* reports(thread("lead"))).map((report) => report.notification?.summary),
-      ["author finished"],
+      (yield* reports(thread("lead"))).map((report) => [report.notification?.summary, report.text]),
+      [
+        [
+          "author finished",
+          `author [finished] (threadId ${thread("author")}):\nFix written.\n\nStill working: "other". Act on this report if it needs action and reply in one line. Give the full summary after the last one reports.`,
+        ],
+      ],
     );
 
     // The next message to it carries no such ask, so its report waits for the group again.

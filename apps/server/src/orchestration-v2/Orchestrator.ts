@@ -1338,7 +1338,19 @@ export function groupWorkerReportSummary(workers: number, failed: number): strin
   return `${workers} workers ${failed === 0 ? "finished" : failed === workers ? "failed" : "reported"}`;
 }
 
-function groupWorkerReportSections(text: string, threadIds: ReadonlyArray<ThreadId>) {
+const GROUP_REPORT_STILL_WORKING = "\n\nStill working: ";
+
+/** Ends a report sent before the whole group stopped, so the lead knows more reports follow. */
+export function groupReportStillWorkingNote(titles: ReadonlyArray<string>): string {
+  return titles.length === 0
+    ? ""
+    : `${GROUP_REPORT_STILL_WORKING}${titles.map((title) => `"${title}"`).join(", ")}. Act on this report if it needs action and reply in one line. Give the full summary after the last one reports.`;
+}
+
+function groupWorkerReportSections(fullText: string, threadIds: ReadonlyArray<ThreadId>) {
+  // The note describes the moment it was sent, so a merged report drops it.
+  const noteAt = fullText.lastIndexOf(GROUP_REPORT_STILL_WORKING);
+  const text = noteAt === -1 ? fullText : fullText.slice(0, noteAt);
   const found: Array<{ readonly threadId: ThreadId; readonly start: number; failed: boolean }> = [];
   let from = 0;
   for (const threadId of threadIds) {
