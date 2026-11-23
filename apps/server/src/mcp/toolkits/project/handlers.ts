@@ -426,6 +426,7 @@ export const layer = McpToolAccess.toLayer(ProjectToolkit, {
           creationSource: "mcp",
           ...(linkOrigin === undefined ? {} : { linkOrigin }),
           ...(caller === undefined ? {} : { groupParentThreadId: caller.id }),
+          ...(input.wake === "now" ? { groupReportNow: true } : {}),
           // Kept only alongside linkOrigin: thread.create drops it otherwise.
           ...(input.delegatedFrom === undefined ? {} : { delegatedFrom: input.delegatedFrom }),
         }).pipe(

@@ -556,6 +556,8 @@ export const OrchestrationV2AppThread = Schema.Struct({
   groupParentThreadId: Schema.optional(Schema.NullOr(ThreadId)),
   groupOrderKey: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   groupLaunchedByThreadId: Schema.optional(Schema.NullOr(ThreadId)),
+  /** The lead asked for this worker's report at once instead of with the whole group's. */
+  groupReportNow: Schema.optional(Schema.Boolean),
   boardTopicCount: Schema.optional(NonNegativeInt),
   boardUpdatedAt: Schema.optional(Schema.NullOr(IsoDateTime)),
   boardViewedAt: Schema.optional(Schema.NullOr(IsoDateTime)),
@@ -1038,6 +1040,8 @@ export const OrchestrationV2Subagent = Schema.Struct({
   modelSelection: Schema.optional(ModelSelection),
   executedModel: Schema.optional(Schema.String),
   completionWake: Schema.optional(Schema.Literals(["always", "settled_only"])),
+  /** The parent asked for this result at once instead of with its other delegates' results. */
+  wakeNow: Schema.optional(Schema.Literal(true)),
   completionDelivery: Schema.optional(OrchestrationV2DelegatedCompletionTaskDelivery),
   // The run whose unfinished task was cancelled, committed with its Stop.
   cancelledRunId: Schema.optional(RunId),
@@ -1473,6 +1477,8 @@ export const OrchestrationV2NotificationSource = kindUnionWithFallback(
     Schema.Struct({
       kind: Schema.Literal("group_worker"),
       workerThreadIds: Schema.Array(ThreadId),
+      /** One key per reported worker run, so a held report is sent once. Older reports omit it. */
+      reportKeys: Schema.optional(Schema.Array(Schema.String)),
     }),
   ],
   (kind) => Schema.Struct({ kind }),
@@ -3261,6 +3267,7 @@ export const OrchestrationV2Command = Schema.Union([
     linkOrigin: Schema.optional(OrchestrationV2LinkOrigin),
     /** Only the server sets this; a client's thread.create never carries one. */
     groupParentThreadId: Schema.optional(ThreadId),
+    groupReportNow: Schema.optional(Schema.Boolean),
     /** Only the server sets this, with `linkOrigin`, for a linked environment's delegated task. */
     delegatedFrom: Schema.optional(OrchestrationV2DelegatedFrom),
     importedNativeThread: Schema.optional(
@@ -3377,6 +3384,8 @@ export const OrchestrationV2Command = Schema.Union([
     threadId: ThreadId,
     parentThreadId: ThreadId,
     orderKey: Schema.optional(TrimmedNonEmptyString),
+    /** Also sets it on a thread already in the group, which the command otherwise leaves alone. */
+    reportNow: Schema.optional(Schema.Boolean),
   }),
   Schema.Struct({
     type: Schema.Literal("thread.group.detach"),
@@ -3766,6 +3775,7 @@ export const OrchestrationV2Command = Schema.Union([
     workspaceStrategy: Schema.optional(OrchestrationV2ThreadLaunchWorkspaceStrategy),
     // Defaults to settled_only; fire-and-forget wakes require always.
     completionWake: Schema.optional(Schema.Literals(["always", "settled_only"])),
+    wakeNow: Schema.optional(Schema.Literal(true)),
     createdAt: Schema.optional(Schema.DateTimeUtc),
   }),
   Schema.Struct({
@@ -3915,6 +3925,7 @@ const OrchestrationV2InternalCommand = Schema.Union([
     modelSelection: ModelSelection,
     remoteChild: OrchestrationV2RemoteTaskChild,
     completionWake: Schema.optional(Schema.Literals(["always", "settled_only"])),
+    wakeNow: Schema.optional(Schema.Literal(true)),
   }),
   /**
    * Completes a delegated task that ran in a linked environment, with what its

@@ -285,7 +285,9 @@ provider session. The request becomes the V2 command
 the timeout expires. A wait timeout does not cancel the child; the result sets
 `waitTimedOut: true`. When the result includes `next`, completion wakes the parent:
 do not wait on the task or poll it; continue other work, and end the turn when none is
-left. A pending blocking question also ends the wait with `hasPendingQuestion: true` and
+left. A finished task's wake waits while the other async tasks started in the same turn still
+work, so their results arrive as one message. A task that failed or was stopped, or one requested with
+`wake: "now"`, wakes the parent at once and brings the results that were waiting. A pending blocking question also ends the wait with `hasPendingQuestion: true` and
 `waitTimedOut: false`.
 If `hasPendingQuestion`, pass `threadId=childThreadId` to `t3_pending_request` with
 action `list`, `read` (with `requestId`), or `respond`, or ask the user; the task's completion still wakes this thread. A pending live approval for the

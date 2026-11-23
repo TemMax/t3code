@@ -5,7 +5,9 @@ import type {
   PullRequestDetail,
   ThreadPullRequestWatch,
 } from "@t3tools/contracts";
+import { resolveT3McpToolId } from "@t3tools/shared/t3McpToolPresentation";
 import * as DateTime from "effect/DateTime";
+import * as Predicate from "effect/Predicate";
 
 /** Bounds consecutive comment-only wakes to stop bot reply loops; check, conflict, or push news resets it. */
 export const PULL_REQUEST_WATCH_WAKE_LIMIT = 10;
@@ -451,6 +453,23 @@ export function combinePullRequestWatchWakes(
       summary: wakes.map((wake) => wake.notification.summary).join("; "),
     },
   };
+}
+
+/**
+ * The pull requests a T3 merge tool call merges itself, or "any" when it names none or merges a
+ * stack. An auto-merge lands later, so that merge is still news.
+ */
+export function changeRequestsMergedByTool(item: {
+  readonly toolName: string | null;
+  readonly input: unknown;
+}): ReadonlySet<number> | "any" | undefined {
+  if (resolveT3McpToolId(item.toolName) !== "pull_request_merge") return undefined;
+  const input: object = Predicate.isObject(item.input) ? item.input : {};
+  if (Reflect.get(input, "auto") === true) return undefined;
+  const number: unknown = Reflect.get(input, "number");
+  return typeof number === "number" && Reflect.get(input, "stack") !== true
+    ? new Set([number])
+    : "any";
 }
 
 export function pullRequestWatchEndMessage(input: {

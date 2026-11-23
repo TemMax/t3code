@@ -47,6 +47,7 @@ import * as Orchestrator from "./Orchestrator.ts";
 import * as ProjectionStore from "./ProjectionStore.ts";
 import { isTerminalRunStatus } from "./ThreadManagementService.ts";
 import {
+  changeRequestsMergedByTool,
   combinePullRequestWatchWakes,
   evaluatePullRequestWatch,
   PULL_REQUEST_WATCH_NO_CHECKS_MS,
@@ -918,16 +919,20 @@ export const make = Effect.gen(function* () {
         }
         if (event.type !== "turn-item.updated") return Effect.void;
         const item = event.payload;
-        if (
-          item.type !== "command_execution" ||
-          finished.has(item.id) ||
-          !isChangeRequestCloseCommand(item.input)
-        ) {
-          return Effect.void;
-        }
+        if (finished.has(item.id)) return Effect.void;
+        // A merge is the agent's own whether it ran the host's CLI or T3's merge tool.
+        const ends =
+          item.type === "command_execution"
+            ? isChangeRequestCloseCommand(item.input)
+              ? changeRequestsClosedBy(item.input)
+              : undefined
+            : item.type === "dynamic_tool"
+              ? changeRequestsMergedByTool(item)
+              : undefined;
+        if (ends === undefined) return Effect.void;
         const commands = agentEnds.get(event.threadId) ?? new Map();
         agentEnds.set(event.threadId, commands);
-        commands.set(item.id, changeRequestsClosedBy(item.input));
+        commands.set(item.id, ends);
         if (isOrchestrationV2WorkActive(item.status)) return Effect.void;
         finished.add(item.id);
         const done = Effect.sync(() => {
@@ -938,7 +943,10 @@ export const make = Effect.gen(function* () {
         });
         // Some providers report a command that failed as completed.
         return Effect.andThen(
-          item.status === "completed" && !commandIndicatesFailure(item) ? Effect.void : done,
+          item.status === "completed" &&
+            (item.type !== "command_execution" || !commandIndicatesFailure(item))
+            ? Effect.void
+            : done,
           FiberMap.run(
             agentReads,
             item.id,

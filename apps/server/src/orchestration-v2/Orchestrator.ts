@@ -671,6 +671,7 @@ const threadOutsideGroup = (thread: OrchestrationV2AppThread): OrchestrationV2Ap
   groupParentThreadId: null,
   groupOrderKey: null,
   groupLaunchedByThreadId: null,
+  ...(thread.groupReportNow === true ? { groupReportNow: false } : {}),
 });
 
 const nextGroupOrderKey = (previous: string | null, next: string | null): string =>
@@ -1049,7 +1050,37 @@ function delegatedCompletionWakeDetail(
       }
       return `${label}. Use task_status with taskId ${taskId} to read the result.`;
     })
+    .concat(delegatedCompletionStillRunningNote(taskIds, tasks))
     .join("\n\n");
+}
+
+/** Tells a parent woken early, by a failure or a `wake:'now'` task, that more results follow. */
+function delegatedCompletionStillRunningNote(
+  taskIds: ReadonlyArray<string>,
+  tasks: ReadonlyArray<OrchestrationV2Subagent>,
+): ReadonlyArray<string> {
+  const running = tasks.filter(
+    (task) =>
+      !taskIds.includes(task.id) &&
+      task.origin === "app_owned" &&
+      task.completionWake === "always" &&
+      (task.status === "pending" || task.status === "running" || task.status === "waiting"),
+  );
+  return running.length === 0
+    ? []
+    : [
+        `Still running: ${running.map((task) => `"${task.title ?? task.id}"`).join(", ")}. Act on this result if it needs action and reply in one line. Give the full summary after the last one reports.`,
+      ];
+}
+
+/**
+ * A finished delegate's wake can wait for the delegates its run started with it, so their results
+ * arrive as one message. A task that did not complete, or asked to wake at once, goes now.
+ */
+export function delegatedCompletionCanWait(
+  deliveryTasks: ReadonlyArray<Pick<OrchestrationV2Subagent, "status" | "wakeNow">>,
+): boolean {
+  return deliveryTasks.every((task) => task.status === "completed" && task.wakeNow !== true);
 }
 
 function isTerminalDelegatedTaskStatus(status: OrchestrationV2Subagent["status"]): boolean {
@@ -1302,7 +1333,24 @@ export function groupWorkerReportHeader(input: {
   return `${input.title} [${input.failed ? "failed" : "finished"}] (threadId ${input.threadId}):`;
 }
 
-function groupWorkerReportSections(text: string, threadIds: ReadonlyArray<ThreadId>) {
+/** The one-line summary of a report that covers several workers. */
+export function groupWorkerReportSummary(workers: number, failed: number): string {
+  return `${workers} workers ${failed === 0 ? "finished" : failed === workers ? "failed" : "reported"}`;
+}
+
+const GROUP_REPORT_STILL_WORKING = "\n\nStill working: ";
+
+/** Ends a report sent before the whole group stopped, so the lead knows more reports follow. */
+export function groupReportStillWorkingNote(titles: ReadonlyArray<string>): string {
+  return titles.length === 0
+    ? ""
+    : `${GROUP_REPORT_STILL_WORKING}${titles.map((title) => `"${title}"`).join(", ")}. Act on this report if it needs action and reply in one line. Give the full summary after the last one reports.`;
+}
+
+function groupWorkerReportSections(fullText: string, threadIds: ReadonlyArray<ThreadId>) {
+  // The note describes the moment it was sent, so a merged report drops it.
+  const noteAt = fullText.lastIndexOf(GROUP_REPORT_STILL_WORKING);
+  const text = noteAt === -1 ? fullText : fullText.slice(0, noteAt);
   const found: Array<{ readonly threadId: ThreadId; readonly start: number; failed: boolean }> = [];
   let from = 0;
   for (const threadId of threadIds) {
@@ -1357,6 +1405,16 @@ function mergedGroupWorkerReport(
   ];
   const text = sections.map((section) => section.section).join("\n\n");
   const failed = sections.filter((section) => section.failed).length;
+  // Keys stay in step with the sections: a worker's newer report replaces its key too.
+  const keys = new Map<ThreadId, string>();
+  for (const source of [message.notification.source, report.notification.source]) {
+    source.workerThreadIds.forEach((threadId, index) => {
+      const key = source.reportKeys?.[index];
+      if (key === undefined) keys.delete(threadId);
+      else keys.set(threadId, key);
+    });
+  }
+  const reportKeys = sections.flatMap((section) => keys.get(section.threadId) ?? []);
   const notification: OrchestrationV2Notification =
     sections.length === 1
       ? { ...report.notification, detail: text }
@@ -1364,11 +1422,10 @@ function mergedGroupWorkerReport(
           source: {
             kind: "group_worker",
             workerThreadIds: sections.map((section) => section.threadId),
+            ...(reportKeys.length === sections.length ? { reportKeys } : {}),
           },
           outcome: failed === 0 ? "completed" : "failed",
-          summary: `${sections.length} workers ${
-            failed === 0 ? "finished" : failed === sections.length ? "failed" : "reported"
-          }`,
+          summary: groupWorkerReportSummary(sections.length, failed),
           detail: text,
         };
   return { run: queued, message: { ...message, text, notification } };
@@ -2371,6 +2428,20 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         });
         if (!isUndeliveredMailboxSteer({ ...messages, ...runs, ...turns }, delivery.messageId))
           return;
+      } else {
+        const { subagents } = yield* projectionStore.getThreadRecords(threadId, ["subagents"], {
+          subagentIds: delivery.taskIds,
+        });
+        if (
+          delegatedCompletionCanWait(subagents) &&
+          (yield* projectionStore.hasWorkingAsyncDelegate({
+            threadId,
+            runId: parentRunId,
+            exceptTaskIds: delivery.taskIds,
+          }))
+        ) {
+          return;
+        }
       }
       const projection = yield* projectionStore.getThreadRecords(threadId, ["providerThreads"], {
         providerThreadIds: parentRun.providerThreadId === null ? [] : [parentRun.providerThreadId],
@@ -4324,11 +4395,14 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         yield* emitGroupAttached(
           events,
           command,
-          threadInGroup(thread, {
-            parentThreadId: resolved.success.parent.id,
-            orderKey: nextGroupOrderKey(siblings.at(-1)?.groupOrderKey ?? null, null),
-            launchedByThreadId: resolved.success.launchedByThreadId,
-          }),
+          {
+            ...threadInGroup(thread, {
+              parentThreadId: resolved.success.parent.id,
+              orderKey: nextGroupOrderKey(siblings.at(-1)?.groupOrderKey ?? null, null),
+              launchedByThreadId: resolved.success.launchedByThreadId,
+            }),
+            ...(command.groupReportNow === true ? { groupReportNow: true } : {}),
+          },
           now,
         );
       }
@@ -4487,7 +4561,20 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     const resolved = yield* resolveGroupParent(command.parentThreadId, command.threadId);
     if (Result.isFailure(resolved)) return yield* invalid(resolved.failure);
     const { parent } = resolved.success;
-    if (thread.groupParentThreadId === parent.id) return;
+    if (thread.groupParentThreadId === parent.id) {
+      if (
+        command.reportNow !== undefined &&
+        command.reportNow !== (thread.groupReportNow === true)
+      ) {
+        yield* emitGroupAttached(
+          events,
+          command,
+          { ...thread, groupReportNow: command.reportNow },
+          now,
+        );
+      }
+      return;
+    }
 
     const siblingKeys = (yield* groupMemberThreads(parent.id)).flatMap((sibling) =>
       sibling.id === thread.id || sibling.groupOrderKey == null ? [] : [sibling.groupOrderKey],
@@ -4496,11 +4583,14 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     yield* emitGroupAttached(
       events,
       command,
-      threadInGroup(thread, {
-        parentThreadId: parent.id,
-        orderKey,
-        launchedByThreadId: null,
-      }),
+      {
+        ...threadInGroup(thread, {
+          parentThreadId: parent.id,
+          orderKey,
+          launchedByThreadId: null,
+        }),
+        ...(command.reportNow === undefined ? {} : { groupReportNow: command.reportNow }),
+      },
       now,
     );
 
@@ -10551,6 +10641,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         model: command.modelSelection.model,
         modelSelection: command.modelSelection,
         ...(command.completionWake === undefined ? {} : { completionWake: command.completionWake }),
+        ...(command.wakeNow === true ? { wakeNow: true as const } : {}),
         status: "running",
         result: null,
         startedAt: now,
@@ -11020,6 +11111,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         model: command.modelSelection.model,
         modelSelection: command.modelSelection,
         ...(command.completionWake === undefined ? {} : { completionWake: command.completionWake }),
+        ...(command.wakeNow === true ? { wakeNow: true as const } : {}),
         status: "running",
         result: null,
         startedAt: now,
@@ -15739,8 +15831,10 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       yield* writeSystemEvents(completionEvents, [], { updateDelegatedCompletionOnly: true });
       yield* releaseFinishedDelegateSessions(childThreadId, childRun.id, task.id);
 
-      if (completionPlan.offer && completionPlan.parentRun !== undefined) {
-        yield* offerDelegatedCompletionDelivery(parentThreadId, completionPlan.parentRun.id);
+      // A delegate that ends without a wake of its own can be the one a held wake waited for.
+      const wakeRun = completionPlan.offer ? completionPlan.parentRun : parentRun;
+      if (wakeRun !== undefined) {
+        yield* offerDelegatedCompletionDelivery(parentThreadId, wakeRun.id);
       }
     },
   );

@@ -172,6 +172,7 @@ function layerProjectionStore(
       getMessageCount: () => Effect.die("unused message count"),
       getTranscriptByteFloor: () => Effect.die("unused transcript byte floor"),
       hasPendingDelegatedCompletion: () => Effect.die("unused hasPendingDelegatedCompletion"),
+      hasWorkingAsyncDelegate: () => Effect.die("unused hasWorkingAsyncDelegate"),
       getSubagentCount: () => Effect.die("unused subagent count"),
       getRunCount: () => Effect.die("unused run count"),
       listAppOwnedChildThreadIds: () => Effect.die("unused listAppOwnedChildThreadIds"),

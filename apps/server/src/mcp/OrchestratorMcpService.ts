@@ -2976,6 +2976,7 @@ const make = Effect.gen(function* () {
               // delegations deliver through the blocking tool call until `awaitTask`
               // gives up the wait (timeout, cancelled call) and upgrades the wake.
               completionWake: input.mode === "wait" ? "settled_only" : "always",
+              ...(input.wake === "now" ? { wakeNow: true as const } : {}),
             })
             .pipe(
               Effect.mapError((error) =>
@@ -3337,6 +3338,7 @@ const make = Effect.gen(function* () {
                   branch: parent.thread.branch,
                   worktreePath: parent.thread.worktreePath,
                   groupParentThreadId: scope.thread.threadId,
+                  ...(request.wake === "now" ? { groupReportNow: true } : {}),
                   ...(parent.thread.linkOrigin === undefined
                     ? {}
                     : { linkOrigin: parent.thread.linkOrigin }),
@@ -3690,6 +3692,27 @@ const make = Effect.gen(function* () {
 
       const mode = input.mode ?? "auto";
       const key = yield* requestKey(input.clientRequestId);
+      // Each send to a worker says how its next report wakes the lead; the default clears 'now'.
+      const reportNow = input.wake === "now";
+      if (
+        parent !== undefined &&
+        target.thread.groupParentThreadId === parent.thread.id &&
+        (target.thread.groupReportNow === true) !== reportNow
+      ) {
+        yield* threadManagement
+          .dispatch({
+            type: "thread.group.attach",
+            commandId: stableCommandId({
+              scope,
+              requestKey: key,
+              operation: "thread-send-group-wake",
+            }),
+            threadId: target.thread.id,
+            parentThreadId: parent.thread.id,
+            reportNow,
+          })
+          .pipe(Effect.mapError(threadManagementFailure));
+      }
       const messageId = stableOperationMessageId({
         scope,
         requestKey: key,

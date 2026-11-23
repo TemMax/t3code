@@ -114,6 +114,7 @@ export interface ThreadLaunchInput {
   readonly linkOrigin?: OrchestrationV2LinkOrigin;
   /** The thread whose group the new thread joins; the decider validates it. */
   readonly groupParentThreadId?: ThreadId;
+  readonly groupReportNow?: boolean;
   /** The parent there, when that environment's agent delegated this as a task. */
   readonly delegatedFrom?: OrchestrationV2DelegatedFrom;
 }
@@ -1386,6 +1387,7 @@ const make = Effect.gen(function* () {
                 ...(input.groupParentThreadId === undefined
                   ? {}
                   : { groupParentThreadId: input.groupParentThreadId }),
+                ...(input.groupReportNow === true ? { groupReportNow: true } : {}),
                 ...(input.delegatedFrom === undefined
                   ? {}
                   : { delegatedFrom: input.delegatedFrom }),

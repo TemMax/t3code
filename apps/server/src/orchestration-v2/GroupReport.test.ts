@@ -272,7 +272,11 @@ it.effect("reports a finished worker to its idle lead", () =>
 
     const [report] = yield* reports(thread("lead"));
     assert.deepEqual(report?.notification, {
-      source: { kind: "group_worker", workerThreadIds: [thread("worker")] },
+      source: {
+        kind: "group_worker",
+        workerThreadIds: [thread("worker")],
+        reportKeys: [`${thread("worker")}:${run.id}:finished`],
+      },
       outcome: "completed",
       summary: "worker finished",
       detail: `worker [finished] (threadId ${thread("worker")}):\nThe parser is done.`,
@@ -286,7 +290,7 @@ it.effect("reports a finished worker to its idle lead", () =>
   }).pipe(Effect.provide(layerReactorTest)),
 );
 
-it.effect("merges reports while the lead is busy", () =>
+it.effect("holds reports until the group stops, sends a failure at once, and merges", () =>
   Effect.gen(function* () {
     const { projections, sink, reactor, thread, create, startTurn, endTurn, reports } =
       yield* harness;
@@ -297,12 +301,15 @@ it.effect("merges reports while the lead is busy", () =>
     const w1 = yield* startTurn(thread("w1"), "First half");
     const w2 = yield* startTurn(thread("w2"), "Second half");
     yield* reactor.handle(yield* endTurn(w1, "waiting", "First half done."));
+    // w2 still works, so w1's report waits for it.
+    assert.lengthOf(yield* reports(thread("lead")), 0);
     yield* reactor.handle(yield* endTurn(w2, "failed", "x".repeat(2_500)));
 
     const [queued] = yield* reports(thread("lead"));
     assert.deepEqual(queued?.notification?.source, {
       kind: "group_worker",
       workerThreadIds: [thread("w1"), thread("w2")],
+      reportKeys: [`${thread("w1")}:${w1.id}:finished`, `${thread("w2")}:${w2.id}:failed`],
     });
     assert.equal(queued?.notification?.summary, "2 workers reported");
     assert.equal(
@@ -352,7 +359,155 @@ it.effect("merges reports while the lead is busy", () =>
     assert.deepEqual(messages[0]?.notification?.source, {
       kind: "group_worker",
       workerThreadIds: [thread("w1"), thread("w2")],
+      reportKeys: [`${thread("w1")}:${w1.id}:finished`, `${thread("w2")}:${w2Again.id}:finished`],
     });
+  }).pipe(Effect.provide(layerReactorTest)),
+);
+
+it.effect("sends one report when the last worker stops, even without a report of its own", () =>
+  Effect.gen(function* () {
+    const { projections, reactor, thread, create, startTurn, endTurn, reports } = yield* harness;
+    yield* create("lead");
+    yield* create("w1", thread("lead"));
+    yield* create("w2", thread("lead"));
+    yield* create("w3", thread("lead"));
+    const w1 = yield* startTurn(thread("w1"), "First");
+    const w2 = yield* startTurn(thread("w2"), "Second");
+    const w3 = yield* startTurn(thread("w3"), "Third");
+    yield* reactor.handle(yield* endTurn(w1, "waiting", "First done."));
+    yield* reactor.handle(yield* endTurn(w2, "waiting", "Second done."));
+    assert.lengthOf(yield* reports(thread("lead")), 0);
+    // The user stops w3: it reports nothing, and nothing is left to wait for.
+    yield* reactor.handle(yield* endTurn(w3, "interrupted", "Partial."));
+
+    const sent = yield* reports(thread("lead"));
+    assert.deepEqual(
+      sent.map((report) => [
+        report.notification?.summary,
+        report.notification?.source.kind === "group_worker" &&
+          report.notification.source.workerThreadIds,
+      ]),
+      [["2 workers finished", [thread("w1"), thread("w2")]]],
+    );
+    const { runs } = yield* projections.getThreadRecords(thread("lead"), ["runs"]);
+    assert.lengthOf(runs, 1);
+  }).pipe(Effect.provide(layerReactorTest)),
+);
+
+it.effect("holds a worker's report while it waits on background work it started", () =>
+  Effect.gen(function* () {
+    const { projections, sink, reactor, thread, create, startTurn, endTurn, reports } =
+      yield* harness;
+    yield* create("lead");
+    yield* create("worker", thread("lead"));
+    const run = yield* startTurn(thread("worker"), "Build and test");
+    const { providerThreads } = yield* projections.getThreadRecords(thread("worker"), [
+      "providerThreads",
+    ]);
+    const providerThread = providerThreads[0]!;
+    const background = (tasks: (typeof providerThread)["pendingBackgroundTasks"]) =>
+      Effect.gen(function* () {
+        const now = yield* DateTime.now;
+        yield* sink.write({
+          events: [
+            {
+              id: EventId.make(`event:group-report:background:${tasks?.length ?? 0}`),
+              type: "provider-thread.updated",
+              threadId: run.threadId,
+              providerInstanceId: providerThread.providerInstanceId,
+              occurredAt: now,
+              payload: { ...providerThread, pendingBackgroundTasks: tasks, updatedAt: now },
+            },
+          ],
+        });
+      });
+    yield* background([{ taskId: "checks", kind: "command", awaited: true }]);
+    const waiting = yield* endTurn(run, "waiting", "Committed. The checks run in the background.");
+    yield* reactor.handle(waiting);
+    assert.lengthOf(yield* reports(thread("lead")), 0);
+
+    // The checks end and wake the worker; that turn's reply is the report.
+    yield* background([]);
+    const wake = yield* startTurn(thread("worker"), "Checks finished");
+    yield* reactor.handle(yield* endTurn(wake, "waiting", "All checks pass."));
+    assert.deepEqual(
+      (yield* reports(thread("lead"))).map((report) => report.text),
+      [`worker [finished] (threadId ${thread("worker")}):\nAll checks pass.`],
+    );
+  }).pipe(Effect.provide(layerReactorTest)),
+);
+
+it.effect("reports at once a worker its lead asked to hear from first, until told otherwise", () =>
+  Effect.gen(function* () {
+    const { orchestrator, reactor, thread, create, startTurn, endTurn, reports } = yield* harness;
+    yield* create("lead");
+    yield* create("author", thread("lead"));
+    yield* create("other", thread("lead"));
+    const reportNow = (name: string, now: boolean) =>
+      orchestrator.dispatch({
+        type: "thread.group.attach",
+        commandId: CommandId.make(`command:group-report:report-now:${name}:${now}`),
+        threadId: thread("author"),
+        parentThreadId: thread("lead"),
+        reportNow: now,
+      });
+    yield* startTurn(thread("other"), "Long job");
+    yield* reportNow("first", true);
+    const draft = yield* startTurn(thread("author"), "Write the fix");
+    yield* reactor.handle(yield* endTurn(draft, "waiting", "Fix written."));
+    assert.deepEqual(
+      (yield* reports(thread("lead"))).map((report) => [report.notification?.summary, report.text]),
+      [
+        [
+          "author finished",
+          `author [finished] (threadId ${thread("author")}):\nFix written.\n\nStill working: "other". Act on this report if it needs action and reply in one line. Give the full summary after the last one reports.`,
+        ],
+      ],
+    );
+
+    // The next message to it carries no such ask, so its report waits for the group again.
+    yield* reportNow("second", false);
+    const polish = yield* startTurn(thread("author"), "Polish it");
+    yield* reactor.handle(yield* endTurn(polish, "waiting", "Polished."));
+    assert.lengthOf(yield* reports(thread("lead")), 1);
+  }).pipe(Effect.provide(layerReactorTest)),
+);
+
+it.effect("drops the still-working note when a later report joins a queued early one", () =>
+  Effect.gen(function* () {
+    const { orchestrator, reactor, thread, create, startTurn, endTurn, reports } = yield* harness;
+    yield* create("lead");
+    yield* create("author", thread("lead"));
+    yield* create("other", thread("lead"));
+    yield* orchestrator.dispatch({
+      type: "thread.group.attach",
+      commandId: CommandId.make("command:group-report:merge-note:report-now"),
+      threadId: thread("author"),
+      parentThreadId: thread("lead"),
+      reportNow: true,
+    });
+    // The lead is busy, so the early report queues behind its turn.
+    yield* startTurn(thread("lead"), "Coordinate");
+    const other = yield* startTurn(thread("other"), "Long job");
+    const draft = yield* startTurn(thread("author"), "Write the fix");
+    yield* reactor.handle(yield* endTurn(draft, "waiting", "Fix written."));
+    const [early] = yield* reports(thread("lead"));
+    assert.include(early?.text, 'Still working: "other".');
+
+    yield* reactor.handle(yield* endTurn(other, "waiting", "Job done."));
+    const merged = yield* reports(thread("lead"));
+    assert.deepEqual(
+      merged.map((report) => [report.notification?.summary, report.text]),
+      [
+        [
+          "2 workers finished",
+          [
+            `author [finished] (threadId ${thread("author")}):\nFix written.`,
+            `other [finished] (threadId ${thread("other")}):\nJob done.`,
+          ].join("\n\n"),
+        ],
+      ],
+    );
   }).pipe(Effect.provide(layerReactorTest)),
 );
 
