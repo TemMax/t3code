@@ -23,7 +23,7 @@ import { SymbolView } from "../../components/ui/AppSymbol";
 import { AppText as Text } from "../../components/ui/AppText";
 import * as Dialog from "../../components/ui/Dialog";
 import { mobileHtmlRenderTheme } from "../../lib/htmlRenderTheme";
-import { tryOpenExternalUrl } from "../../lib/openExternalUrl";
+import { useOpenPullRequest } from "../../native/useOpenPullRequest";
 import { useAssetUrlState, useRefreshAssetUrl } from "../../state/assets";
 import { useAppearancePreferences } from "../settings/appearance/AppearancePreferencesProvider";
 import { webViewDecelerationRate } from "../../lib/webViewDecelerationRate";
@@ -99,6 +99,7 @@ export function HtmlRenderWebView(props: {
   readonly onSelection?: (selection: HtmlRenderSelection | null, clear: () => void) => void;
 }) {
   const theme = useHtmlRenderTheme();
+  const openLink = useOpenPullRequest();
   const [initialTheme] = useState(theme);
   const [generation, setGeneration] = useState(0);
   const [loaded, setLoaded] = useState(false);
@@ -160,7 +161,7 @@ export function HtmlRenderWebView(props: {
         }
         onOpenWindow={(event) => {
           const url = event.nativeEvent.targetUrl;
-          if (/^https?:/i.test(url)) void tryOpenExternalUrl(url, "html-render");
+          if (/^https?:/i.test(url)) void openLink(url);
         }}
         onLoadEnd={() => {
           setLoaded(true);

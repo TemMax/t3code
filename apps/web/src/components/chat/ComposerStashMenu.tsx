@@ -4,6 +4,7 @@ import { memo, useEffect, useEffectEvent, useRef, useState, type RefObject } fro
 import type { EnvironmentId, PromptStashAttachment, PromptStashSummary } from "@t3tools/contracts";
 import { assistantCitationsToPlainText } from "@t3tools/shared/assistantCitations";
 import { replaceComposerContextReferences } from "@t3tools/shared/composerContextReferences";
+import { composerFileLinksToPlainText } from "@t3tools/shared/composerInlineTokens";
 
 import { RelativeTime } from "../RelativeTime";
 import { useAssetUrls } from "~/assets/assetUrls";
@@ -52,7 +53,9 @@ export function stashEntrySnippet(
   resolve: MessageResolver = m,
 ): string {
   const trimmed = assistantCitationsToPlainText(
-    replaceComposerContextReferences(entry.prompt, (reference) => reference.label),
+    composerFileLinksToPlainText(
+      replaceComposerContextReferences(entry.prompt, (reference) => reference.label),
+    ),
   )
     .trim()
     .replace(/\s+/g, " ");
@@ -179,6 +182,7 @@ function ComposerStashMenuList<T extends StashMenuEntry>(props: {
   });
 
   const handleKeyDown = useEffectEvent((event: KeyboardEvent) => {
+    if (event.isComposing || event.keyCode === 229) return;
     const drawer = drawerRef.current;
     if (!drawer) return;
     const target = event.target;

@@ -118,7 +118,7 @@ vi.mock("./ui/AppText", () => ({ AppText: ({ children }: { children?: ReactNode 
 vi.mock("./ComposerContextSheet", () => ({ ComposerContextSheet: () => null }));
 vi.mock("./ModelMentionSheet", () => ({ ModelMentionSheet: () => null }));
 vi.mock("./AssistantCitationSheet", () => ({ AssistantCitationSheet: () => null }));
-vi.mock("../features/threads/useOpenLinkedThread", () => ({ useOpenLinkedThread: () => vi.fn() }));
+vi.mock("../features/threads/useOpenThreadLink", () => ({ useOpenThreadLink: () => vi.fn() }));
 vi.mock("../state/peerLinks", () => ({ useLinkedEnvironments: () => [] }));
 vi.mock("../state/model-mentions", () => ({ useModelMentions: () => [] }));
 vi.mock("../state/use-atom-command", () => ({ useAtomCommand: () => () => {} }));
