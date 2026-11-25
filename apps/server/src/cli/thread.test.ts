@@ -74,6 +74,7 @@ it.effect("list includes delegated threads across pages and still leaves out sub
       createdBy: "user",
       creationSource: "web",
       status: "idle",
+      activity: null,
       latestRunId: null,
       providerInstanceId: "codex",
       model: "test",
