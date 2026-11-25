@@ -3022,7 +3022,7 @@ describe("OrchestratorMcpService provider resolution", () => {
           }),
         ]),
         adapterRegistryLayer([codexInstanceId]),
-        Layer.mock(ProjectService.ProjectService)({}),
+        Layer.mock(ProjectService.ProjectService)({ getById: () => Effect.succeedNone }),
         Layer.mock(SecretRequests.SecretRequests)({}),
         Layer.mock(RemoteDelegation.RemoteDelegation)({}),
         Layer.mock(ScheduledTaskService.ScheduledTaskService)({}),
@@ -5364,6 +5364,7 @@ describe("OrchestratorMcpService thread lookup", () => {
               ),
             getTimelinePage: () =>
               Effect.succeed({ items: [], totalItems: 0, hasMore: false, hasEarlier: false }),
+            getRunCount: () => Effect.succeed(0),
             listGroupMemberThreadIds: (parentThreadId) =>
               Effect.sync(() => {
                 memberQueries.push(parentThreadId);

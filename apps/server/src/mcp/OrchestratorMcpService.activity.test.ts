@@ -565,6 +565,7 @@ it("readThread does not attribute the /compact T3 Code sends before a stale send
           getThreadRecords: () => Effect.succeed(projection),
           getProjectThreadRecords: () => Effect.succeed(projection),
           getRunCount: () => Effect.succeed(projection.runs.length),
+          listGroupMemberThreadIds: () => Effect.succeed([]),
           getThreadShell: () =>
             Effect.succeed(projection.thread as unknown as OrchestrationV2ThreadShell),
         } satisfies Partial<ThreadManagementService.ThreadManagementService["Service"]>),
