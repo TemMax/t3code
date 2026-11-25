@@ -5,16 +5,16 @@ import * as Exit from "effect/Exit";
 import * as SqlClient from "effect/sql/SqlClient";
 
 import { runMigrations } from "../Migrations.ts";
-import GroupBoard from "./116_GroupBoard.ts";
+import GroupBoard from "./118_GroupBoard.ts";
 
 const layer = it.layer(NodeSqliteClient.layer({ filename: ":memory:" }));
 const updatedAt = "2026-11-18T10:00:00.000Z";
 
-layer("116_GroupBoard", (it) => {
+layer("118_GroupBoard", (it) => {
   it.effect("creates the board table with one topic per title on each lead's board", () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;
-      yield* runMigrations({ toMigrationInclusive: 115 });
+      yield* runMigrations({ toMigrationInclusive: 117 });
       const tables = sql`
         SELECT name FROM sqlite_master
         WHERE tbl_name = 'orchestration_v2_projection_board_topics'
@@ -22,7 +22,7 @@ layer("116_GroupBoard", (it) => {
       `;
       assert.deepStrictEqual(yield* tables, []);
 
-      yield* runMigrations({ toMigrationInclusive: 116 });
+      yield* runMigrations({ toMigrationInclusive: 118 });
       assert.deepStrictEqual(
         (yield* tables).map((row) => row.name),
         [
@@ -50,6 +50,7 @@ layer("116_GroupBoard", (it) => {
 it.effect.each([
   { recordedId: 97, firstUpstream: "97_IssueTrackerBindings" },
   { recordedId: 103, firstUpstream: "103_IssueTrackerAdditionalScopes" },
+  { recordedId: 116, firstUpstream: "116_ForkHistoryMembership" },
 ])(
   "upgrades a fork database that recorded GroupBoard as migration $recordedId",
   ({ recordedId, firstUpstream }) =>
@@ -68,8 +69,8 @@ it.effect.each([
 
       const executed = (yield* runMigrations()).map(([id, name]) => `${id}_${name}`);
       assert.equal(executed[0], firstUpstream);
-      assert.equal(executed.at(-1), "116_GroupBoard");
-      assert.equal(executed.length, 116 - recordedId + 1);
+      assert.equal(executed.at(-1), "118_GroupBoard");
+      assert.equal(executed.length, 118 - recordedId + 1);
       assert.deepStrictEqual(
         yield* sql`SELECT topic_id FROM orchestration_v2_projection_board_topics`,
         [{ topic_id: "topic-1" }],
