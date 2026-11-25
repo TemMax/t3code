@@ -101,6 +101,7 @@ const makeHarness = Effect.fn(function* (settings: { readonly enabled: boolean }
               title: "Project",
               hasCustomTitle: false,
               workspaceRoot: "/repo",
+              trackedFolders: [],
               defaultModelSelection: { instanceId: instances.claude.id, model: "claude-opus-5-5" },
               defaultThreadEnvMode: null,
               autoPull: false,
