@@ -42,6 +42,7 @@ const REGISTRY = {
     "sidebarThreadSortOrder",
     "sidebarUsageBarEnabled",
     "sidebarUsageBarStyle",
+    "sidebarUsageBarShape",
     "sidebarUsageBarAlignment",
     "sidebarUsageBarFocus",
     "sidebarUsageBarPaceMarks",

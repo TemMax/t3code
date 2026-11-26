@@ -31,8 +31,8 @@ describe("client profile keys", () => {
 
   it("limits each surface to its keys", () => {
     expect(clientProfileBaseKeys(M)).toHaveLength(9);
-    expect(clientProfileBaseKeys(B)).toHaveLength(66);
-    expect(clientProfileBaseKeys(D)).toHaveLength(84);
+    expect(clientProfileBaseKeys(B)).toHaveLength(67);
+    expect(clientProfileBaseKeys(D)).toHaveLength(85);
     expect(isClientProfileBaseKey("browserLinkTarget", D)).toBe(true);
     expect(isClientProfileBaseKey("browserLinkTarget", B)).toBe(false);
     expect(isClientProfileBaseKey("snapShotShortcut", D)).toBe(true);

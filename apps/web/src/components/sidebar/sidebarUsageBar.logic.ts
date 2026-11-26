@@ -1,6 +1,7 @@
 import type {
   ServerProvider,
   SidebarUsageBarFocus,
+  SidebarUsageBarShape,
   SidebarUsageBarStyle,
 } from "@t3tools/contracts";
 import {
@@ -154,21 +155,22 @@ export function buildUsageGauges(
 
 export type ResolvedUsageBarStyle = Exclude<SidebarUsageBarStyle, "auto">;
 
-const CHIP_WIDTH: Record<ResolvedUsageBarStyle, number> = {
-  detailed: 92,
-  compact: 80,
-  minimal: 30,
+const CHIP_WIDTH: Record<SidebarUsageBarShape, Record<ResolvedUsageBarStyle, number>> = {
+  nested: { detailed: 92, compact: 80, minimal: 30 },
+  halves: { detailed: 92, compact: 80, minimal: 30 },
+  rails: { detailed: 88, compact: 74, minimal: 44 },
 };
 const CHIP_GAP = 4;
 
 export function resolveUsageBarStyle(
   style: SidebarUsageBarStyle,
+  shape: SidebarUsageBarShape,
   count: number,
   width: number,
 ): ResolvedUsageBarStyle {
   if (style !== "auto") return style;
   const fits = (candidate: ResolvedUsageBarStyle) =>
-    count * CHIP_WIDTH[candidate] + Math.max(0, count - 1) * CHIP_GAP <= width;
+    count * CHIP_WIDTH[shape][candidate] + Math.max(0, count - 1) * CHIP_GAP <= width;
   if (fits("detailed")) return "detailed";
   if (fits("compact")) return "compact";
   return "minimal";
