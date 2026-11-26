@@ -364,6 +364,10 @@ export type EffortDisplay = typeof EffortDisplay.Type;
 export const SidebarUsageBarStyle = Schema.Literals(["auto", "detailed", "compact", "minimal"]);
 export type SidebarUsageBarStyle = typeof SidebarUsageBarStyle.Type;
 
+/** How a gauge draws its windows: nested arcs, a ring split in two, or labelled rails. */
+export const SidebarUsageBarShape = Schema.Literals(["nested", "halves", "rails"]);
+export type SidebarUsageBarShape = typeof SidebarUsageBarShape.Type;
+
 export const SidebarUsageBarAlignment = Schema.Literals(["start", "center", "end", "spread"]);
 export type SidebarUsageBarAlignment = typeof SidebarUsageBarAlignment.Type;
 
@@ -547,6 +551,9 @@ export const ClientSettingsSchema = Schema.Struct({
   sidebarUsageBarEnabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   sidebarUsageBarStyle: SidebarUsageBarStyle.pipe(
     Schema.withDecodingDefault(Effect.succeed("auto" as const)),
+  ),
+  sidebarUsageBarShape: SidebarUsageBarShape.pipe(
+    Schema.withDecodingDefault(Effect.succeed("nested" as const)),
   ),
   sidebarUsageBarAlignment: SidebarUsageBarAlignment.pipe(
     Schema.withDecodingDefault(Effect.succeed("start" as const)),
@@ -2198,6 +2205,7 @@ export const ClientSettingsPatch = Schema.Struct({
   pullRequestLinksOpenInApp: Schema.optionalKey(Schema.Boolean),
   sidebarUsageBarEnabled: Schema.optionalKey(Schema.Boolean),
   sidebarUsageBarStyle: Schema.optionalKey(SidebarUsageBarStyle),
+  sidebarUsageBarShape: Schema.optionalKey(SidebarUsageBarShape),
   sidebarUsageBarAlignment: Schema.optionalKey(SidebarUsageBarAlignment),
   sidebarUsageBarFocus: Schema.optionalKey(SidebarUsageBarFocus),
   sidebarUsageBarPaceMarks: Schema.optionalKey(Schema.Boolean),

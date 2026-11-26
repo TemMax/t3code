@@ -131,12 +131,15 @@ describe("buildUsageGauges", () => {
 
 describe("resolveUsageBarStyle", () => {
   it.each([
-    ["detailed", 1, 10, "detailed"],
-    ["auto", 2, 240, "detailed"],
-    ["auto", 3, 260, "compact"],
-    ["auto", 6, 200, "minimal"],
-    ["auto", 2, 0, "minimal"],
-  ] as const)("%s with %i gauges in %ipx renders %s", (style, count, width, expected) => {
-    expect(resolveUsageBarStyle(style, count, width)).toBe(expected);
+    ["detailed", "nested", 1, 10, "detailed"],
+    ["auto", "nested", 2, 240, "detailed"],
+    ["auto", "nested", 3, 260, "compact"],
+    ["auto", "nested", 6, 200, "minimal"],
+    ["auto", "nested", 2, 0, "minimal"],
+    ["auto", "rails", 2, 240, "detailed"],
+    ["auto", "rails", 3, 240, "compact"],
+    ["auto", "rails", 5, 240, "minimal"],
+  ] as const)("%s %s with %i gauges in %ipx renders %s", (style, shape, count, width, expected) => {
+    expect(resolveUsageBarStyle(style, shape, count, width)).toBe(expected);
   });
 });

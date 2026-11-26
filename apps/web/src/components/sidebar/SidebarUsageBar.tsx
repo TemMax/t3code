@@ -5,6 +5,7 @@ import {
   DEFAULT_CLIENT_SETTINGS,
   type ServerProvider,
   type SidebarUsageBarAlignment,
+  type SidebarUsageBarShape,
 } from "@t3tools/contracts";
 import {
   collectLimitAccounts,
@@ -55,8 +56,9 @@ import {
   type ResolvedUsageBarStyle,
   resolveUsageBarStyle,
   type UsageGauge as UsageGaugeData,
+  type UsageGaugeArc,
 } from "./sidebarUsageBar.logic";
-import { UsageGauge } from "./UsageGauge";
+import { UsageGauge, UsageHalves, UsageRail } from "./UsageGauge";
 
 const LOW_REMAINING_PERCENT = 15;
 const PREFIX_CLASS_NAME = "me-1 font-normal text-muted-foreground/70";
@@ -78,10 +80,11 @@ function useUsageGauges(now: number) {
 
 function useBarSettings() {
   const style = useClientSettings((settings) => settings.sidebarUsageBarStyle);
+  const shape = useClientSettings((settings) => settings.sidebarUsageBarShape);
   const alignment = useClientSettings((settings) => settings.sidebarUsageBarAlignment);
   const paceMarks = useClientSettings((settings) => settings.sidebarUsageBarPaceMarks);
   const hidden = useClientSettings((settings) => settings.sidebarUsageBarHidden);
-  return { style, alignment, paceMarks, hidden };
+  return { style, shape, alignment, paceMarks, hidden };
 }
 
 function gaugeTitle(gauge: UsageGaugeData): string {
@@ -113,49 +116,157 @@ function chipLabel(gauge: UsageGaugeData, resolve: MessageResolver): string {
       );
 }
 
+const lowClassName = (arc: UsageGaugeArc) =>
+  arc.remaining <= LOW_REMAINING_PERCENT ? "text-warning-foreground" : "text-foreground";
+
+function RailsChipContent({
+  gauge,
+  style,
+  paceMarks,
+}: {
+  readonly gauge: UsageGaugeData;
+  readonly style: ResolvedUsageBarStyle;
+  readonly paceMarks: boolean;
+}) {
+  const color = gaugeColor(gauge);
+  const arcs = gauge.inner ? [gauge.inner, gauge.outer] : [gauge.outer];
+  const icon = (
+    <ProviderInstanceIcon
+      driverKind={gauge.driver}
+      displayName={providerLabel(gauge.driver)}
+      className="size-3"
+      iconClassName="size-3 text-foreground/80"
+    />
+  );
+  if (style === "compact") {
+    const arc = gauge.focus;
+    return (
+      <>
+        {icon}
+        <span className="flex min-w-10 flex-col gap-1.25 leading-none">
+          <span className="flex items-baseline justify-between gap-1">
+            <span className="text-4xs whitespace-nowrap text-muted-foreground">
+              {gauge.name ?? arc.shortLabel}
+            </span>
+            <span className={cn("text-2xs font-semibold tabular-nums", lowClassName(arc))}>
+              {arc.remaining}%
+            </span>
+          </span>
+          <UsageRail arc={arc} color={color} paceMarks={paceMarks} />
+        </span>
+      </>
+    );
+  }
+  return (
+    <>
+      {icon}
+      <span className="flex flex-col gap-1.5 leading-none">
+        {arcs.map((arc) =>
+          style === "minimal" ? (
+            <UsageRail
+              key={arc.window.id}
+              arc={arc}
+              color={color}
+              paceMarks={paceMarks}
+              className="w-5"
+            />
+          ) : (
+            <span key={arc.window.id} className="flex items-center gap-1">
+              <span className="w-3.5 text-4xs text-muted-foreground">{arc.shortLabel}</span>
+              <UsageRail arc={arc} color={color} paceMarks={paceMarks} className="w-6" />
+              <span
+                className={cn(
+                  "w-4 text-end text-3xs font-semibold tabular-nums",
+                  lowClassName(arc),
+                )}
+              >
+                {arc.remaining}
+              </span>
+            </span>
+          ),
+        )}
+      </span>
+    </>
+  );
+}
+
 function ChipContent({
   gauge,
   style,
+  shape,
   paceMarks,
   now,
 }: {
   readonly gauge: UsageGaugeData;
   readonly style: ResolvedUsageBarStyle;
+  readonly shape: SidebarUsageBarShape;
   readonly paceMarks: boolean;
   readonly now: number;
 }) {
   const m = useMessages();
-  const low = gauge.focus.remaining <= LOW_REMAINING_PERCENT;
+  if (shape === "rails") {
+    return <RailsChipContent gauge={gauge} style={style} paceMarks={paceMarks} />;
+  }
   const resetsIn =
     gauge.focus.resetsAt !== null && gauge.focus.resetsAt > now
       ? formatDuration(gauge.focus.resetsAt - now, m)
       : null;
-  return (
-    <>
+  const center =
+    style === "minimal" ? (
+      <span
+        className={cn("relative text-4xs font-semibold tabular-nums", lowClassName(gauge.focus))}
+      >
+        {gauge.focus.remaining}
+      </span>
+    ) : (
+      <ProviderInstanceIcon
+        driverKind={gauge.driver}
+        displayName={providerLabel(gauge.driver)}
+        className="size-2.5"
+        iconClassName="size-2.5 text-foreground/80"
+      />
+    );
+  const glyph =
+    shape === "halves" ? (
+      <UsageHalves
+        left={gauge.inner}
+        right={gauge.outer}
+        color={gaugeColor(gauge)}
+        paceMarks={paceMarks}
+      >
+        {center}
+      </UsageHalves>
+    ) : (
       <UsageGauge
         outer={gauge.outer}
         inner={gauge.inner}
         color={gaugeColor(gauge)}
         paceMarks={paceMarks}
       >
-        {style === "minimal" ? (
-          <span
-            className={cn(
-              "relative text-4xs font-semibold tabular-nums",
-              low ? "text-warning-foreground" : "text-foreground",
-            )}
-          >
-            {gauge.focus.remaining}
-          </span>
-        ) : (
-          <ProviderInstanceIcon
-            driverKind={gauge.driver}
-            displayName={providerLabel(gauge.driver)}
-            className="size-2.5"
-            iconClassName="size-2.5 text-foreground/80"
-          />
-        )}
+        {center}
       </UsageGauge>
+    );
+  if (shape === "halves" && style === "detailed" && gauge.inner) {
+    // Each number sits on the side of the half it reports.
+    const side = (arc: UsageGaugeArc, className: string) => (
+      <span className={cn("flex min-w-4 flex-col gap-0.5 leading-none", className)}>
+        <span className={cn("text-2xs font-semibold tabular-nums", lowClassName(arc))}>
+          {arc.remaining}
+        </span>
+        <span className="text-4xs whitespace-nowrap text-muted-foreground">{arc.shortLabel}</span>
+      </span>
+    );
+    return (
+      <>
+        {side(gauge.inner, "items-end")}
+        {glyph}
+        {side(gauge.outer, "items-start")}
+      </>
+    );
+  }
+  return (
+    <>
+      {glyph}
       {style === "minimal" ? null : style === "detailed" && gauge.inner ? (
         // Nested arcs do not say which is which, so both windows get a labelled line.
         <span className="flex min-w-0 flex-col gap-0.5 leading-none">
@@ -164,9 +275,7 @@ function ChipContent({
               key={arc.window.id}
               className={cn(
                 "text-2xs font-semibold whitespace-nowrap tabular-nums",
-                arc.remaining <= LOW_REMAINING_PERCENT
-                  ? "text-warning-foreground"
-                  : "text-foreground",
+                lowClassName(arc),
               )}
             >
               <span className={PREFIX_CLASS_NAME}>{arc.shortLabel}:</span>
@@ -179,7 +288,7 @@ function ChipContent({
           <span
             className={cn(
               "text-xs font-semibold whitespace-nowrap tabular-nums",
-              low ? "text-warning-foreground" : "text-foreground",
+              lowClassName(gauge.focus),
             )}
           >
             {style === "compact" ? (
@@ -218,8 +327,8 @@ function UsageStrip({
   readonly width: number;
   readonly renderChip: (gauge: UsageGaugeData, style: ResolvedUsageBarStyle) => ReactNode;
 }) {
-  const { style, alignment } = useBarSettings();
-  const resolved = resolveUsageBarStyle(style, gauges.length, width);
+  const { style, shape, alignment } = useBarSettings();
+  const resolved = resolveUsageBarStyle(style, shape, gauges.length, width);
   return (
     <div
       className={cn(
@@ -336,6 +445,12 @@ const STYLE_OPTIONS = [
   { value: "minimal", label: msg("Minimal", { $context: "usage bar style" }) },
 ] as const;
 
+const SHAPE_OPTIONS = [
+  { value: "nested", label: msg("Arcs", { $context: "usage bar gauge shape" }) },
+  { value: "halves", label: msg("Halves", { $context: "usage bar gauge shape" }) },
+  { value: "rails", label: msg("Rails", { $context: "usage bar gauge shape" }) },
+] as const;
+
 const ALIGNMENT_OPTIONS = [
   {
     value: "start",
@@ -393,12 +508,28 @@ function setGaugeHidden(hidden: readonly string[], key: string, hide: boolean) {
 }
 
 function UsageBarControls({ gauges }: { readonly gauges: readonly UsageGaugeData[] }) {
-  const { style, alignment, paceMarks, hidden } = useBarSettings();
+  const { style, shape, alignment, paceMarks, hidden } = useBarSettings();
   const focus = useClientSettings((settings) => settings.sidebarUsageBarFocus);
   const gt = useGT();
   const messages = useMessages();
   return (
     <div className="flex flex-col gap-1.5">
+      <ControlRow label={gt("Shape", { $context: "usage bar setting" })}>
+        <ToggleGroup
+          aria-label={gt("Usage bar shape")}
+          value={[shape]}
+          onValueChange={(value) => {
+            const next = pick(SHAPE_OPTIONS, value[0]);
+            if (next) void updateClientSettings({ sidebarUsageBarShape: next });
+          }}
+        >
+          {SHAPE_OPTIONS.map((option) => (
+            <ToggleGroupItem key={option.value} value={option.value}>
+              {messages(option.label)}
+            </ToggleGroupItem>
+          ))}
+        </ToggleGroup>
+      </ControlRow>
       <ControlRow label={gt("Style", { $context: "usage bar setting" })}>
         <ToggleGroup
           aria-label={gt("Usage bar style")}
@@ -435,8 +566,8 @@ function UsageBarControls({ gauges }: { readonly gauges: readonly UsageGaugeData
           ))}
         </ToggleGroup>
       </ControlRow>
-      {/* Only Compact and Minimal fit one number for nested arcs; Detailed labels both. */}
-      {style === "compact" || style === "minimal" ? (
+      {/* Only Compact and Minimal report one window; Detailed labels both, minimal rails none. */}
+      {style === "compact" || (style === "minimal" && shape !== "rails") ? (
         <ControlRow label={gt("Number shows")}>
           <ToggleGroup
             aria-label={gt("Window the number reports")}
@@ -502,6 +633,7 @@ function UsageBarControls({ gauges }: { readonly gauges: readonly UsageGaugeData
 function resetBarCustomization() {
   void updateClientSettings({
     sidebarUsageBarStyle: DEFAULT_CLIENT_SETTINGS.sidebarUsageBarStyle,
+    sidebarUsageBarShape: DEFAULT_CLIENT_SETTINGS.sidebarUsageBarShape,
     sidebarUsageBarAlignment: DEFAULT_CLIENT_SETTINGS.sidebarUsageBarAlignment,
     sidebarUsageBarFocus: DEFAULT_CLIENT_SETTINGS.sidebarUsageBarFocus,
     sidebarUsageBarPaceMarks: DEFAULT_CLIENT_SETTINGS.sidebarUsageBarPaceMarks,
@@ -546,7 +678,7 @@ function SidebarUsageBarDialogBody() {
   const messages = useMessages();
   const now = Date.parse(`${useNowMinute()}Z`);
   const gauges = useUsageGauges(now);
-  const { paceMarks, hidden } = useBarSettings();
+  const { shape, paceMarks, hidden } = useBarSettings();
   const visible = gauges.filter((gauge) => !hidden.includes(gauge.key));
   return (
     <DialogPanel>
@@ -564,7 +696,13 @@ function SidebarUsageBarDialogBody() {
                     aria-label={chipLabel(gauge, messages)}
                     className={cn(CHIP_CLASS_NAME, style === "minimal" ? "px-0.5" : "px-1")}
                   >
-                    <ChipContent gauge={gauge} style={style} paceMarks={paceMarks} now={now} />
+                    <ChipContent
+                      gauge={gauge}
+                      style={style}
+                      shape={shape}
+                      paceMarks={paceMarks}
+                      now={now}
+                    />
                   </span>
                 )}
               />
@@ -595,7 +733,7 @@ function SidebarUsageBarStrip() {
   const { isMobile, setOpenMobile } = useSidebar();
   const now = Date.parse(`${useNowMinute()}Z`);
   const gauges = useUsageGauges(now);
-  const { paceMarks, hidden } = useBarSettings();
+  const { shape, paceMarks, hidden } = useBarSettings();
   const visible = gauges.filter((gauge) => !hidden.includes(gauge.key));
   const [strip, setStrip] = useState<HTMLDivElement | null>(null);
   const [width, setWidth] = useState(0);
@@ -679,7 +817,13 @@ function SidebarUsageBarStrip() {
                   />
                 }
               >
-                <ChipContent gauge={gauge} style={style} paceMarks={paceMarks} now={now} />
+                <ChipContent
+                  gauge={gauge}
+                  style={style}
+                  shape={shape}
+                  paceMarks={paceMarks}
+                  now={now}
+                />
               </PopoverTrigger>
             )}
           />

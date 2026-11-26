@@ -69,6 +69,7 @@ const clientSettings: ClientSettings = {
   sidebarWorkingShelfEnabled: false,
   sidebarUsageBarEnabled: true,
   sidebarUsageBarStyle: "compact",
+  sidebarUsageBarShape: "halves",
   sidebarUsageBarAlignment: "spread",
   sidebarUsageBarFocus: "long",
   sidebarUsageBarPaceMarks: false,

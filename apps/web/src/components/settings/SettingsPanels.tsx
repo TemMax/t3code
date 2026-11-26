@@ -852,6 +852,7 @@ function AutoSettleDaysInput({
 const USAGE_BAR_DEFAULTS = {
   sidebarUsageBarEnabled: DEFAULT_UNIFIED_SETTINGS.sidebarUsageBarEnabled,
   sidebarUsageBarStyle: DEFAULT_UNIFIED_SETTINGS.sidebarUsageBarStyle,
+  sidebarUsageBarShape: DEFAULT_UNIFIED_SETTINGS.sidebarUsageBarShape,
   sidebarUsageBarAlignment: DEFAULT_UNIFIED_SETTINGS.sidebarUsageBarAlignment,
   sidebarUsageBarFocus: DEFAULT_UNIFIED_SETTINGS.sidebarUsageBarFocus,
   sidebarUsageBarPaceMarks: DEFAULT_UNIFIED_SETTINGS.sidebarUsageBarPaceMarks,
@@ -862,6 +863,7 @@ function isUsageBarCustomized(settings: typeof DEFAULT_UNIFIED_SETTINGS): boolea
   return (
     settings.sidebarUsageBarEnabled !== USAGE_BAR_DEFAULTS.sidebarUsageBarEnabled ||
     settings.sidebarUsageBarStyle !== USAGE_BAR_DEFAULTS.sidebarUsageBarStyle ||
+    settings.sidebarUsageBarShape !== USAGE_BAR_DEFAULTS.sidebarUsageBarShape ||
     settings.sidebarUsageBarAlignment !== USAGE_BAR_DEFAULTS.sidebarUsageBarAlignment ||
     settings.sidebarUsageBarFocus !== USAGE_BAR_DEFAULTS.sidebarUsageBarFocus ||
     settings.sidebarUsageBarPaceMarks !== USAGE_BAR_DEFAULTS.sidebarUsageBarPaceMarks ||
